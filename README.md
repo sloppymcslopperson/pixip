@@ -88,6 +88,9 @@ src/client/         index.html, style.css, app.js, render.js (pure, unit-tested)
 test/               protocol/rpc tests and ANSI/render tests
 ```
 
+Work is tracked on a strict FIT board in `fit/` (backlog holds the known gaps
+from "Not yet"). See [AGENTS.md](AGENTS.md) for the rules that apply to changes.
+
 See [ARCHITECTURE.md](ARCHITECTURE.md) for invariants, the wire protocol, measured
 latency, the memory policy, and the Rust-port map.
 
