@@ -39,10 +39,13 @@ do in the TUI.
    a UI that stays responsive on a phone: append-only DOM, rAF-batched deltas,
    raw event passthrough (no server-side re-encoding), one websocket, no polling,
    no framework, ~25 KB of JS.
-2. **Ergonomic on a phone.** Native scroll, soft-wrap with no horizontal scroll,
-   16 px input (no iOS zoom), sticky composer, safe-area padding, tap targets,
-   collapsed tool output, approvals as a bottom sheet instead of "go find the
-   terminal".
+2. **Ergonomic on a phone, and responsive by contract.** Native scroll, soft-wrap
+   with no horizontal scroll, 16 px input (no iOS zoom), sticky composer,
+   safe-area padding, tap targets, collapsed tool output, approvals as a bottom
+   sheet instead of "go find the terminal". One asset set serves every width:
+   the phone layout is verifiable by resizing a desktop browser, and a wide
+   window is expected to show *more* (session cards or a rail), not a stretched
+   single column.
 3. **Pi's semantics, not a byte stream.** Messages, thinking, tool calls and
    results, compaction notices, `session_info_changed` — the things a terminal
    hides in scrollback.

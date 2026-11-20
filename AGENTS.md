@@ -69,5 +69,12 @@ Rules:
   ticket.
 - Client assets are served as-is: no bundler, no build step, no framework. Keep
   the client small and keep `src/client/render.js` pure so `test/` can cover it.
+- The client is responsive by contract: one asset set, CSS media/container queries
+  only, no user-agent branching and no duplicated markup per breakpoint. Every
+  layout change must be checked by resizing a desktop browser (roughly 360, 390,
+  768, 1280, 1600 px) — a real phone confirms, it is not the only evidence.
+  Widening must add information (session cards, rail, context), never stretch one
+  column; anything the desktop view shows must come from frames the hub already
+  streams.
 - Commits use the repo-local identity already configured here
   (`Sloppy McSlopperson <thesloppyslopperson@gmail.com>`).
