@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+		<meta name="color-scheme" content="dark" />
+		<meta name="theme-color" content="#16141f" />
+		<title>pixip</title>
+		<link rel="stylesheet" href="/style.css" />
+		<link rel="icon" href="data:," />
+	</head>
+	<body>
+		<header id="bar">
+			<button id="back" class="ghost" hidden aria-label="Sessions">‹</button>
+			<div id="titles">
+				<div id="title">sessions</div>
+				<div id="sub"></div>
+			</div>
+			<span id="dot" class="dot idle"></span>
+			<button id="stop" class="ghost" hidden aria-label="Stop">stop</button>
+		</header>
+
+		<main id="list" hidden></main>
+		<main id="session" hidden>
+			<div id="log"></div>
+		</main>
+
+		<form id="composer" hidden>
+			<textarea id="input" rows="1" placeholder="message pi…" autocomplete="off" autocapitalize="sentences" spellcheck="false"></textarea>
+			<button id="send" type="submit" aria-label="Send">↑</button>
+		</form>
+
+		<div id="sheet" hidden role="dialog" aria-modal="true"></div>
+		<div id="toast" hidden></div>
+
+		<script type="module" src="/app.js"></script>
+	</body>
+</html>

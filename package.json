@@ -1,0 +1,27 @@
+{
+	"name": "pixip",
+	"version": "0.0.1",
+	"private": true,
+	"description": "Phone-first web transcript for Pi sessions: a fast supervisor over `pi --mode rpc`",
+	"type": "module",
+	"bin": {
+		"pixip": "./bin/pixip.ts"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"scripts": {
+		"start": "node bin/pixip.ts",
+		"test": "node --test test/*.test.js test/*.test.ts",
+		"typecheck": "tsc --noEmit",
+		"check": "npm run typecheck && npm test"
+	},
+	"dependencies": {
+		"ws": "^8.18.0"
+	},
+	"devDependencies": {
+		"@types/node": "^22.19.0",
+		"@types/ws": "^8.5.13",
+		"typescript": "^5.9.0"
+	}
+}
