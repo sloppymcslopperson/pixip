@@ -17,9 +17,13 @@ The UI must be one responsive asset set: the phone layout has to be verifiable b
 
 ### How this gets verified
 
-Resizing a desktop browser is the primary test path. Every layout change is checked at roughly 360, 390 (phone), 768 (tablet), 1280 and 1600 px, plus a coarse-pointer emulation pass for hover/`pointer: coarse` behaviour. No device is required to accept a change; a real phone is confirmation, not the only evidence.
+`tools/shot.mjs` renders any width in headless Chromium, prints the box model of header/list/log/composer, and flags horizontal overflow and console/page errors. Breakpoints to check: 360, 390, 768, 1280, 1600. A device is confirmation, not the only evidence.
+
+### Already checked by rendering (2026-11-20)
+
+Fixed after the first real renders: `hidden` was overridden by component `display` rules (list and composer both laid out while hidden, leaving 376 px of dead space above the transcript); user echoes escaped as literal HTML; thinking-only turns left an empty labelled block; assistant blocks were nested and double-labelled; a stray `ping` frame produced a toast. Reading measure is now capped (`104ch`) and the header aligns to it; the model is hidden from the subtitle below 560 px. Remaining phone work: iOS keyboard/safe-area behaviour under a real software keyboard, which no desktop resize can prove.
 
 ### Constraints
 
 - CSS media/container queries only; no duplicated markup per breakpoint.
-- The responsiveness test is part of the change, so document what was checked in the ticket when it closes.
+- Record which widths were checked when this ticket closes.
