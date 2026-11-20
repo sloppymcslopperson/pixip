@@ -3,6 +3,7 @@ import {
 	escapeHtml,
 	relativeTime,
 	renderAssistant,
+	renderAssistantBody,
 	renderEntry,
 	summarizeArgs,
 	textOf,
@@ -55,7 +56,6 @@ function connect(sessionId) {
 	state.ws = ws;
 	ws.onopen = () => {
 		state.retries = 0;
-		if (sessionId) send({ t: "ping" });
 	};
 	ws.onmessage = (event) => {
 		let frame;
@@ -112,6 +112,7 @@ async function showList() {
 	ui.title.textContent = "sessions";
 	ui.sub.textContent = "";
 	ui.dot.className = "dot idle";
+	ui.dot.hidden = true;
 	document.title = "pixip";
 
 	connect(null);
@@ -223,10 +224,15 @@ function applyInfo() {
 	const name = info.name ?? info.id.slice(0, 8);
 	ui.title.textContent = name;
 	document.title = `${name} · pixip`;
-	const bits = [info.model, info.state];
-	if (info.thinkingLevel) bits.push(`think:${info.thinkingLevel}`);
-	if (info.messageCount) bits.push(`${info.messageCount} msg`);
-	ui.sub.textContent = bits.filter(Boolean).join(" · ");
+	// Separators live inside the `.wide` wrapper so hiding it on narrow screens
+	// does not leave dangling "· ·" separators behind.
+	let subtitle = escapeHtml(info.state);
+	const wide = [info.model, info.thinkingLevel].filter(Boolean).map((part) => escapeHtml(part));
+	if (wide.length > 0) subtitle += ` · <span class="wide">${wide.join(" · ")}</span>`;
+	if (info.messageCount) subtitle += ` · ${info.messageCount} msg`;
+	ui.sub.innerHTML = subtitle;
+	ui.sub.title = [info.state, info.model, info.thinkingLevel].filter(Boolean).join(" · ");
+	ui.dot.hidden = false;
 	ui.dot.className = `dot ${info.state}`;
 	const stopped = info.state === "stopped" || info.state === "error";
 	ui.input.disabled = stopped;
@@ -306,9 +312,11 @@ function handleEvent(event) {
 			if (message.role === "user") {
 				state.pendingUser?.remove();
 				state.pendingUser = null;
-				appendBlock("user", `<div class="who">you</div><div class="text">${ansiToHtml(textOf(message.content))}</div>`);
+				appendBlock("user", `<div class="who">you</div><div class="text">${ansiToHtml(textOf(message.content))}</div>`, true);
 			} else if (message.role === "assistant") {
-				state.streaming = appendBlock("assistant", `<div class="who">pi</div><div class="text"></div>`, true);
+				// Lazy: the block is created by the first text delta, so a turn that
+				// only thinks never leaves an empty labelled block behind.
+				state.streaming = null;
 			}
 			break;
 		}
@@ -317,9 +325,16 @@ function handleEvent(event) {
 			break;
 		case "message_end": {
 			const message = event.message ?? {};
-			if (message.role === "assistant" && state.streaming) {
-				state.streaming.innerHTML = `<div class="who">pi</div>${renderAssistant(message.content ?? [], false)}`;
+			if (message.role === "assistant") {
+				const body = renderAssistantBody(message.content ?? [], false);
+				const section = state.streaming;
 				state.streaming = null;
+				if (section) {
+					if (body) section.innerHTML = `<div class="who">pi</div>${body}`;
+					else section.remove();
+				} else if (body) {
+					appendBlock("assistant", `<div class="who">pi</div>${body}`, true);
+				}
 			}
 			if (message.role === "assistant" && Array.isArray(message.content)) {
 				for (const call of toolCallsOf(message.content)) state.tools.get(call.id)?.setAttribute("data-name", call.name);
@@ -373,26 +388,23 @@ function handleEvent(event) {
 }
 
 function handleDelta(delta) {
-	const stream = state.streaming;
-	if (!stream) return;
-	let target = stream.querySelector(".live-text");
-	if (!target) {
-		target = document.createElement("div");
-		target.className = "text live-text";
-		stream.append(target);
+	if (delta.type !== "text_delta" && delta.type !== "text_end") return;
+	if (!state.streaming) {
+		state.streaming = appendBlock(
+			"assistant",
+			'<div class="who">pi</div><div class="text live-text"></div>',
+			true,
+		);
 	}
+	const target = state.streaming.querySelector(".live-text");
+	if (!target) return;
 	if (delta.type === "text_delta") {
 		state.pending ??= "";
 		state.pending += delta.delta ?? "";
 		scheduleFlush(target);
-	} else if (delta.type === "text_end") {
+	} else {
 		state.pending = "";
 		target.textContent = delta.content ?? target.textContent;
-	} else if (delta.type === "thinking_end" && delta.content?.trim()) {
-		const details = document.createElement("details");
-		details.className = "think";
-		details.innerHTML = `<summary>thinking</summary><div>${ansiToHtml(delta.content)}</div>`;
-		stream.prepend(details);
 	}
 }
 

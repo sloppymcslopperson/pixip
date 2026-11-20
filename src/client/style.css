@@ -18,6 +18,10 @@
 
 * { box-sizing: border-box; }
 
+/* The `hidden` attribute must win over component display rules: without this,
+   `#list`/`#composer` keep laying out after `element.hidden = true`. */
+[hidden] { display: none !important; }
+
 html, body {
 	margin: 0;
 	height: 100%;
@@ -43,7 +47,7 @@ button, input, textarea { font: inherit; color: inherit; }
 	display: flex;
 	align-items: center;
 	gap: 10px;
-	padding: calc(var(--pad) * 0.75) var(--pad);
+	padding: calc(var(--pad) * 0.75) max(var(--pad), calc((100% - 104ch) / 2));
 	padding-top: calc(var(--pad) * 0.75 + env(safe-area-inset-top, 0px));
 	background: color-mix(in srgb, var(--bg) 92%, transparent);
 	backdrop-filter: blur(8px);
@@ -52,6 +56,9 @@ button, input, textarea { font: inherit; color: inherit; }
 
 #titles { flex: 1; min-width: 0; }
 #title { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 560px) {
+	.wide { display: none; }
+}
 #sub { font-size: 11px; color: var(--fg-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .ghost {
@@ -75,6 +82,9 @@ main { flex: 1; min-height: 0; }
 #session { display: flex; flex-direction: column; }
 #log {
 	flex: 1;
+	width: 100%;
+	max-width: 104ch;
+	margin-inline: auto;
 	overflow-y: auto;
 	-webkit-overflow-scrolling: touch;
 	padding: var(--pad) var(--pad) calc(var(--pad) * 2);
@@ -142,7 +152,7 @@ details.tool.error > summary .tool-name { color: var(--err); }
 details.tool.empty > summary { color: var(--fg-faint); }
 
 /* ---- list ---- */
-#list { padding: var(--pad); display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
+#list { padding: var(--pad); display: flex; flex-direction: column; gap: 8px; overflow-y: auto; width: 100%; max-width: 760px; margin-inline: auto; }
 .row {
 	display: block;
 	width: 100%;
@@ -178,6 +188,9 @@ details.tool.empty > summary { color: var(--fg-faint); }
 /* ---- composer ---- */
 #composer {
 	position: sticky;
+	width: 100%;
+	max-width: 104ch;
+	margin-inline: auto;
 	bottom: 0;
 	display: flex;
 	gap: 8px;

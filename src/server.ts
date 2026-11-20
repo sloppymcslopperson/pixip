@@ -13,6 +13,8 @@ export interface ServerOptions {
 	hub: Hub;
 	clientDir: string;
 	log: (message: string) => void;
+	/** Re-read client assets per request, so CSS/JS edits need no restart. */
+	dev?: boolean;
 }
 
 export interface RunningServer {
@@ -34,7 +36,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
 	const wss = new WebSocketServer({ noServer: true });
 
 	const server = createServer((req, res) => {
-		void handleHttp(req, res, hub, assets, log);
+		void handleHttp(req, res, hub, assets, log, options);
 	});
 
 	server.on("upgrade", (req, socket, head) => {
@@ -71,6 +73,7 @@ async function handleHttp(
 	hub: Hub,
 	assets: Map<string, Buffer>,
 	log: (message: string) => void,
+	options: ServerOptions,
 ): Promise<void> {
 	const url = new URL(req.url ?? "/", "http://localhost");
 	const send = (status: number, body: string | Buffer, type = "application/json; charset=utf-8") => {
@@ -107,7 +110,7 @@ async function handleHttp(
 
 		const assetPath = url.pathname === "/" ? "/index.html" : url.pathname;
 		const normalized = normalize(assetPath).replace(/^(\.\.[/\\])+/, "");
-		const asset = assets.get(normalized);
+		const asset = options.dev ? await readAsset(options.clientDir, normalized) : assets.get(normalized);
 		if (!asset) {
 			send(404, JSON.stringify({ error: "not found" }));
 			return;
@@ -219,6 +222,14 @@ async function handleCommand(
 	} catch (error) {
 		log(`ws command failed: ${(error as Error).message}`);
 		send(frameError((error as Error).message));
+	}
+}
+
+async function readAsset(clientDir: string, relative: string): Promise<Buffer | undefined> {
+	try {
+		return await readFile(join(clientDir, relative));
+	} catch {
+		return undefined;
 	}
 }
 

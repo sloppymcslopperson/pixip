@@ -191,6 +191,13 @@ export function renderMessage(message) {
 }
 
 export function renderAssistant(content, includeTools = true) {
+	const body = renderAssistantBody(content, includeTools);
+	if (!body) return "";
+	return `<section class="block assistant"><div class="who">pi</div>${body}</section>`;
+}
+
+/** Just the inside of an assistant block (no wrapper, no "pi" label). */
+export function renderAssistantBody(content, includeTools = true) {
 	let html = "";
 	const text = [];
 	const tools = [];
@@ -207,8 +214,7 @@ export function renderAssistant(content, includeTools = true) {
 	if (includeTools) {
 		for (const call of tools) html += toolBlock(call.name, summarizeArgs(call.name, call.arguments), "", "", null, call.id ?? "");
 	}
-	if (!html) return "";
-	return `<section class="block assistant"><div class="who">pi</div>${html}</section>`;
+	return html;
 }
 
 export function toolBlock(name, summary, output, extraClass, durationMs, callId) {

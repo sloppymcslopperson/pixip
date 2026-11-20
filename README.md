@@ -6,6 +6,10 @@ has a normal text box instead of a pane grid.
 
 Prototype. Single supervisor process (`pixip`) + static client, no build step.
 
+| phone | desktop |
+|---|---|
+| ![phone](docs/phone-session.png) | ![desktop](docs/desktop-session.png) |
+
 ```bash
 npm install
 node bin/pixip.ts --data-dir ./tmp/dev        # http://127.0.0.1:8137/
@@ -78,6 +82,20 @@ do in the TUI.
 - virtualised transcript for very long sessions;
 - auth of any kind (bind loopback, or a private VPN interface — same posture as
   `aoe serve --host 100.42.42.1 --auth none`).
+
+## Checking the layout
+
+The responsive contract is verified by resizing, not by owning a phone. With any
+Chromium/Chrome binary:
+
+```bash
+PIXIP_CHROME=/path/to/chrome node tools/shot.mjs http://127.0.0.1:8137/ 390 844 phone.png
+PIXIP_CHROME=/path/to/chrome node tools/shot.mjs http://127.0.0.1:8137/ 1280 900 desktop.png
+```
+
+It prints the box model of the header/list/log/composer (so a resize is asserted,
+not eyeballed), flags horizontal overflow, console errors and page errors, and
+writes the screenshot. Use `--dev` on the daemon so CSS/JS edits need no restart.
 
 ## Layout
 

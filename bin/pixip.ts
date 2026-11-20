@@ -21,6 +21,7 @@ interface Options {
 	dataDir: string;
 	piBin: string;
 	idleMs: number;
+	dev: boolean;
 }
 
 function parseArgs(argv: string[]): Options {
@@ -30,6 +31,7 @@ function parseArgs(argv: string[]): Options {
 		dataDir: resolve("tmp/dev"),
 		piBin: "pi",
 		idleMs: 15 * 60_000,
+		dev: false,
 	};
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index];
@@ -54,6 +56,9 @@ function parseArgs(argv: string[]): Options {
 			case "--idle-ms":
 				options.idleMs = Number(next());
 				break;
+			case "--dev":
+				options.dev = true;
+				break;
 			case "--help":
 			case "-h":
 				printHelp();
@@ -77,6 +82,7 @@ Usage: pixip [options]
   --pi <path>         pi executable (default: pi from PATH)
   --idle-ms <ms>      detach an idle session after this long, keeping its JSONL
                       for resume (default 900000; 0 disables)
+  --dev               re-read client assets per request (no restart on CSS/JS edits)
 `);
 }
 
@@ -105,6 +111,7 @@ async function main(): Promise<void> {
 		hub,
 		clientDir,
 		log,
+		dev: options.dev,
 	});
 
 	log(`pixip listening on ${server.url}`);
