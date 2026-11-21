@@ -18,6 +18,7 @@ import { crumbTrail, filterDirEntries, initialDirectory, parentDirectory } from 
 import { queueCount, queueFromEvent, queueTexts, restoreText } from "./queue.js";
 import { flattenTree } from "./tree.js";
 import { addonStatusText, addonWidgets, applyAddonUi, createAddonUi } from "./addonUi.js";
+import { createSessionCache } from "./sessionCache.js";
 import { formatSession } from "./sessionInfo.js";
 import {
 	contextLevel,
@@ -83,6 +84,7 @@ const ui = {
 
 const state = {
 	sessionId: null,
+	sessionCache: createSessionCache(8), // recently viewed transcripts, in-memory only
 	info: null,
 	ws: null,
 	retries: 0,
@@ -196,6 +198,7 @@ function route() {
 }
 
 async function showList() {
+	cacheCurrentSession();
 	state.sessionId = null;
 	state.info = null;
 	state.pendingCreate = null;
@@ -654,6 +657,7 @@ function confirmSheet(title, message, confirmLabel, action) {
 async function archiveSession(session) {
 	try {
 		await apiJson(`/api/sessions/${encodeURIComponent(session.id)}/archive`, { method: "POST" });
+		forgetCachedSession(session);
 		await refreshDashboard();
 		toast("archived");
 	} catch (error) {
@@ -664,6 +668,7 @@ async function archiveSession(session) {
 async function deleteSession(session) {
 	try {
 		const result = await apiJson(`/api/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" });
+		forgetCachedSession(session);
 		await refreshDashboard();
 		const token = result?.undo?.token;
 		if (token) {
@@ -688,6 +693,7 @@ async function archiveInactive(count) {
 	if (!window.confirm(`Archive ${count} inactive session${count === 1 ? "" : "s"}?`)) return;
 	try {
 		const result = await apiJson("/api/sessions/archive-inactive", { method: "POST" });
+		if (Array.isArray(result.archived)) for (const session of result.archived) forgetCachedSession(session);
 		await refreshDashboard();
 		const failed = Array.isArray(result.failed) ? result.failed.length : 0;
 		toast(`archived ${result.archived ?? 0}${failed ? ` · ${failed} failed` : ""}`);
@@ -924,6 +930,7 @@ function failPendingSession(message) {
 
 function openSession(id) {
 	if (state.sessionId === id) return;
+	cacheCurrentSession();
 	state.pendingCreate = null;
 	state.sessionId = id;
 	state.restarting = false;
@@ -958,7 +965,53 @@ function openSession(id) {
 	ui.sub.textContent = id.slice(0, 8);
 	ui.dot.className = "dot busy";
 	document.title = "pixip";
+	const cached = state.sessionCache.get(id);
+	if (cached) restoreCachedSession(cached);
+	else ui.input.value = "";
 	connect(id);
+}
+
+/** Snapshot the current route before leaving it; the next open paints this. */
+function cacheCurrentSession() {
+	const id = state.sessionId;
+	if (!id) return;
+	state.sessionCache.set(id, {
+		entries: state.entries,
+		more: state.more,
+		distance: state.stick ? ui.log.clientHeight : ui.log.scrollHeight - ui.log.scrollTop,
+		stick: state.stick,
+		info: state.info,
+		footer: state.footer,
+		addon: state.addon,
+		queue: { steering: [...state.queue.steering], followUp: [...state.queue.followUp] },
+		input: ui.input.value,
+	});
+}
+
+/** Repaint a cached route synchronously, before its socket snapshot arrives. */
+function restoreCachedSession(cached) {
+	state.entries = Array.isArray(cached.entries) ? cached.entries : [];
+	state.more = Boolean(cached.more);
+	state.stick = cached.stick !== false;
+	state.info = cached.info ?? null;
+	state.footer = cached.footer ?? null;
+	state.addon = cached.addon ?? createAddonUi();
+	state.queue = cached.queue
+		? { steering: [...cached.queue.steering], followUp: [...cached.queue.followUp] }
+		: { steering: [], followUp: [] };
+	ui.input.value = cached.input ?? "";
+	renderTranscript(cached.distance ?? (state.stick ? ui.log.clientHeight : null));
+	renderQueue();
+	renderFooter();
+	if (state.info) applyInfo();
+	resize();
+}
+
+/** Archive/delete must not leave a stale transcript behind the same id. */
+function forgetCachedSession(session) {
+	if (!session) return;
+	state.sessionCache.delete(session.id);
+	if (typeof session.logicalId === "string") state.sessionCache.delete(session.logicalId);
 }
 
 // --------------------------------------------------------------------- frames
@@ -983,6 +1036,7 @@ function handleFrame(frame) {
 				(session) => session.id === state.sessionId || (logical && session.logicalId === logical),
 			);
 			if (!present) {
+				state.sessionCache.delete(state.sessionId);
 				state.sessionId = null;
 				toast("session is no longer available");
 				location.hash = "";
@@ -1047,13 +1101,16 @@ function handleFrame(frame) {
 			if (state.sessionId && state.ws) {
 				// An index-only session reattached under a new Pi id: keep this socket
 				// and transcript, and move the URL to the new id without reconnecting.
-				const changed = state.sessionId !== id;
+				const previousId = state.sessionId;
+				const changed = previousId !== id;
+				if (changed) state.sessionCache.delete(previousId);
 				state.sessionId = id;
 				if (frame.session) state.info = frame.session;
 				history.replaceState(null, "", `#s=${encodeURIComponent(id)}`);
 				if (frame.rekey === true && changed) {
 					// `/new` in the same child: the old transcript belongs to a
 					// different session, so ask for a replacement window.
+					state.sessionCache.delete(id);
 					state.entries = [];
 					state.more = false;
 					state.tools.clear();
