@@ -96,7 +96,9 @@ skips the clarifying-question round (the tickets are already decided);
 Drop to `/fit work` (no count) to take one ticket at a time.
 
 Definition of done for every ticket: `npm run check` green, plus `tools/shot.mjs`
-at 390 and 1280 for anything that touches the client. If a change moves the
+at 390 and 1280 for anything that touches the client. `--dev` only reloads client
+assets; hub or server changes need the daemon restarted (kill the pid on 8137 and
+relaunch, or start a second instance on another `--port`/`--data-dir`). If a change moves the
 numbers in ARCHITECTURE.md, update them there (that file is the source of truth
 for the latency budget).
 
