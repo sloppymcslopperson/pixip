@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { markdownToHtml } from "../src/client/markdown.js";
-import { ansiToHtml, escapeHtml, renderAssistantBody, renderMessage, summarizeArgs, textOf, toolBlock } from "../src/client/render.js";
+import { ansiToHtml, bashCardHtml, escapeHtml, renderAssistantBody, renderMessage, summarizeArgs, textOf, toolBlock } from "../src/client/render.js";
 
 describe("ansi", () => {
 	it("maps SGR colors to spans and leaves text alone", () => {
@@ -53,6 +53,34 @@ describe("rendering", () => {
 
 	it("escapes tool names and summaries", () => {
 		assert.equal(escapeHtml('<a href="x">'), "&lt;a href=&quot;x&quot;&gt;");
+	});
+
+	it("renders a bash card with the excluded badge and terminal state", () => {
+		const html = bashCardHtml({
+			command: "cat secret",
+			output: "a\nb",
+			exitCode: 0,
+			cancelled: false,
+			truncated: false,
+			excludeFromContext: true,
+		});
+		assert.match(html, /class="block bash excluded"/);
+		assert.match(html, /class="badge excluded">excluded</);
+		assert.match(html, /<span class="bash-cmd">cat secret<\/span>/);
+		assert.match(html, /<pre class="bash-out">a\nb<\/pre>/);
+		assert.match(html, /exit 0/);
+	});
+
+	it("keeps the bash card for running, empty, failed and truncated output", () => {
+		const running = bashCardHtml({ command: "npm test", output: "", running: true });
+		assert.match(running, /class="block bash running empty"/);
+		assert.match(running, /running…/);
+		const failed = bashCardHtml({ command: "false", output: "", exitCode: 1 });
+		assert.match(failed, /class="block bash error empty"/);
+		assert.match(failed, /exit 1/);
+		const truncated = bashCardHtml({ command: "yes", output: "x", exitCode: 0, truncated: true, fullOutputPath: "/tmp/full.log" });
+		assert.match(truncated, /truncated/);
+		assert.match(truncated, /\/tmp\/full\.log/);
 	});
 });
 

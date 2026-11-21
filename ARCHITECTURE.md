@@ -85,6 +85,8 @@ Hub → client:
 | `status` | `session` | state/name/model changes |
 | `event` | `ev` | **verbatim** Pi record |
 | `opened` | `session` | reply to `create` |
+| `policy` | `policy` (`allow`, `deny`, `bash`) | effective per-session command policy |
+| `bash` | `id`, `command`, `excludeFromContext`, `output`, `exitCode`, `cancelled`, `truncated`, `fullOutputPath?`, `error?` | terminal result for `!`/`!!`; chunks arrive as `event` |
 | `error` | `message` | protocol/command failure |
 
 Client → hub:
@@ -92,7 +94,9 @@ Client → hub:
 | frame | fields | maps to |
 |---|---|---|
 | `create` | `cwd`, `name?` | spawn a new session |
-| `prompt` / `steer` | `text` | `prompt` / `steer` |
+| `prompt` | `text`, `streamingBehavior?` | `prompt` (`"steer"` while busy: extension commands must still execute) |
+| `steer` | `text` | `steer` (plain text only) |
+| `bash` | `id`, `command`, `excludeFromContext` | `bash`; `id` is repeated on streamed updates and the final frame |
 | `abort` | – | `abort` |
 | `earlier` | `before` (entry id) | hub reads the preceding window from the JSONL and replies with `history` |
 | `stop` | – | detach process, keep JSONL |
@@ -120,6 +124,35 @@ Model and thinking are plain RPC passthroughs (`get_available_models`,
 `set_model`, `get_available_thinking_levels`, `set_thinking_level`); the footer is
 the one place that shows and changes them. `thinking_level_changed` events keep it
 in sync when the change happens elsewhere.
+
+## Composer commands, `!`/`!!` and policy
+
+The composer classifies a submitted line in one pure module
+(`src/client/commands.js`, covered by `test/commands.test.js`):
+
+- a name in the catalog is a pixip built-in (`02-builtin-commands`) or TUI-only
+  (local notice, never sent to the model);
+- any other `/…` line — extension commands like `/fit`, templates, skills,
+  unknown names — is forwarded verbatim to `prompt`, exactly like the TUI;
+- `!cmd` / `!!cmd` run through RPC `bash`, with `excludeFromContext` set for
+  `!!`. The client paints the card optimistically and supplies its own id on the
+  `bash` frame; Pi repeats that id on every `bash_execution_update` (forwarded
+  verbatim as `event`) and the hub's final `bash` frame carries output, exit
+  code, cancellation, truncation and the full-output path. `!`/`!!` with no
+  command is a no-op, and only one bash runs per session at a time;
+- plain text keeps `prompt` when idle and `steer` while busy. Slash input while
+  busy uses `prompt` with `streamingBehavior: "steer"`, because RPC `steer`
+  queues text and never executes an extension command.
+
+`prompt` and `bash` are exempt from the 20 s RPC response timeout (extension
+handlers block on user dialogs; a build can run for minutes), and a late or
+failed prompt response is advisory — logged, never an error toast.
+
+Policy is per session and restrict-only: `<data-dir>/pixip.json`,
+`<cwd>/.pixip.json` and the CLI flags (`--allow-command`, `--deny-command`,
+`--no-bash`) merge in `resolvePolicy()` (the same client module the hub imports),
+and the hub serves the result as a `policy` frame on the session socket. Denied
+and TUI-only commands produce a local notice and are never sent to the model.
 
 ## Measured latency (this box, 1 vCPU)
 

@@ -24,6 +24,26 @@ export interface FooterData {
 	providerCount: number;
 }
 
+/**
+ * Restrict-only command policy, resolved per session from the data dir, the
+ * session cwd and the CLI flags. `allow: []` means "no allow restriction";
+ * `deny` wins over `allow`; `bash: false` disables `!`/`!!`.
+ */
+export interface CommandPolicy {
+	allow: string[];
+	deny: string[];
+	bash: boolean;
+}
+
+/** Final result of one `!`/`!!` command, built by the hub from the RPC response. */
+export interface BashResult {
+	output: string;
+	exitCode: number | null;
+	cancelled: boolean;
+	truncated: boolean;
+	fullOutputPath?: string;
+}
+
 export interface ModelSummary {
 	id: string;
 	provider: string;
@@ -98,4 +118,32 @@ export function frameThinking(levels: string[], current: string): string {
 
 export function frameHello(sessions: SessionInfo[], defaultCwd?: string): string {
 	return JSON.stringify({ t: "hello", v: WIRE_VERSION, sessions, defaultCwd });
+}
+
+export function framePolicy(policy: CommandPolicy): string {
+	return JSON.stringify({ t: "policy", policy });
+}
+
+/**
+ * Terminal `bash` frame. `id` is the client-generated id also used for the RPC
+ * command, so streamed `bash_execution_update` events and this result agree
+ * without the hub parsing event payloads.
+ */
+export function frameBash(id: string, command: string, excludeFromContext: boolean, result: BashResult): string {
+	return JSON.stringify({
+		t: "bash",
+		id,
+		command,
+		excludeFromContext,
+		output: result.output,
+		exitCode: result.exitCode,
+		cancelled: result.cancelled,
+		truncated: result.truncated,
+		...(result.fullOutputPath ? { fullOutputPath: result.fullOutputPath } : {}),
+	});
+}
+
+/** A refused or failed bash (already running, policy, child died). */
+export function frameBashError(id: string, command: string, message: string): string {
+	return JSON.stringify({ t: "bash", id, command, error: message });
 }

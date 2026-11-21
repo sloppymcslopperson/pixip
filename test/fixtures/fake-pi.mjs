@@ -40,6 +40,7 @@ if (env.FAKE_PI_LOG) {
 	appendFileSync(
 		env.FAKE_PI_LOG,
 		`${JSON.stringify({
+			type: "spawn",
 			pid: process.pid,
 			args: argv,
 			sessionId,
@@ -47,6 +48,11 @@ if (env.FAKE_PI_LOG) {
 		})}\n`,
 	);
 }
+
+/** One line per command the hub sent; tests assert on the recorded payload. */
+const logRecord = (record) => {
+	if (env.FAKE_PI_LOG) appendFileSync(env.FAKE_PI_LOG, `${JSON.stringify(record)}\n`);
+};
 
 const send = (record) => process.stdout.write(`${JSON.stringify(record)}\n`);
 const ok = (id, command, data) => send({ type: "response", id, command, success: true, data });
@@ -101,6 +107,43 @@ function handle(line) {
 		case "get_available_models":
 			if (env.FAKE_PI_RENAME_TO) send({ type: "session_info_changed", name: env.FAKE_PI_RENAME_TO });
 			return ok(command.id, "get_available_models", { models: [] });
+		case "prompt": {
+			logRecord({
+				type: "prompt",
+				id: command.id,
+				text: command.message,
+				streamingBehavior: command.streamingBehavior ?? null,
+			});
+			// A slow handler stands in for an extension command blocked on a dialog.
+			const promptDelay = Number(env.FAKE_PI_PROMPT_DELAY_MS ?? 0);
+			const prompt = () => ok(command.id, "prompt", { disposition: "started" });
+			if (promptDelay > 0) return void setTimeout(prompt, promptDelay);
+			return prompt();
+		}
+		case "steer":
+			logRecord({ type: "steer", id: command.id, text: command.message });
+			return ok(command.id, "steer", {});
+		case "bash": {
+			logRecord({
+				type: "bash",
+				id: command.id,
+				command: command.command,
+				excludeFromContext: command.excludeFromContext === true,
+			});
+			const chunks = env.FAKE_PI_BASH_DELTA ? [env.FAKE_PI_BASH_DELTA] : ["out-1\n", "out-2\n"];
+			for (const delta of chunks) send({ type: "bash_execution_update", id: command.id, delta });
+			const respond = () =>
+				ok(command.id, "bash", {
+					output: env.FAKE_PI_BASH_OUTPUT ?? chunks.join(""),
+					exitCode: Number(env.FAKE_PI_BASH_EXIT ?? 0),
+					cancelled: env.FAKE_PI_BASH_CANCELLED === "1",
+					truncated: env.FAKE_PI_BASH_TRUNCATED === "1",
+					...(env.FAKE_PI_BASH_FULL_OUTPUT ? { fullOutputPath: env.FAKE_PI_BASH_FULL_OUTPUT } : {}),
+				});
+			const bashDelay = Number(env.FAKE_PI_BASH_DELAY_MS ?? 0);
+			if (bashDelay > 0) return void setTimeout(respond, bashDelay);
+			return respond();
+		}
 		default:
 			return ok(command.id, command.type, {});
 	}

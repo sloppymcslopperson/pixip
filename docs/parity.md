@@ -14,7 +14,7 @@ to the model).
 
 | Order | Ticket | What it unlocks |
 |---|---|---|
-| 1 | `00-prefix-commands` | `/`, `!`, `!!` classification, bash, command policy, prompt/steer dispatch |
+| 1 | `00-prefix-commands` | done: `/`, `!`, `!!` classification, bash, command policy, prompt/steer dispatch |
 | 2 | `01-daemon-refresh` | run pixip as a background daemon; soft reload and `--when-idle` restart so the agent can update pixip mid-session |
 | 3 | `02-builtin-commands` | `/compact`, `/name`, `/session`, `/copy`, `/model`, `/thinking`, `/new`, `/resume`, `/quit` |
 | 4 | `06-command-menu` | `/` suggestion menu and the status line below the composer |
@@ -55,16 +55,16 @@ already done or deliberately deferred.
 | `/changelog` | changelog viewer | TUI-only |
 | `/quit` | quit Pi | `02-builtin-commands` (soft quit: detach + session list) |
 | `/debug` | debug view | TUI-only |
-| `/extension` | extension commands, e.g. `/fit` | `00-prefix-commands` (passthrough to Pi) |
-| `/template` | prompt templates | `00-prefix-commands` (passthrough to Pi) |
-| `/skill:name` | skills | `00-prefix-commands` (passthrough to Pi) |
-| unknown `/thing` | sent as a prompt | `00-prefix-commands` (same passthrough) |
+| `/extension` | extension commands, e.g. `/fit` | done (`00-prefix-commands`: passthrough to Pi) |
+| `/template` | prompt templates | done (`00-prefix-commands`: passthrough to Pi) |
+| `/skill:name` | skills | done (`00-prefix-commands`: passthrough to Pi) |
+| unknown `/thing` | sent as a prompt | done (`00-prefix-commands`: same passthrough) |
 
 ## Composer and runtime
 
 | Behaviour | pixip |
 |---|---|
-| `!cmd`, `!!cmd` (bash, excluded from context) | `00-prefix-commands` |
+| `!cmd`, `!!cmd` (bash, excluded from context) | done (`00-prefix-commands`: streamed card, `!!` badge) |
 | Command menu on `/` | `06-command-menu` |
 | Steering/follow-up queue visible, clear + restore | `07-queue-display` |
 | Abort a running bash | deferred (gap; TUI-only for now) |
@@ -72,7 +72,7 @@ already done or deliberately deferred.
 | `@file` completion | deferred |
 | Image paste/attachments | deferred |
 | Esc to abort/clear | abort via the stop button; queue clear in `07` |
-| Long `notify` text readable (extension commands) | `00-prefix-commands` (dismissible sheet, not a 3.2 s toast) |
+| Long `notify` text readable (extension commands) | done (`00-prefix-commands`: dismissible sheet, not a 3.2 s toast) |
 | Transcript text size (50–150 %, header `A−`/`A+`) | `03-add-font-size-control` |
 | Working / compacting status | done (footer + toasts) |
 | Markdown rendering | done (`00-render-markdown`) |
@@ -118,7 +118,10 @@ restrict-only layers (a more specific layer can only narrow):
 and TUI-only commands render a local notice and are never sent to the model. The
 effective policy is resolved per session from its cwd and sent to the client.
 
-Decided in `00-prefix-commands`; the implementation and tests live there.
+Implemented in `00-prefix-commands` (`src/commands.ts` reads and validates, the pure
+`src/client/commands.js` merges, the hub sends a `policy` frame per session, and
+the composer applies it to built-ins, TUI-only commands and passthrough alike).
+`01-daemon-refresh` re-resolves it on a soft refresh.
 
 ## Extension commands (e.g. `/fit`)
 

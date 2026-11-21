@@ -178,13 +178,38 @@ export function renderMessage(message) {
 		return toolBlock(message.toolName ?? "tool", "", output, error, null, message.toolCallId ?? "");
 	}
 	if (message.role === "bashExecution") {
-		const output = ansiToHtml(textOf(message.output ?? message.content));
-		return toolBlock("bash", message.command ?? "", output, message.exitCode === 0 ? "" : " error", null, "");
+		return bashCardHtml(message);
 	}
 	if (message.role === "custom") {
 		return `<section class="block meta"><div class="meta-head">${escapeHtml(message.customType ?? "note")}</div><div class="meta-body">${ansiToHtml(textOf(message.content))}</div></section>`;
 	}
 	return "";
+}
+
+/**
+ * One `!`/`!!` card: the command, its streamed output, and the terminal state
+ * (exit code, cancelled, truncation, full-output path). `excluded` marks `!!`,
+ * whose output Pi keeps in the session but leaves out of the model context.
+ * Used live (optimistic card, then the final frame) and from snapshots, so a
+ * reload repaints the same card.
+ */
+export function bashCardHtml(message) {
+	const command = message.command ?? "";
+	const output = textOf(message.output ?? message.content ?? "");
+	const excluded = message.excludeFromContext === true;
+	const meta = [];
+	if (message.cancelled) meta.push("cancelled");
+	else if (typeof message.exitCode === "number") meta.push(`exit ${message.exitCode}`);
+	if (message.truncated) meta.push("truncated");
+	if (message.fullOutputPath) meta.push(`full output: ${message.fullOutputPath}`);
+	if (message.running) meta.push("running…");
+	const classes = ["block", "bash"];
+	if (excluded) classes.push("excluded");
+	if (message.running) classes.push("running");
+	if (message.cancelled || (typeof message.exitCode === "number" && message.exitCode !== 0)) classes.push("error");
+	if (!output) classes.push("empty");
+	const badge = excluded ? '<span class="badge excluded">excluded</span>' : "";
+	return `<section class="${classes.join(" ")}"><div class="bash-head"><span class="bash-prompt">$</span><span class="bash-cmd">${escapeHtml(command)}</span>${badge}</div><pre class="bash-out">${escapeHtml(output)}</pre><div class="bash-meta">${escapeHtml(meta.join(" · "))}</div></section>`;
 }
 
 export function renderAssistant(content, includeTools = true) {

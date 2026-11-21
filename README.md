@@ -66,6 +66,10 @@ do in the TUI.
 - streamed transcript: user/assistant text, thinking collapsed, tool calls with
   ANSI output, error styling, durations;
 - composer: send while idle, steer while streaming, abort via `stop`;
+- `!cmd`/`!!cmd` bash cards (streamed output, exit code, `!!` excluded from the
+  model context), slash-command passthrough for extension commands/templates/
+  skills, and a restrict-only per-session command policy (`pixip.json`,
+  `--allow-command`/`--deny-command`/`--no-bash`) — see `docs/parity.md`;
 - per-session model and thinking level, picked from the footer (`get_available_models`
   / `set_model`, `get_available_thinking_levels` / `set_thinking_level`);
 - the TUI status line: pwd + branch + session name, token totals, cost, context
@@ -86,8 +90,8 @@ tickets that own each gap.
 - TUI visual parity: diff/syntax colouring and the TUI's own theme colours (theme
   values are `okhsl`, which browsers do not support without conversion — see
   `85-theme-tokens`);
-- the TUI command surface: slash built-ins, the command menu, queue display and
-  branch/session commands (tracked in `docs/parity.md`);
+- built-in slash handlers (`02-builtin-commands` is next), the command menu,
+  queue display and branch/session commands (tracked in `docs/parity.md`);
 - daemon lifecycle and self-refresh (`01-daemon-refresh`);
 - worktree creation, image input, input history and `@file` completion;
 - virtualised transcript for very long sessions;
@@ -114,9 +118,11 @@ writes the screenshot. Use `--dev` on the daemon so CSS/JS edits need no restart
 bin/pixip.ts        supervisor entry: flags, data dir, signals
 src/rpc.ts          `pi --mode rpc` peer: LF framing, id correlation, raw records
 src/hub.ts          session registry, spawn/attach/stop, idle policy, disk scan
+src/commands.ts     per-session command policy: read, validate, merge, serve
 src/wire.ts         hub <-> browser frames (v1)
 src/server.ts       http + ws, static client
-src/client/         index.html, style.css, app.js, render.js (pure, unit-tested)
+src/client/         index.html, style.css, app.js, render.js and commands.js
+                    (the last two are pure and unit-tested)
 test/               protocol/rpc tests and ANSI/render tests
 ```
 

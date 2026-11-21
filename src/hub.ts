@@ -5,8 +5,9 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
 import { RpcChild } from "./rpc.ts";
+import { resolveSessionPolicy, type CommandLayer } from "./commands.ts";
 import { frameError, frameEvent, frameFooter, frameModels, frameSessions, frameSnapshot, frameStatus } from "./wire.ts";
-import type { FooterData, ModelSummary, SessionInfo, SessionState } from "./wire.ts";
+import type { BashResult, CommandPolicy, FooterData, ModelSummary, SessionInfo, SessionState } from "./wire.ts";
 
 const run = promisify(execFile);
 
@@ -25,10 +26,19 @@ const run = promisify(execFile);
 interface HubOptions {
 	piBin: string;
 	sessionsDir: string;
+	/** `<data-dir>`: where `pixip.json`, the pid/log and the index live. */
+	dataDir?: string;
 	/** Plain JSON array mapping pixip logical ids to the Pi sessions they ran as. */
 	indexPath: string;
 	idleMs: number;
 	extraPiArgs: string[];
+	/** CLI command-policy layer (`--allow-command`/`--deny-command`/`--no-bash`). */
+	cliCommands?: CommandLayer;
+	/**
+	 * Response timeout for `prompt`, in ms; `0` (default) waits forever because an
+	 * extension command may block on a user dialog. Tests pass a small value.
+	 */
+	promptTimeoutMs?: number;
 	/** Extra environment for every child; `process.env` is inherited first. */
 	env?: Record<string, string | undefined>;
 	log: (message: string) => void;
@@ -71,6 +81,10 @@ interface LiveSession {
 	idleTimer?: NodeJS.Timeout;
 	branch?: string;
 	footerTimer?: NodeJS.Timeout;
+	/** Effective command policy, resolved once at attach (or on soft refresh). */
+	policy?: CommandPolicy;
+	/** Id of the bash command currently running, if any (one at a time per session). */
+	bashId?: string;
 	/** Timestamp of the assistant message currently streaming (or last done). */
 	assistantTs?: number;
 }
@@ -342,16 +356,73 @@ export class Hub {
 		return found?.path;
 	}
 
-	async prompt(id: string, text: string): Promise<void> {
+	async prompt(id: string, text: string, streamingBehavior?: "steer" | "followUp"): Promise<void> {
 		const live = this.require(id);
 		this.touch(live);
-		await live.proc.command({ type: "prompt", message: text });
+		try {
+			// Slash input while busy must go through `prompt` with a steering
+			// behavior: RPC `steer` expands templates/skills but never runs an
+			// extension command (`/fit`), so it would queue the literal text.
+			await live.proc.command(
+				{ type: "prompt", message: text, ...(streamingBehavior ? { streamingBehavior } : {}) },
+				{ timeoutMs: this.options.promptTimeoutMs ?? 0 },
+			);
+		} catch (error) {
+			// Advisory: a late/failed prompt response must not become an error toast
+			// (extension handlers legitimately outlive any timeout), so log it and
+			// let the event stream be the source of truth.
+			this.options.log(`prompt ${id}: ${(error as Error).message}`);
+		}
 	}
 
 	async steer(id: string, text: string): Promise<void> {
 		const live = this.require(id);
 		this.touch(live);
 		await live.proc.command({ type: "steer", message: text });
+	}
+
+	/**
+	 * Run one `!`/`!!` command through Pi's RPC `bash`. The caller-supplied id is
+	 * repeated on every `bash_execution_update`, so the client can stream into the
+	 * card it already painted without the hub parsing events.
+	 *
+	 * One bash at a time per session (the TUI guard); output is left to the event
+	 * stream and the final result, never buffered here.
+	 */
+	async bash(id: string, bashId: string, command: string, excludeFromContext: boolean): Promise<BashResult> {
+		const live = this.require(id);
+		if (!command.trim()) throw new Error("empty bash command");
+		if (live.bashId) throw new Error("a bash command is already running");
+		live.bashId = bashId;
+		// A long build must not be detached by the idle timer mid-run.
+		this.clearIdle(live);
+		try {
+			const data = (await live.proc.command(
+				{ type: "bash", command, excludeFromContext },
+				{ id: bashId, timeoutMs: 0 },
+			)) as {
+				output?: string;
+				exitCode?: number;
+				cancelled?: boolean;
+				truncated?: boolean;
+				fullOutputPath?: string;
+			} | null;
+			return {
+				output: typeof data?.output === "string" ? data.output : "",
+				exitCode: typeof data?.exitCode === "number" ? data.exitCode : null,
+				cancelled: Boolean(data?.cancelled),
+				truncated: Boolean(data?.truncated),
+				...(typeof data?.fullOutputPath === "string" ? { fullOutputPath: data.fullOutputPath } : {}),
+			};
+		} finally {
+			live.bashId = undefined;
+			if (live.info.state === "idle") this.scheduleIdle(live);
+		}
+	}
+
+	/** Effective per-session command policy (resolved at attach). */
+	policy(id: string): CommandPolicy {
+		return this.require(id).policy ?? { allow: [], deny: [], bash: true };
 	}
 
 	async abort(id: string): Promise<void> {
@@ -424,6 +495,9 @@ export class Hub {
 			resolveState = resolve;
 			rejectState = reject;
 		});
+		// The policy read below can fail before this promise is awaited; keep the
+		// later `onExit` rejection from becoming an unhandled rejection.
+		ready.catch(() => {});
 
 		const info: SessionInfo = {
 			id: "",
@@ -476,6 +550,22 @@ export class Hub {
 		info.messageCount = state.messageCount;
 		info.state = state.isStreaming ? "busy" : "idle";
 		info.lastActivity = Date.now();
+
+		// Resolve the command policy before the session is usable: a malformed
+		// config fails the attach with the file path instead of silently allowing
+		// or blocking commands. Read once per attach; a soft refresh re-resolves.
+		try {
+			live.policy = await resolveSessionPolicy({
+				dataDir: this.options.dataDir ?? dirname(this.options.sessionsDir),
+				cwd: info.cwd,
+				cli: this.options.cliCommands,
+				log: this.options.log,
+			});
+		} catch (error) {
+			this.live.delete(SYMBOL_PENDING);
+			await proc.close();
+			throw error;
+		}
 
 		this.live.delete(SYMBOL_PENDING);
 		const previous = this.live.get(info.id);

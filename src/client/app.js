@@ -1,5 +1,6 @@
 import {
 	ansiToHtml,
+	bashCardHtml,
 	escapeHtml,
 	relativeTime,
 	renderAssistant,
@@ -10,6 +11,7 @@ import {
 	toolBlock,
 	toolCallsOf,
 } from "./render.js";
+import { classifyInput, isAllowed } from "./commands.js";
 import {
 	contextLevel,
 	footerPwdLine,
@@ -50,6 +52,9 @@ const state = {
 	footer: null,
 	models: [],
 	levels: [],
+	policy: null, // effective per-session command policy (hub-resolved)
+	bashRunning: false,
+	bash: new Map(), // bash id -> optimistic card, matched by event id
 	entries: [], // what the client currently knows, oldest first
 	more: false, // older entries exist before entries[0]
 	loadingEarlier: false,
@@ -88,6 +93,10 @@ function connect(sessionId) {
 	ws.onclose = () => {
 		if (state.ws !== ws) return;
 		state.ws = null;
+		// A dropped socket does not kill the child, but this page no longer tracks
+		// the card or the one-at-a-time guard; the snapshot restores the transcript.
+		state.bashRunning = false;
+		state.bash.clear();
 		if (!state.sessionId) return;
 		const delay = Math.min(2000, 200 * 2 ** state.retries++);
 		toast(`reconnecting… (${delay}ms)`);
@@ -123,6 +132,9 @@ async function showList() {
 	state.tools.clear();
 	state.streaming = null;
 	state.pendingUser = null;
+	state.policy = null;
+	state.bashRunning = false;
+	state.bash.clear();
 	state.entries = [];
 	state.more = false;
 	state.loadingEarlier = false;
@@ -193,6 +205,9 @@ function openSession(id) {
 	state.tools.clear();
 	state.streaming = null;
 	state.pendingUser = null;
+	state.policy = null;
+	state.bashRunning = false;
+	state.bash.clear();
 	ui.list.hidden = true;
 	ui.session.hidden = false;
 	ui.composer.hidden = false;
@@ -255,6 +270,12 @@ function handleFrame(frame) {
 		case "footer":
 			state.footer = frame.footer;
 			renderFooter();
+			break;
+		case "policy":
+			applyPolicy(frame.policy);
+			break;
+		case "bash":
+			finishBash(frame);
 			break;
 		case "models":
 			state.models = frame.models ?? [];
@@ -591,6 +612,16 @@ function handleEvent(event) {
 			scheduleScroll();
 			break;
 		}
+		case "bash_execution_update": {
+			// Verbatim event, matched by the id the client put on the bash frame.
+			const card = state.bash.get(event.id);
+			const out = card?.querySelector(".bash-out");
+			if (!out || typeof event.delta !== "string") break;
+			out.textContent += event.delta;
+			card.classList.remove("empty");
+			scheduleScroll();
+			break;
+		}
 		case "extension_ui_request":
 			handleUiRequest(event);
 			break;
@@ -740,7 +771,7 @@ function closeSheet() {
 function handleUiRequest(request) {
 	const method = request.method;
 	if (method === "notify") {
-		toast(request.message ?? "");
+		notice(request.message ?? "");
 		return;
 	}
 	if (!["select", "confirm", "input", "editor"].includes(method)) return;
@@ -787,15 +818,155 @@ function handleUiRequest(request) {
 
 // ------------------------------------------------------------------ composer
 
+/** pixip built-in handlers; `02-builtin-commands` fills this registry. */
+const builtinHandlers = {};
+
+function clearInput() {
+	ui.input.value = "";
+	resize();
+}
+
 function submit() {
 	const text = ui.input.value.trim();
 	if (!text) return;
+	const action = classifyInput(text);
+	switch (action.kind) {
+		case "empty":
+			return;
+		case "menu":
+			// `/` opens the suggestion menu in 06-command-menu; keep the text until then.
+			return;
+		case "bash":
+			submitBash(action);
+			return;
+		case "tui":
+			if (!allowed(action)) return;
+			notice(
+				`/${action.name} is a Pi TUI-only command${action.command?.ticket ? ` (planned in ${action.command.ticket})` : ""} — use a terminal`,
+			);
+			clearInput();
+			return;
+		case "builtin": {
+			if (!allowed(action)) return;
+			const handler = builtinHandlers[action.name];
+			if (!handler) {
+				notice(`/${action.name} is not wired yet`);
+				clearInput();
+				return;
+			}
+			handler(action.args);
+			clearInput();
+			return;
+		}
+		case "passthrough":
+			// Unknown `/thing` and every extension command/template/skill go to Pi
+			// verbatim. While busy that must be `prompt` + steer: RPC `steer` would
+			// queue the text instead of executing the extension command.
+			if (!allowed(action)) return;
+			submitSlash(action.text);
+			return;
+		default:
+			submitText(action.text);
+	}
+}
+
+function applyPolicy(policy) {
+	state.policy = policy && typeof policy === "object"
+		? {
+				allow: Array.isArray(policy.allow) ? policy.allow.filter((name) => typeof name === "string") : [],
+				deny: Array.isArray(policy.deny) ? policy.deny.filter((name) => typeof name === "string") : [],
+				bash: policy.bash !== false,
+			}
+		: null;
+}
+
+/** Denied commands never reach the model; they get a local notice instead. */
+function allowed(action) {
+	if (isAllowed(action.name, state.policy)) return true;
+	notice(`/${action.name} is blocked by the command policy`);
+	clearInput();
+	return false;
+}
+
+function submitSlash(text) {
+	const busy = state.info?.state === "busy";
+	send({ t: "prompt", text, ...(busy ? { streamingBehavior: "steer" } : {}) });
+	// No optimistic user echo: an extension command may consume the prompt, and
+	// Pi's own message_start paints templates/skills when they produce a message.
+	clearInput();
+}
+
+function submitText(text) {
 	const busy = state.info?.state === "busy";
 	send({ t: busy ? "steer" : "prompt", text });
 	state.pendingUser = appendBlock("user", `<div class="who">you</div><div class="text">${escapeHtml(text)}</div>`, true);
-	ui.input.value = "";
-	resize();
+	clearInput();
 	scrollToEnd(true);
+}
+
+let bashSeq = 0;
+
+function submitBash(action) {
+	// `!`/`!!` with no command is a no-op (the TUI keeps the text for editing).
+	if (!action.command) return;
+	if (state.policy && state.policy.bash === false) {
+		notice("bash is disabled by the command policy");
+		clearInput();
+		return;
+	}
+	if (state.bashRunning) {
+		// TUI guard: one bash at a time; keep the text so it can be resubmitted.
+		toast("a bash command is already running");
+		return;
+	}
+	const id = `b${++bashSeq}-${Date.now().toString(36)}`;
+	state.bashRunning = true;
+	state.bash.set(id, appendBashCard(id, action.command, action.excludeFromContext));
+	send({ t: "bash", id, command: action.command, excludeFromContext: action.excludeFromContext });
+	clearInput();
+	scrollToEnd(true);
+}
+
+/** Optimistic card on submit: the TUI shows only the bash card, never a user echo. */
+function appendBashCard(id, command, excluded) {
+	const host = document.createElement("div");
+	host.innerHTML = bashCardHtml({
+		command,
+		output: "",
+		exitCode: null,
+		cancelled: false,
+		truncated: false,
+		excludeFromContext: excluded,
+		running: true,
+	});
+	const card = host.firstElementChild;
+	if (!card) return ui.log.appendChild(document.createElement("div"));
+	card.dataset.bash = id;
+	ui.log.append(card);
+	scheduleScroll();
+	return card;
+}
+
+/** Final `bash` frame: replace the streamed card with the authoritative result. */
+function finishBash(frame) {
+	state.bashRunning = false;
+	const card = state.bash.get(frame.id);
+	state.bash.delete(frame.id);
+	if (!card) {
+		if (frame.error) toast(frame.error);
+		return;
+	}
+	if (frame.error) {
+		card.classList.remove("running");
+		card.classList.add("error");
+		const meta = card.querySelector(".bash-meta");
+		if (meta) meta.textContent = `failed: ${frame.error}`;
+		scrollToEnd();
+		return;
+	}
+	card.insertAdjacentHTML("beforebegin", bashCardHtml(frame));
+	card.remove();
+	scrollToEnd();
 }
 
 ui.composer.addEventListener("submit", (event) => {
@@ -874,6 +1045,37 @@ function toast(message) {
 	toastTimer = setTimeout(() => {
 		ui.toast.hidden = true;
 	}, 3200);
+}
+
+/** A 3.2 s toast is useless for `/fit help`'s 2 KB notify: long or multi-line
+ *  notices get a dismissible sheet instead. */
+const NOTICE_SHEET_CHARS = 180;
+function notice(message) {
+	if (!message) return;
+	if (message.includes("\n") || message.length > NOTICE_SHEET_CHARS) {
+		textSheet("notice", message);
+		return;
+	}
+	toast(message);
+}
+
+function textSheet(title, text) {
+	const target = ui.sheet;
+	target.hidden = false;
+	target.textContent = "";
+	const heading = document.createElement("div");
+	heading.className = "sheet-title";
+	heading.textContent = title;
+	const body = document.createElement("pre");
+	body.className = "sheet-text";
+	body.textContent = text;
+	const actions = document.createElement("div");
+	actions.className = "sheet-actions";
+	const close = document.createElement("button");
+	close.textContent = "close";
+	close.addEventListener("click", closeSheet);
+	actions.append(close);
+	target.append(heading, body, actions);
 }
 
 route();

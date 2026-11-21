@@ -247,6 +247,58 @@ details.tool.error > summary .tool-name { color: var(--err); }
 }
 details.tool.empty > summary { color: var(--fg-faint); }
 
+/* ---- bash cards (!cmd / !!cmd) ---- */
+.block.bash {
+	background: var(--bg-soft);
+	border: 1px solid var(--line);
+	border-left: 2px solid var(--fg-dim);
+	border-radius: 8px;
+	padding: 0;
+	overflow: hidden;
+}
+.block.bash .bash-head {
+	display: flex;
+	gap: 6px;
+	align-items: baseline;
+	padding: 7px 9px;
+	font-size: 12.5px;
+	border-bottom: 1px solid var(--line);
+}
+.block.bash .bash-prompt { color: var(--ok); }
+.block.bash .bash-cmd { flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.block.bash .badge {
+	font-size: 10px;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	border: 1px solid var(--line);
+	border-radius: 6px;
+	padding: 1px 5px;
+	color: var(--fg-faint);
+}
+.block.bash .badge.excluded { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+.block.bash .bash-out {
+	margin: 0;
+	padding: 9px;
+	font-size: 12.5px;
+	line-height: 1.4;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	max-height: 60dvh;
+	overflow: auto;
+	color: #cfc9e0;
+}
+.block.bash.empty .bash-out { display: none; }
+.block.bash .bash-meta {
+	padding: 0 9px 7px;
+	font-size: 11px;
+	color: var(--fg-faint);
+}
+.block.bash .bash-meta:empty { display: none; }
+.block.bash.running { border-left-color: var(--accent); }
+.block.bash.running .bash-meta { color: var(--accent); }
+.block.bash.error { border-left-color: var(--err); }
+.block.bash.error .bash-meta { color: var(--err); }
+
 /* ---- list ---- */
 #list { padding: var(--pad); display: flex; flex-direction: column; gap: 8px; overflow-y: auto; width: 100%; max-width: 760px; margin-inline: auto; }
 .row {
@@ -363,6 +415,16 @@ details.tool.empty > summary { color: var(--fg-faint); }
 	box-shadow: 0 -12px 40px #0008;
 }
 #sheet .sheet-title { font-size: 13px; color: var(--fg-dim); margin-bottom: 10px; white-space: pre-wrap; }
+#sheet .sheet-text {
+	margin: 0 0 10px;
+	max-height: 50dvh;
+	overflow-y: auto;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	font-size: 12.5px;
+	letter-spacing: 0;
+	color: var(--fg-dim);
+}
 #sheet .sheet-actions { display: flex; flex-direction: column; gap: 8px; }
 #sheet .sheet-actions button {
 	text-align: left;

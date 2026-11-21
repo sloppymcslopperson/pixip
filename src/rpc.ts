@@ -29,7 +29,18 @@ export interface RpcChildOptions {
 interface Pending {
 	resolve: (value: unknown) => void;
 	reject: (error: Error) => void;
-	timer: NodeJS.Timeout;
+	timer?: NodeJS.Timeout;
+}
+
+export interface CommandOptions {
+	/**
+	 * Response timeout. `0` means "wait forever": `prompt` (extension handlers
+	 * block on user dialogs) and `bash` (a build can run for minutes) opt out of
+	 * the default. Anything else keeps the 20 s default.
+	 */
+	timeoutMs?: number;
+	/** Caller-supplied RPC id, so streamed events can repeat it. */
+	id?: string;
 }
 
 export interface RpcResponse {
@@ -98,7 +109,7 @@ export class RpcChild {
 		this.child.on("exit", (code, signal) => {
 			this.exited = true;
 			for (const [, entry] of this.pending) {
-				clearTimeout(entry.timer);
+				if (entry.timer) clearTimeout(entry.timer);
 				entry.reject(new Error("pi exited before responding"));
 			}
 			this.pending.clear();
@@ -115,15 +126,20 @@ export class RpcChild {
 	}
 
 	/** Send a command and await its `response` record. */
-	command(command: Record<string, unknown>, timeoutMs = this.options.requestTimeoutMs ?? 20_000): Promise<unknown> {
+	command(command: Record<string, unknown>, options: CommandOptions = {}): Promise<unknown> {
 		if (!this.running) return Promise.reject(new Error("pi is not running"));
-		const id = `c${++this.seq}`;
+		const id = options.id ?? `c${++this.seq}`;
+		if (this.pending.has(id)) return Promise.reject(new Error(`command id ${id} is already pending`));
 		const payload = JSON.stringify({ ...command, id });
+		const timeoutMs = options.timeoutMs ?? this.options.requestTimeoutMs ?? 20_000;
 		return new Promise<unknown>((resolve, reject) => {
-			const timer = setTimeout(() => {
-				this.pending.delete(id);
-				reject(new Error(`timeout waiting for ${String(command.type)}`));
-			}, timeoutMs);
+			const timer =
+				timeoutMs > 0
+					? setTimeout(() => {
+							this.pending.delete(id);
+							reject(new Error(`timeout waiting for ${String(command.type)}`));
+						}, timeoutMs)
+					: undefined;
 			this.pending.set(id, { resolve, reject, timer });
 			this.write(payload);
 		});
@@ -162,7 +178,7 @@ export class RpcChild {
 			const entry = this.pending.get(typed.id);
 			if (entry) {
 				this.pending.delete(typed.id);
-				clearTimeout(entry.timer);
+				if (entry.timer) clearTimeout(entry.timer);
 				const response = record as RpcResponse;
 				if (response.success) entry.resolve(response.data);
 				else entry.reject(new Error(response.error ?? `command ${response.command} failed`));

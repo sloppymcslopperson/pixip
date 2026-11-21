@@ -22,6 +22,9 @@ interface Options {
 	piBin: string;
 	idleMs: number;
 	dev: boolean;
+	allowCommands: string[];
+	denyCommands: string[];
+	noBash: boolean;
 }
 
 function parseArgs(argv: string[]): Options {
@@ -32,6 +35,9 @@ function parseArgs(argv: string[]): Options {
 		piBin: "pi",
 		idleMs: 15 * 60_000,
 		dev: false,
+		allowCommands: [],
+		denyCommands: [],
+		noBash: false,
 	};
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index];
@@ -59,6 +65,15 @@ function parseArgs(argv: string[]): Options {
 			case "--dev":
 				options.dev = true;
 				break;
+			case "--allow-command":
+				options.allowCommands.push(next());
+				break;
+			case "--deny-command":
+				options.denyCommands.push(next());
+				break;
+			case "--no-bash":
+				options.noBash = true;
+				break;
 			case "--help":
 			case "-h":
 				printHelp();
@@ -83,6 +98,13 @@ Usage: pixip [options]
   --idle-ms <ms>      detach an idle session after this long, keeping its JSONL
                       for resume (default 900000; 0 disables)
   --dev               re-read client assets per request (no restart on CSS/JS edits)
+  --allow-command <name>
+                      allow only these commands (repeatable); merged with
+                      <data-dir>/pixip.json and <cwd>/.pixip.json, which can
+                      only narrow the result
+  --deny-command <name>
+                      block a command by name (repeatable); deny wins
+  --no-bash           disable !/!! (same as "bash": false in pixip.json)
 `);
 }
 
@@ -99,9 +121,15 @@ async function main(): Promise<void> {
 	const hub = new Hub({
 		piBin: options.piBin,
 		sessionsDir,
+		dataDir: options.dataDir,
 		indexPath: join(options.dataDir, "sessions.json"),
 		idleMs: options.idleMs,
 		extraPiArgs: [],
+		cliCommands: {
+			allow: options.allowCommands,
+			deny: options.denyCommands,
+			bash: !options.noBash,
+		},
 		log,
 	});
 

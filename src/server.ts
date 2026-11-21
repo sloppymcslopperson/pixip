@@ -5,7 +5,18 @@ import { extname, join, normalize } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 
 import { Hub } from "./hub.ts";
-import { frameError, frameHello, frameHistory, frameModels, frameSnapshot, frameThinking, WIRE_VERSION } from "./wire.ts";
+import {
+	frameBash,
+	frameBashError,
+	frameError,
+	frameHello,
+	frameHistory,
+	frameModels,
+	framePolicy,
+	frameSnapshot,
+	frameThinking,
+	WIRE_VERSION,
+} from "./wire.ts";
 import type { SessionInfo } from "./wire.ts";
 
 export interface ServerOptions {
@@ -199,6 +210,9 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 		// The index-only path lands on a new Pi id: tell the client before the
 		// snapshot so its URL and session key keep pointing at this transcript.
 		if (info.id !== sessionId) send(JSON.stringify({ t: "opened", session: info }));
+		// Policy is per session (cwd + data dir + CLI), so it goes on the session
+		// socket, not on the list; the composer needs it before the first submit.
+		send(framePolicy(hub.policy(info.id)));
 
 		// Subscribe *before* `get_entries` and buffer what the child emits in
 		// between, so a client connecting mid-turn cannot miss the start of a
@@ -299,12 +313,31 @@ async function handleCommand(
 			return;
 		}
 		switch (type) {
-			case "prompt":
-				await hub.prompt(sessionId, String(message["text"] ?? ""));
+			case "prompt": {
+				const behavior = message["streamingBehavior"] === "steer" ? "steer" : message["streamingBehavior"] === "followUp" ? "followUp" : undefined;
+				await hub.prompt(sessionId, String(message["text"] ?? ""), behavior);
 				break;
+			}
 			case "steer":
 				await hub.steer(sessionId, String(message["text"] ?? ""));
 				break;
+			case "bash": {
+				// The client owns the id: it paints the card optimistically and matches
+				// verbatim `bash_execution_update` events by it.
+				const bashId = typeof message["id"] === "string" ? message["id"] : "";
+				const command = String(message["command"] ?? "");
+				if (!bashId) {
+					send(frameError('"bash" needs an id'));
+					return;
+				}
+				try {
+					const result = await hub.bash(sessionId, bashId, command, message["excludeFromContext"] === true);
+					send(frameBash(bashId, command, message["excludeFromContext"] === true, result));
+				} catch (error) {
+					send(frameBashError(bashId, command, (error as Error).message));
+				}
+				return;
+			}
 			case "abort":
 				await hub.abort(sessionId);
 				break;
