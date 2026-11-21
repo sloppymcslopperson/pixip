@@ -26,6 +26,7 @@ import {
 	COLLAPSED_STORAGE_KEY,
 	KEEP_ACTIVE_STORAGE_KEY,
 	countLabel,
+	groupBranch,
 	groupLabel,
 	groupSessions,
 	groupView,
@@ -532,10 +533,19 @@ function renderGroup(group) {
 	path.className = "group-path";
 	path.textContent = groupLabel(group, state.home);
 	path.title = group.key || "unknown cwd";
+	const branch = groupBranch(group);
 	const count = document.createElement("span");
 	count.className = "group-count";
 	count.textContent = countLabel(group.sessions.length, view.hidden);
-	control.append(path, count);
+	control.append(path);
+	if (branch) {
+		const chip = document.createElement("span");
+		chip.className = "group-branch";
+		chip.textContent = branch;
+		chip.title = `git branch ${branch}`;
+		control.append(chip);
+	}
+	control.append(count);
 	head.append(control);
 	if (group.cwd) {
 		const add = document.createElement("button");

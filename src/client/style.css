@@ -404,6 +404,19 @@ details.tool.empty > summary { color: var(--fg-faint); }
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
+.group-branch {
+	flex: none;
+	max-width: 14ch;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	border: 1px solid var(--line);
+	border-radius: 999px;
+	padding: 1px 7px;
+	font-size: 10px;
+	line-height: 1.5;
+	color: var(--fg-faint);
+}
 .group-count { flex: none; font-size: 10.5px; color: var(--fg-faint); white-space: nowrap; }
 .group-new {
 	flex: none;

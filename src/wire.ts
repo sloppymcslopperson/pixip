@@ -71,6 +71,8 @@ export interface SessionInfo {
 	thinkingLevel?: string;
 	messageCount?: number;
 	sessionFile?: string;
+	/** Current git branch (or detached short SHA) for the dashboard chip. */
+	branch?: string;
 	lastActivity: number;
 }
 

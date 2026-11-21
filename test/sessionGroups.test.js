@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
 	countLabel,
+	groupBranch,
 	groupLabel,
 	groupSessions,
 	groupView,
@@ -123,6 +124,13 @@ describe("labels and storage", () => {
 		assert.equal(groupLabel(proj, "/home/x"), "~/proj");
 		assert.equal(groupLabel(proj, undefined), "/home/x/proj");
 		assert.equal(groupLabel({ key: "" }, "/home/x"), "unknown cwd");
+	});
+
+	it("reports the first git branch in a group", () => {
+		assert.equal(groupBranch({ sessions: [{ branch: "main" }, { branch: "other" }] }), "main");
+		assert.equal(groupBranch({ sessions: [{ branch: " main " }] }), "main");
+		assert.equal(groupBranch({ sessions: [{ branch: "" }, {}] }), "");
+		assert.equal(groupBranch(undefined), "");
 	});
 
 	it("normalizes bucket keys without swallowing the root path", () => {

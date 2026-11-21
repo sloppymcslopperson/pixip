@@ -94,6 +94,14 @@ export function groupLabel(group, home) {
 	return group?.key ? formatCwd(group.key, home) : "unknown cwd";
 }
 
+/** The group's git branch, if the hub reported one for any session in it. */
+export function groupBranch(group) {
+	for (const session of group?.sessions ?? []) {
+		if (typeof session?.branch === "string" && session.branch.trim()) return session.branch.trim();
+	}
+	return "";
+}
+
 /** Stored collapse map: only boolean values survive, malformed input is empty. */
 export function parseCollapsed(raw) {
 	if (typeof raw !== "string" || raw === "") return {};

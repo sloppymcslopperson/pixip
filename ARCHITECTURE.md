@@ -388,6 +388,12 @@ still the way to make the child itself fast, and is deliberately not done (1 vCP
   session visible; the engine is the pure `src/client/sessionGroups.js`. Collapse
   state and the pinning toggle are device-local (`localStorage`), and group paths
   are shortened with `home` from `/api/info`/`hello`;
+- each group header carries the git branch for its cwd. The hub resolves it once
+  per distinct cwd on the session-list path (`git rev-parse --abbrev-ref HEAD`,
+  cached ~5 s) and sends `branch` on the session info; subdirectories, worktrees
+  and submodules show the enclosing repo, detached HEAD shows the short SHA, and
+  a non-repo cwd has no chip. It is dashboard state only: nothing is added to the
+  streaming path or the transcript;
 
 - append-only DOM for live events; deltas buffered and flushed in one rAF
   (`textContent += …`), never a full re-render per delta;

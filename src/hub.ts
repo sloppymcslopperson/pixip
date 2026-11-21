@@ -169,6 +169,8 @@ export class Hub {
 	private readonly trashGraceMs: number;
 	/** Startup cleanup runs once; trash operations wait for it. */
 	private readonly startupTrash: Promise<void>;
+	/** Branch per cwd, so list refreshes do not run git every time. */
+	private readonly branchCache = new Map<string, { branch?: string; at: number }>();
 
 	constructor(options: HubOptions) {
 		this.options = options;
@@ -223,6 +225,14 @@ export class Hub {
 			});
 		}
 		infos.sort((a, b) => b.lastActivity - a.lastActivity);
+		// One git call per distinct cwd, shared by every session in that repo.
+		const branches = new Map<string, string | undefined>();
+		for (const info of infos) {
+			if (!info.cwd) continue;
+			if (!branches.has(info.cwd)) branches.set(info.cwd, await this.gitBranch(info.cwd));
+			const branch = branches.get(info.cwd);
+			if (branch) info.branch = branch;
+		}
 		return infos;
 	}
 
@@ -1275,12 +1285,23 @@ export class Hub {
 	}
 
 	private async gitBranch(cwd: string): Promise<string | undefined> {
+		const cached = this.branchCache.get(cwd);
+		if (cached && Date.now() - cached.at < 5000) return cached.branch;
+		let branch: string | undefined;
 		try {
-			const { stdout } = await run("git", ["-C", cwd, "branch", "--show-current"], { timeout: 2000 });
-			return stdout.trim() || undefined;
+			const { stdout } = await run("git", ["-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"], { timeout: 2000 });
+			branch = stdout.trim() || undefined;
+			if (branch === "HEAD") {
+				// Detached HEAD: show the abbreviated commit instead of a bare "HEAD".
+				const sha = await run("git", ["-C", cwd, "rev-parse", "--short", "HEAD"], { timeout: 2000 });
+				branch = sha.stdout.trim() || undefined;
+			}
 		} catch {
-			return undefined;
+			// Not a repo (or git unavailable): no chip, never an error in the list.
+			branch = undefined;
 		}
+		this.branchCache.set(cwd, { branch, at: Date.now() });
+		return branch;
 	}
 
 	// ------------------------------------------------------------ session index
