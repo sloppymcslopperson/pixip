@@ -15,6 +15,29 @@ const option = (name) => {
 	return at >= 0 ? argv[at + 1] : undefined;
 };
 
+// One-shot print mode: the title summarizer calls `pi --print` and must not
+// touch the session store. Tests can set the reply, fail it, or delay it.
+if (argv.includes("--print") || argv.includes("-p")) {
+	const title = env.FAKE_PI_TITLE ?? "Fake session label";
+	const logTitle = () => {
+		if (env.FAKE_PI_LOG) {
+			appendFileSync(
+				env.FAKE_PI_LOG,
+				`${JSON.stringify({ type: "title", args: argv, title, pid: process.pid })}\n`,
+			);
+		}
+	};
+	if (env.FAKE_PI_TITLE_FAIL === "1") {
+		logTitle();
+		process.exit(1);
+	}
+	const titleDelay = Number(env.FAKE_PI_TITLE_DELAY_MS ?? 0);
+	if (titleDelay > 0) await new Promise((resolve) => setTimeout(resolve, titleDelay));
+	logTitle();
+	process.stdout.write(`${title}\n`);
+	process.exit(0);
+}
+
 const sessionDir = option("--session-dir") ?? process.cwd();
 const requested = option("--session");
 let sessionName = option("--name") ?? env.FAKE_PI_NAME;

@@ -66,6 +66,9 @@ do in the TUI.
   home-fenced directory picker (`browse`), or from a group's `+`, open, stop,
   wake/reattach; collapsing keeps hot/warm sessions and each group's newest
   session visible by default, configurable from the header gear;
+- first-prompt session labels: a separate one-shot Pi call summarizes the first
+  prompt to 3-5 words (`--title-model` / `PIXIP_TITLE_MODEL`, cheap default,
+  local fallback), while a manual rename always wins;
 - streamed transcript: user/assistant text, thinking collapsed, tool calls with
   ANSI output, error styling, durations;
 - composer: send while idle, steer while streaming, abort via `stop`;

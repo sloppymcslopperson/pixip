@@ -8,10 +8,12 @@ import { RpcChild } from "./rpc.ts";
 import { resolveSessionPolicy, type CommandLayer } from "./commands.ts";
 import { resolveModelArgument, resolveThinkingArgument } from "./client/commands.js";
 import { exportFileName } from "./client/sessionInfo.js";
+import { fallbackTitle, normalizeTitle, titlePrompt } from "./titles.ts";
 import { frameError, frameEvent, frameFooter, frameModels, framePolicy, frameSessions, frameSnapshot, frameStatus } from "./wire.ts";
 import type { BashResult, CommandPolicy, DynamicCommand, FooterData, ModelSummary, SessionInfo, SessionState } from "./wire.ts";
 
 const run = promisify(execFile);
+const DEFAULT_TITLE_MODEL = "deepseek-v4.1-flash";
 
 /**
  * The supervisor. One `pi --mode rpc` child per live session, nothing else.
@@ -43,8 +45,15 @@ interface HubOptions {
 	promptTimeoutMs?: number;
 	/** Extra environment for every child; `process.env` is inherited first. */
 	env?: Record<string, string | undefined>;
+	/** Model for automatic session labels (`provider/id`); falls back to a cheap default. */
+	titleModel?: string;
+	/** One-shot title call timeout. Default 15 s. */
+	titleTimeoutMs?: number;
 	log: (message: string) => void;
 }
+
+/** Who owns the session name; a manual rename always wins over the auto label. */
+export type NameSource = "auto" | "manual";
 
 /**
  * One logical session, as recorded in `<data-dir>/sessions.json`.
@@ -64,6 +73,8 @@ export interface SessionIndexRecord {
 	piIds: string[];
 	cwd: string;
 	name?: string;
+	/** Whether `name` came from the first-prompt label or a user rename. */
+	nameSource?: NameSource;
 	sessionFile?: string;
 	createdAt: string;
 }
@@ -89,6 +100,9 @@ interface LiveSession {
 	bashId?: string;
 	/** Timestamp of the assistant message currently streaming (or last done). */
 	assistantTs?: number;
+	/** The automatic title has already been attempted for this session. */
+	titleAttempted?: boolean;
+	nameSource?: NameSource;
 }
 
 /**
@@ -372,6 +386,11 @@ export class Hub {
 	async prompt(id: string, text: string, streamingBehavior?: "steer" | "followUp"): Promise<void> {
 		const live = this.require(id);
 		this.touch(live);
+		// The title call runs beside the real prompt; never wait for it here.
+		if (!live.titleAttempted && !live.info.name && (live.info.messageCount ?? 0) === 0 && text.trim()) {
+			live.titleAttempted = true;
+			void this.autoLabel(live, text);
+		}
 		try {
 			await live.proc.command(
 				{ type: "prompt", message: text, ...(streamingBehavior ? { streamingBehavior } : {}) },
@@ -577,11 +596,94 @@ export class Hub {
 	}
 
 	/** `/name <name>`: Pi appends the rename and emits `session_info_changed`. */
-	async setName(id: string, name: string): Promise<void> {
+	async setName(id: string, name: string, source: NameSource = "manual"): Promise<void> {
 		const live = this.require(id);
-		await live.proc.command({ type: "set_session_name", name });
+		const previous = { name: live.info.name, source: live.nameSource };
+		// Set before the command so the matching `session_info_changed` event does
+		// not mistake our own auto label for an external (manual) rename.
 		live.info.name = name;
+		live.nameSource = source;
+		try {
+			await live.proc.command({ type: "set_session_name", name });
+		} catch (error) {
+			live.info.name = previous.name;
+			live.nameSource = previous.source;
+			this.emitStatus(live);
+			throw error;
+		}
 		this.emitStatus(live);
+		if (live.info.logicalId) {
+			await this.upsertIndex(live.info, live.info.logicalId, undefined, source).catch((error: unknown) => {
+				this.options.log(`session index write failed: ${(error as Error).message}`);
+			});
+		}
+	}
+
+	/**
+	 * First-prompt label: ask a one-shot child with no session/tools/extensions,
+	 * then set the name only if the session is still unnamed. The real prompt has
+	 * already been dispatched; nothing here is on its critical path.
+	 */
+	private async autoLabel(live: LiveSession, prompt: string): Promise<void> {
+		let title = "";
+		try {
+			const model = await this.resolveTitleModel(live);
+			title = normalizeTitle(await this.runTitlePi(live, prompt, model));
+		} catch (error) {
+			this.options.log(`auto title failed for ${live.info.id}: ${(error as Error).message}`);
+		}
+		if (!title) title = fallbackTitle(prompt);
+		if (!title || this.live.get(live.info.id) !== live || live.info.name) return;
+		try {
+			await this.setName(live.info.id, title, "auto");
+		} catch (error) {
+			this.options.log(`auto title apply failed for ${live.info.id}: ${(error as Error).message}`);
+		}
+	}
+
+	/** Configured model, then the cheap default, then the session's own model. */
+	private async resolveTitleModel(live: LiveSession): Promise<string | undefined> {
+		const requested = this.options.titleModel?.trim();
+		let models: ModelSummary[] = [];
+		try {
+			models = (await this.models(live.info.id)).models;
+		} catch {
+			// A session with no model discovery still gets the configured/default id.
+		}
+		const resolve = (query: string): ModelSummary | undefined => {
+			const result = resolveModelArgument(models, query) as { model?: ModelSummary };
+			return result.model;
+		};
+		const sessionModel = models.find((model) => model.id === live.info.model) ?? (models.length === 1 ? models[0] : undefined);
+		const chosen = requested
+			? resolve(requested) ?? sessionModel
+			: resolve(DEFAULT_TITLE_MODEL) ?? sessionModel;
+		if (!chosen) return requested || undefined;
+		return chosen.provider ? `${chosen.provider}/${chosen.id}` : chosen.id;
+	}
+
+	private async runTitlePi(live: LiveSession, prompt: string, model?: string): Promise<string> {
+		const args = [
+			"--print",
+			"--no-session",
+			"--no-tools",
+			"--no-extensions",
+			"--no-skills",
+			"--no-prompt-templates",
+			"--no-context-files",
+			"--no-mcp",
+			"--thinking",
+			"off",
+		];
+		if (model) args.push("--model", model);
+		args.push(titlePrompt(prompt));
+		const { stdout } = await run(this.options.piBin, args, {
+			cwd: live.info.cwd,
+			env: { ...process.env, ...this.options.env },
+			timeout: this.options.titleTimeoutMs ?? 15_000,
+			maxBuffer: 256 * 1024,
+		});
+		return stdout;
 	}
 
 	/** `/compact [instructions]`: manual compaction; the client resnapshots after. */
@@ -684,7 +786,7 @@ export class Hub {
 			sessionFile: target,
 			lastActivity: Date.now(),
 		};
-		await this.upsertIndex(imported, logicalId);
+		await this.upsertIndex(imported, logicalId, undefined, imported.name ? "manual" : undefined);
 
 		// The live session now *is* the imported one: follow its identity and cwd.
 		live.info.logicalId = logicalId;
@@ -698,7 +800,9 @@ export class Hub {
 		const info = await this.rekeyFromState(live);
 		if (!info.name && imported.name) {
 			info.name = imported.name;
+			live.nameSource = "manual";
 			this.emitStatus(live);
+			if (info.logicalId) await this.upsertIndex(info, info.logicalId, undefined, "manual");
 		}
 		return { info, cancelled: false };
 	}
@@ -764,6 +868,7 @@ export class Hub {
 
 		const info = live.info;
 		const previous = info.id;
+		const previousName = info.name;
 		info.id = state.sessionId;
 		info.sessionFile = state.sessionFile ?? info.sessionFile;
 		info.name = state.sessionName;
@@ -772,11 +877,13 @@ export class Hub {
 		info.messageCount = state.messageCount ?? 0;
 		info.state = state.isStreaming ? "busy" : "idle";
 		info.lastActivity = Date.now();
+		if (info.name !== previousName) live.nameSource = info.name ? "manual" : undefined;
+		if (previous !== info.id) live.titleAttempted = false;
 		this.live.delete(previous);
 		this.live.set(info.id, live);
 
 		if (info.logicalId) {
-			await this.upsertIndex(info, info.logicalId).catch((error: unknown) => {
+			await this.upsertIndex(info, info.logicalId, undefined, live.nameSource).catch((error: unknown) => {
 				this.options.log(`session index write failed: ${(error as Error).message}`);
 			});
 		}
@@ -885,6 +992,11 @@ export class Hub {
 		info.messageCount = state.messageCount;
 		info.state = state.isStreaming ? "busy" : "idle";
 		info.lastActivity = Date.now();
+		const existing = await this.findRecord(logicalId);
+		live.nameSource = existing?.nameSource;
+		if (info.name !== undefined) {
+			live.nameSource = existing?.name === info.name ? existing.nameSource : "manual";
+		}
 
 		// Resolve the command policy before the session is usable: a malformed
 		// config fails the attach with the file path instead of silently allowing
@@ -909,7 +1021,7 @@ export class Hub {
 
 		// Persist the logical -> Pi id mapping. A broken index must never take a
 		// session down, so a failed write is only logged.
-		await this.upsertIndex(info, logicalId, input.createdAt).catch((error: unknown) => {
+		await this.upsertIndex(info, logicalId, input.createdAt, live.nameSource).catch((error: unknown) => {
 			this.options.log(`session index write failed: ${(error as Error).message}`);
 		});
 
@@ -944,6 +1056,7 @@ export class Hub {
 				this.scheduleIdle(target);
 				break;
 			case "session_info_changed":
+				if (target.info.name !== typed.name) target.nameSource = "manual";
 				target.info.name = typed.name;
 				this.emitStatus(target);
 				void this.persistName(target);
@@ -1075,18 +1188,28 @@ export class Hub {
 		return records.find((record) => record.logicalId === id || record.piId === id || record.piIds.includes(id));
 	}
 
-	private async upsertIndex(info: SessionInfo, logicalId: string, createdAt?: string): Promise<void> {
+	private async upsertIndex(
+		info: SessionInfo,
+		logicalId: string,
+		createdAt?: string,
+		nameSource?: NameSource,
+	): Promise<void> {
 		if (!info.id) return;
 		await this.mutateIndex((records) => {
 			const existing = records.find((record) => record.logicalId === logicalId);
 			const piIds = existing ? [...existing.piIds] : [];
 			if (!piIds.includes(info.id)) piIds.push(info.id);
+			const name = info.name ?? existing?.name;
+			const source =
+				nameSource ??
+				(info.name !== undefined && existing?.name !== info.name ? "manual" : existing?.nameSource);
 			const next: SessionIndexRecord = {
 				logicalId,
 				piId: info.id,
 				piIds,
 				cwd: info.cwd,
-				name: info.name ?? existing?.name,
+				name,
+				nameSource: source,
 				sessionFile: info.sessionFile ?? existing?.sessionFile,
 				createdAt: existing?.createdAt ?? createdAt ?? new Date().toISOString(),
 			};
@@ -1111,14 +1234,13 @@ export class Hub {
 	}
 
 	/**
-	 * A rename of a never-prompted session exists only in memory, so persist it
-	 * to the index. Once the JSONL exists, the file stays the source of truth.
+	 * Names live in the JSONL once it exists, but `nameSource` is index-owned:
+	 * write both so a restart knows an auto label from a manual rename.
 	 */
 	private async persistName(live: LiveSession): Promise<void> {
 		const { info } = live;
 		if (!info.logicalId) return;
-		if (info.sessionFile && (await pathExists(info.sessionFile))) return;
-		await this.upsertIndex(info, info.logicalId).catch((error: unknown) => {
+		await this.upsertIndex(info, info.logicalId, undefined, live.nameSource).catch((error: unknown) => {
 			this.options.log(`session index write failed: ${(error as Error).message}`);
 		});
 	}
@@ -1311,6 +1433,7 @@ function normalizeRecord(raw: unknown, fallbackCwd: string): SessionIndexRecord[
 			piIds: piIds.includes(record.piId) ? piIds : [...piIds, record.piId],
 			cwd: typeof record.cwd === "string" ? record.cwd : fallbackCwd,
 			name: typeof record.name === "string" ? record.name : undefined,
+			nameSource: record.nameSource === "auto" || record.nameSource === "manual" ? record.nameSource : undefined,
 			sessionFile: typeof record.sessionFile === "string" ? record.sessionFile : undefined,
 			createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
 		},

@@ -50,6 +50,7 @@ interface Options {
 	dataDir: string;
 	piBin: string;
 	idleMs: number;
+	titleModel: string;
 	dev: boolean;
 	allowCommands: string[];
 	denyCommands: string[];
@@ -77,6 +78,7 @@ function parseArgs(argv: string[], command: Command): Options {
 		dataDir: resolve("tmp/dev"),
 		piBin: "pi",
 		idleMs: 15 * 60_000,
+		titleModel: process.env["PIXIP_TITLE_MODEL"] ?? "",
 		dev: false,
 		allowCommands: [],
 		denyCommands: [],
@@ -111,6 +113,9 @@ function parseArgs(argv: string[], command: Command): Options {
 				break;
 			case "--idle-ms":
 				options.idleMs = Number(next());
+				break;
+			case "--title-model":
+				options.titleModel = next();
 				break;
 			case "--dev":
 				options.dev = true;
@@ -173,6 +178,9 @@ function printHelp(): void {
   --pi <path>         pi executable (default: pi from PATH)
   --idle-ms <ms>      detach an idle session after this long, keeping its JSONL
                       for resume (default 900000; 0 disables)
+  --title-model <p/id> model for the automatic 3-5 word session label
+                      (default: cheap deepseek-v4.1-flash when available,
+                      else the session model; env: PIXIP_TITLE_MODEL)
   --dev               re-read client assets per request (no restart on CSS/JS edits)
   --allow-command <name>
                       allow only these commands (repeatable); merged with
@@ -273,6 +281,7 @@ async function serve(options: Options): Promise<void> {
 		dataDir: options.dataDir,
 		indexPath: join(options.dataDir, "sessions.json"),
 		idleMs: options.idleMs,
+		titleModel: options.titleModel,
 		extraPiArgs: [],
 		cliCommands: {
 			allow: options.allowCommands,
