@@ -65,6 +65,11 @@ and holds `scrollHeight - scrollTop` constant so a prepend never moves the view.
 Transient states are explicit: `starting` (child booting, provisional paint),
 `busy` (agent running), `idle`, `stopped` (JSONL only), `error` (child died).
 
+A stopped session keeps its name: the disk scan reads the JSONL header (first
+line) plus `session_info` records from the first ~20 lines and from a bounded
+16 KB tail, so a rename late in the session still shows. Header and name share
+one mtime-cached entry per file; no whole-file read is needed to list.
+
 ## Wire protocol v1
 
 All frames are JSON text on one websocket. `v` is bumped on breaking change.

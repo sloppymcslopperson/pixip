@@ -59,6 +59,9 @@ export const ENTRY_TEXT_LIMIT = 8 * 1024;
 const EARLIER_BYTES_CAP = 4 * 1024 * 1024;
 /** Header scan: first line only, bounded so a 17 MB session costs one small read. */
 const HEAD_BYTES = 8 * 1024;
+/** Name scan: first ~20 lines, plus a bounded tail for sessions renamed later. */
+const NAME_HEAD_LINES = 20;
+const NAME_TAIL_BYTES = 16 * 1024;
 
 export class Hub {
 	private readonly options: HubOptions;
@@ -87,6 +90,7 @@ export class Hub {
 			infos.push({
 				id: header.id,
 				cwd: header.cwd,
+				name: header.name,
 				state: "stopped",
 				sessionFile: path,
 				lastActivity: Date.parse(header.timestamp) || 0,
@@ -587,14 +591,30 @@ export class Hub {
 		if (cached && cached.mtimeMs === mtimeMs) return cached.header;
 		try {
 			const head = await readHead(path, HEAD_BYTES);
-			const firstLine = head.text.slice(0, head.text.indexOf("\n") === -1 ? head.text.length : head.text.indexOf("\n"));
+			const headLines = head.text.split("\n");
+			const firstLine = headLines[0] ?? "";
 			if (firstLine.length === 0) return undefined;
 			const parsed = JSON.parse(firstLine) as { type?: string; id?: string; cwd?: string; timestamp?: string };
 			if (parsed.type !== "session" || !parsed.id) return undefined;
+
+			// Names live in `session_info` records: the head pass covers the common
+			// case, the bounded tail pass covers a rename later in the session.
+			let name = nameFromLines(headLines.slice(0, NAME_HEAD_LINES));
+			try {
+				const tail = await readFromEnd(path, NAME_TAIL_BYTES);
+				const tailLines = tail.text.split("\n");
+				// A read that starts mid-file begins with a partial line.
+				if (tail.offset > 0) tailLines.shift();
+				name = nameFromLines(tailLines) ?? name;
+			} catch {
+				// Unreadable tail: keep whatever the head found.
+			}
+
 			const header: SessionHeader = {
 				id: parsed.id,
 				cwd: parsed.cwd ?? this.options.sessionsDir,
 				timestamp: parsed.timestamp ?? new Date(mtimeMs).toISOString(),
+				name,
 			};
 			this.files.set(path, { mtimeMs, header });
 			return header;
@@ -663,6 +683,24 @@ export function parseEntries(text: string, options: { maxEntries?: number; dropF
 		}
 	}
 	return entries;
+}
+
+/** Last non-empty `session_info` name in a run of JSONL lines. */
+function nameFromLines(lines: string[]): string | undefined {
+	let name: string | undefined;
+	for (const line of lines) {
+		const trimmed = line.trim();
+		if (!trimmed) continue;
+		try {
+			const record = JSON.parse(trimmed) as { type?: unknown; name?: unknown };
+			if (record.type === "session_info" && typeof record.name === "string" && record.name.trim()) {
+				name = record.name;
+			}
+		} catch {
+			// Truncated or corrupt record: skip it, keep the name found so far.
+		}
+	}
+	return name;
 }
 
 /** Drop the JSONL header record: only transcript entries belong in a window. */
