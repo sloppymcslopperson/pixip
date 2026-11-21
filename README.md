@@ -66,6 +66,10 @@ do in the TUI.
 - streamed transcript: user/assistant text, thinking collapsed, tool calls with
   ANSI output, error styling, durations;
 - composer: send while idle, steer while streaming, abort via `stop`;
+- per-session model and thinking level, picked from the footer (`get_available_models`
+  / `set_model`, `get_available_thinking_levels` / `set_thinking_level`);
+- the TUI status line: pwd + branch + session name, token totals, cost, context
+  usage with the TUI's thresholds, and `model • thinkingLevel`;
 - extension dialogs (`select`/`confirm`/`input`/`editor`) rendered as a sheet and
   answered from the phone; `notify` as a toast;
 - reconnect with backoff + snapshot replay;
@@ -75,6 +79,9 @@ do in the TUI.
 
 - persisted session *names* for stopped sessions (they live in the JSONL, the hub
   only reads the header today);
+- TUI visual parity: markdown rendering, diff/syntax colouring and the TUI's own
+  theme colours (see the parity ticket — theme values are `okhsl`, which browsers
+  do not support without conversion);
 - an index for sessions that have no messages yet (Pi writes the JSONL on first
   message, so an empty session disappears after detach);
 - fork/clone/switch-session commands, worktree creation, model picker, compaction

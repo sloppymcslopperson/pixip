@@ -9,6 +9,28 @@
 
 export const WIRE_VERSION = 1;
 
+/** Everything the TUI footer shows, unformatted: the client formats it. */
+export interface FooterData {
+	cwd: string;
+	home: string;
+	branch?: string;
+	name?: string;
+	tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
+	cost: number;
+	context: { percent: number | null; window: number };
+	autoCompact: boolean;
+	model: { id: string; provider: string; reasoning: boolean } | null;
+	thinking: string;
+	providerCount: number;
+}
+
+export interface ModelSummary {
+	id: string;
+	provider: string;
+	contextWindow?: number;
+	reasoning?: boolean;
+}
+
 export type SessionState = "starting" | "idle" | "busy" | "stopped" | "error";
 
 export interface SessionInfo {
@@ -42,6 +64,18 @@ export function frameStatus(session: SessionInfo): string {
 
 export function frameError(message: string): string {
 	return JSON.stringify({ t: "error", message });
+}
+
+export function frameFooter(footer: FooterData): string {
+	return JSON.stringify({ t: "footer", footer });
+}
+
+export function frameModels(models: ModelSummary[], current: string | null): string {
+	return JSON.stringify({ t: "models", models, current });
+}
+
+export function frameThinking(levels: string[], current: string): string {
+	return JSON.stringify({ t: "thinking", levels, current });
 }
 
 export function frameHello(sessions: SessionInfo[], defaultCwd?: string): string {

@@ -1,9 +1,13 @@
+import { execFile } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { promisify } from "node:util";
 
 import { RpcChild } from "./rpc.ts";
-import { frameError, frameEvent, frameSessions, frameSnapshot, frameStatus } from "./wire.ts";
-import type { SessionInfo, SessionState } from "./wire.ts";
+import { frameError, frameEvent, frameFooter, frameModels, frameSessions, frameSnapshot, frameStatus } from "./wire.ts";
+import type { FooterData, ModelSummary, SessionInfo, SessionState } from "./wire.ts";
+
+const run = promisify(execFile);
 
 /**
  * The supervisor. One `pi --mode rpc` child per live session, nothing else.
@@ -36,6 +40,8 @@ interface LiveSession {
 	info: SessionInfo;
 	subs: Set<(frame: string) => void>;
 	idleTimer?: NodeJS.Timeout;
+	branch?: string;
+	footerTimer?: NodeJS.Timeout;
 }
 
 type Subscriber = (frame: string) => void;
@@ -148,6 +154,40 @@ export class Hub {
 		await live.proc.command({ type: "abort" });
 	}
 
+	async models(id: string): Promise<{ models: ModelSummary[]; current: string | null }> {
+		const live = this.require(id);
+		const data = (await live.proc.command({ type: "get_available_models" })) as { models?: ModelSummary[] };
+		const models = (data.models ?? []).map((model) => ({
+			id: String(model.id),
+			provider: String(model.provider),
+			contextWindow: model.contextWindow,
+			reasoning: model.reasoning,
+		}));
+		return { models, current: live.info.model ?? null };
+	}
+
+	async setModel(id: string, provider: string, modelId: string): Promise<void> {
+		const live = this.require(id);
+		const data = (await live.proc.command({ type: "set_model", provider, modelId })) as { id?: string; provider?: string };
+		live.info.model = data.id ?? modelId;
+		this.emitStatus(live);
+		await this.sendFooter(live);
+	}
+
+	async thinkingLevels(id: string): Promise<{ levels: string[]; current: string }> {
+		const live = this.require(id);
+		const data = (await live.proc.command({ type: "get_available_thinking_levels" })) as { levels?: string[] };
+		return { levels: data.levels ?? ["off"], current: live.info.thinkingLevel ?? "off" };
+	}
+
+	async setThinking(id: string, level: string): Promise<void> {
+		const live = this.require(id);
+		await live.proc.command({ type: "set_thinking_level", level });
+		live.info.thinkingLevel = level;
+		this.emitStatus(live);
+		await this.sendFooter(live);
+	}
+
 	/** Answer an extension dialog (`ctx.ui.confirm` and friends) from the phone. */
 	uiResponse(id: string, requestId: string, fields: Record<string, unknown>): void {
 		const live = this.require(id);
@@ -254,6 +294,7 @@ export class Hub {
 				target.info.state = "idle";
 				target.info.lastActivity = Date.now();
 				this.emitStatus(target);
+				this.scheduleFooter(target);
 				this.scheduleIdle(target);
 				break;
 			case "session_info_changed":
@@ -263,6 +304,14 @@ export class Hub {
 			case "message_end": {
 				const message = typed.message as { role?: string } | undefined;
 				if (message?.role === "user") target.info.messageCount = (target.info.messageCount ?? 0) + 1;
+				if (message?.role === "assistant") this.scheduleFooter(target);
+				break;
+			}
+			case "thinking_level_changed": {
+				const level = (typed as { level?: string }).level;
+				if (level) target.info.thinkingLevel = level;
+				this.emitStatus(target);
+				this.scheduleFooter(target);
 				break;
 			}
 			default:
@@ -275,6 +324,82 @@ export class Hub {
 	private pendingSession(info: SessionInfo): LiveSession | undefined {
 		const candidate = this.live.get(SYMBOL_PENDING);
 		return candidate && candidate.info === info ? candidate : undefined;
+	}
+
+	// ---------------------------------------------------------------- footer
+
+	/**
+	 * The TUI footer, as data: cwd (with branch and session name), usage totals,
+	 * context usage, and the model/thinking pair. Formatting lives in the client so
+	 * this stays a thin passthrough of `get_session_stats` + `get_state`.
+	 */
+	async footer(id: string): Promise<FooterData> {
+		const live = this.require(id);
+		const [stats, state] = await Promise.all([
+			live.proc.command({ type: "get_session_stats" }) as Promise<{
+				tokens?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+				cost?: number;
+				contextUsage?: { percent?: number | null; contextWindow?: number };
+			}>,
+			live.proc.command({ type: "get_state" }) as Promise<{
+				model?: { id?: string; provider?: string; reasoning?: boolean; contextWindow?: number };
+				thinkingLevel?: string;
+				autoCompactionEnabled?: boolean;
+			}>,
+		]);
+		if (!live.branch) live.branch = await this.gitBranch(live.info.cwd);
+		return {
+			cwd: live.info.cwd,
+			home: process.env["HOME"] ?? "",
+			branch: live.branch,
+			name: live.info.name,
+			tokens: {
+				input: stats.tokens?.input ?? 0,
+				output: stats.tokens?.output ?? 0,
+				cacheRead: stats.tokens?.cacheRead ?? 0,
+				cacheWrite: stats.tokens?.cacheWrite ?? 0,
+			},
+			cost: stats.cost ?? 0,
+			context: {
+				percent: stats.contextUsage?.percent ?? null,
+				window: stats.contextUsage?.contextWindow ?? state.model?.contextWindow ?? 0,
+			},
+			autoCompact: state.autoCompactionEnabled ?? true,
+			model: state.model?.id
+				? {
+						id: state.model.id,
+						provider: state.model.provider ?? "",
+						reasoning: Boolean(state.model.reasoning),
+					}
+				: null,
+			thinking: state.thinkingLevel ?? live.info.thinkingLevel ?? "off",
+			providerCount: 0,
+		};
+	}
+
+	async sendFooter(live: LiveSession): Promise<void> {
+		try {
+			this.broadcast(live, frameFooter(await this.footer(live.info.id)));
+		} catch {
+			// a session that is mid-shutdown has no footer to send
+		}
+	}
+
+	private scheduleFooter(live: LiveSession): void {
+		if (live.footerTimer) return;
+		live.footerTimer = setTimeout(() => {
+			live.footerTimer = undefined;
+			void this.sendFooter(this.live.get(live.info.id) ?? live);
+		}, 150);
+	}
+
+	private async gitBranch(cwd: string): Promise<string | undefined> {
+		try {
+			const { stdout } = await run("git", ["-C", cwd, "branch", "--show-current"], { timeout: 2000 });
+			return stdout.trim() || undefined;
+		} catch {
+			return undefined;
+		}
 	}
 
 	// --------------------------------------------------------------- plumbing

@@ -5,7 +5,7 @@ import { extname, join, normalize } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 
 import { Hub } from "./hub.ts";
-import { frameError, frameHello, frameSnapshot, WIRE_VERSION } from "./wire.ts";
+import { frameError, frameHello, frameModels, frameSnapshot, frameThinking, WIRE_VERSION } from "./wire.ts";
 
 export interface ServerOptions {
 	host: string;
@@ -150,6 +150,9 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 		send(frameSnapshot(snapshot.info, snapshot.entries, snapshot.leafId));
 		subscriptions.push(hub.subscribe(sessionId, send));
 		subscriptions.push(hub.watch((frame) => send(frame)));
+		void hub.footer(sessionId).then((footer) => {
+			send(JSON.stringify({ t: "footer", footer }));
+		});
 	} catch (error) {
 		send(frameError((error as Error).message));
 	}
@@ -207,6 +210,24 @@ async function handleCommand(
 			case "abort":
 				await hub.abort(sessionId);
 				break;
+			case "models": {
+				const result = await hub.models(sessionId);
+				send(frameModels(result.models, result.current));
+				break;
+			}
+			case "set_model": {
+				await hub.setModel(sessionId, String(message["provider"] ?? ""), String(message["modelId"] ?? ""));
+				break;
+			}
+			case "thinking": {
+				const result = await hub.thinkingLevels(sessionId);
+				send(frameThinking(result.levels, result.current));
+				break;
+			}
+			case "set_thinking": {
+				await hub.setThinking(sessionId, String(message["level"] ?? "off"));
+				break;
+			}
 			case "ui": {
 				const requestId = String(message["id"] ?? "");
 				const fields: Record<string, unknown> = {};

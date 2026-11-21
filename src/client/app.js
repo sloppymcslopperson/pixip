@@ -10,6 +10,12 @@ import {
 	toolBlock,
 	toolCallsOf,
 } from "./render.js";
+import {
+	contextLevel,
+	footerPwdLine,
+	footerStatsLeft,
+	footerStatsRight,
+} from "./footer.js";
 
 const $ = (selector) => document.querySelector(selector);
 const ui = {
@@ -25,6 +31,7 @@ const ui = {
 	composer: $("#composer"),
 	input: $("#input"),
 	send: $("#send"),
+	footer: $("#footer"),
 	sheet: $("#sheet"),
 	toast: $("#toast"),
 };
@@ -40,6 +47,9 @@ const state = {
 	tools: new Map(), // toolCallId -> <details>
 	coarse: window.matchMedia("(pointer: coarse)").matches,
 	renderQueued: false,
+	footer: null,
+	models: [],
+	levels: [],
 };
 
 // ------------------------------------------------------------------ transport
@@ -106,6 +116,7 @@ async function showList() {
 	state.pendingUser = null;
 	ui.session.hidden = true;
 	ui.composer.hidden = true;
+	ui.footer.hidden = true;
 	ui.stop.hidden = true;
 	ui.back.hidden = true;
 	ui.list.hidden = false;
@@ -173,6 +184,7 @@ function openSession(id) {
 	ui.list.hidden = true;
 	ui.session.hidden = false;
 	ui.composer.hidden = false;
+	ui.footer.hidden = false;
 	ui.stop.hidden = false;
 	ui.back.hidden = false;
 	ui.log.textContent = "";
@@ -209,6 +221,18 @@ function handleFrame(frame) {
 			break;
 		case "event":
 			handleEvent(frame.ev);
+			break;
+		case "footer":
+			state.footer = frame.footer;
+			renderFooter();
+			break;
+		case "models":
+			state.models = frame.models ?? [];
+			openModelSheet(frame.current);
+			break;
+		case "thinking":
+			state.levels = frame.levels ?? [];
+			openThinkingSheet(frame.current);
 			break;
 		case "error":
 			toast(frame.message);
@@ -342,7 +366,9 @@ function handleEvent(event) {
 			break;
 		}
 		case "tool_execution_start": {
-			const html = toolBlock(event.toolName, summarizeArgs(event.toolName, event.args), "", "", null, event.toolCallId);
+			const summary = summarizeArgs(event.toolName, event.args);
+			if (!event.toolName && !summary) break;
+			const html = toolBlock(event.toolName, summary, "", "", null, event.toolCallId);
 			const el = appendBlock("", html, true);
 			el.classList.add("tool-host");
 			if (event.toolCallId && el.firstElementChild) state.tools.set(event.toolCallId, el.firstElementChild);
@@ -419,6 +445,95 @@ function scheduleFlush(target) {
 		target.textContent += text;
 		scheduleScroll();
 	});
+}
+
+// -------------------------------------------------------------------- footer
+
+function renderFooter() {
+	const footer = state.footer;
+	if (!footer) return;
+	const pwd = ui.footer.querySelector(".pwd");
+	const left = ui.footer.querySelector(".left");
+	const right = ui.footer.querySelector(".right");
+	pwd.textContent = footerPwdLine(footer);
+	left.textContent = footerStatsLeft(footer);
+	left.dataset.level = contextLevel(footer);
+	right.textContent = footerStatsRight(footer);
+}
+
+ui.footer.addEventListener("click", () => {
+	if (!state.sessionId) return;
+	openSessionSheet();
+});
+
+function openSessionSheet() {
+	const footer = state.footer;
+	sheet("session", [
+		[
+			`model: ${footer?.model?.id ?? "unknown"}`,
+			() => {
+				send({ t: "models" });
+			},
+		],
+		[
+			`thinking: ${footer?.thinking ?? "unknown"}`,
+			() => {
+				send({ t: "thinking" });
+			},
+		],
+	]);
+}
+
+function openModelSheet(current) {
+	const items = state.models.map((model) => [
+		`${model.id === current ? "✓ " : ""}${model.id}${model.provider ? ` · ${model.provider}` : ""}`,
+		() => {
+			send({ t: "set_model", provider: model.provider, modelId: model.id });
+			closeSheet();
+		},
+	]);
+	sheet("model", items.length > 0 ? items : [["no models configured", () => closeSheet()]]);
+}
+
+function openThinkingSheet(current) {
+	const items = state.levels.map((level) => [
+		`${level === current ? "✓ " : ""}${level}`,
+		() => {
+			send({ t: "set_thinking", level });
+			closeSheet();
+		},
+	]);
+	sheet("thinking", items.length > 0 ? items : [["no levels reported", () => closeSheet()]]);
+}
+
+/** Bottom sheet with a title and one button per action. */
+function sheet(title, items) {
+	const target = ui.sheet;
+	target.hidden = false;
+	target.textContent = "";
+	const heading = document.createElement("div");
+	heading.className = "sheet-title";
+	heading.textContent = title;
+	target.append(heading);
+	const actions = document.createElement("div");
+	actions.className = "sheet-actions";
+	for (const [label, action] of items) {
+		const button = document.createElement("button");
+		button.textContent = label;
+		if (label.startsWith("✓ ")) button.classList.add("current");
+		button.addEventListener("click", action);
+		actions.append(button);
+	}
+	const cancel = document.createElement("button");
+	cancel.textContent = "close";
+	cancel.addEventListener("click", closeSheet);
+	actions.append(cancel);
+	target.append(actions);
+}
+
+function closeSheet() {
+	ui.sheet.hidden = true;
+	ui.sheet.textContent = "";
 }
 
 // --------------------------------------------------------------- ui dialogs

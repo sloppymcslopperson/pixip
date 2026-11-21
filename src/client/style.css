@@ -185,6 +185,31 @@ details.tool.empty > summary { color: var(--fg-faint); }
 	font-weight: 600;
 }
 
+/* ---- status line (TUI footer parity) ---- */
+#footer {
+	width: 100%;
+	max-width: 104ch;
+	margin-inline: auto;
+	padding: 4px var(--pad) 0;
+	font-size: 11px;
+	line-height: 1.35;
+	color: var(--fg-dim);
+	user-select: none;
+}
+#footer .fline {
+	white-space: pre;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+#footer .stats {
+	display: flex;
+	justify-content: space-between;
+	gap: 12px;
+}
+#footer .left [data-level="warning"], #footer .left[data-level="warning"] { color: var(--warn); }
+#footer .left[data-level="error"] { color: var(--err); }
+#footer .right { color: var(--fg-dim); }
+
 /* ---- composer ---- */
 #composer {
 	position: sticky;
@@ -231,6 +256,9 @@ details.tool.empty > summary { color: var(--fg-faint); }
 #sheet {
 	position: fixed;
 	inset: auto 0 0 0;
+	max-height: 78dvh;
+	overflow-y: auto;
+	overscroll-behavior: contain;
 	z-index: 20;
 	background: var(--bg-raised);
 	border-top: 1px solid var(--line);
@@ -242,6 +270,9 @@ details.tool.empty > summary { color: var(--fg-faint); }
 #sheet .sheet-actions { display: flex; flex-direction: column; gap: 8px; }
 #sheet .sheet-actions button {
 	text-align: left;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 	padding: 12px;
 	border-radius: 10px;
 	border: 1px solid var(--line);

@@ -78,6 +78,25 @@ REST is only for discovery and process verbs: `GET /api/sessions`,
 `POST /api/sessions`, `POST /api/sessions/:id/stop`, `GET /api/info`, `GET /health`.
 Streaming never uses HTTP requests.
 
+## Status line and session controls
+
+The footer mirrors Pi's own footer component
+(`dist/modes/interactive/components/footer.js`) rather than inventing a summary:
+
+- line 1: `~/cwd (branch) • session name`;
+- line 2: `↑in ↓out R<cacheRead> W<cacheWrite> $cost` + `percent%/window (auto)`
+  (warning above 70 %, error above 90 %), right-aligned `model • thinkingLevel`.
+
+The hub sends **raw numbers** (`get_session_stats`, `get_state`, plus
+`git -C cwd branch --show-current` cached per session) and the client formats, so
+the rules live in one tested place (`src/client/footer.js`,
+`test/footer.test.js`) and the hub stays a passthrough a Rust port can copy.
+
+Model and thinking are plain RPC passthroughs (`get_available_models`,
+`set_model`, `get_available_thinking_levels`, `set_thinking_level`); the footer is
+the one place that shows and changes them. `thinking_level_changed` events keep it
+in sync when the change happens elsewhere.
+
 ## Measured latency (this box, 1 vCPU)
 
 `tmp/smoke.mjs` against a local daemon, one prompt, `deepseek-v4.1-flash`:
