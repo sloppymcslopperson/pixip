@@ -78,3 +78,28 @@ Rules:
   streams.
 - Commits use the repo-local identity already configured here
   (`Sloppy McSlopperson <thesloppyslopperson@gmail.com>`).
+
+## Working the board
+
+`open/` is the work queue, in filename order. Each ticket there is pre-grilled
+(`grilled: true` in frontmatter) and carries its own Goal / Done when / files, so a
+fresh agent can start without a planning round:
+
+```bash
+# in this directory
+/fit work 5 nogrill autocommit
+```
+
+`/fit work` takes in_progress first, then `open/` in priority order. `nogrill`
+skips the clarifying-question round (the tickets are already decided);
+`autocommit` commits only the files a ticket changed and then commits the board.
+Drop to `/fit work` (no count) to take one ticket at a time.
+
+Definition of done for every ticket: `npm run check` green, plus `tools/shot.mjs`
+at 390 and 1280 for anything that touches the client. If a change moves the
+numbers in ARCHITECTURE.md, update them there (that file is the source of truth
+for the latency budget).
+
+`backlog/` is not a queue: those tickets are either blocked on a human decision
+(desktop surface, phone-only ergonomics, auth posture) or deliberately later
+(worktrees, fork/clone, theme tokens).
