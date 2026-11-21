@@ -6,6 +6,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 
 import { Hub } from "./hub.ts";
 import { frameError, frameHello, frameHistory, frameModels, frameSnapshot, frameThinking, WIRE_VERSION } from "./wire.ts";
+import type { SessionInfo } from "./wire.ts";
 
 export interface ServerOptions {
 	host: string;
@@ -29,6 +30,39 @@ const CONTENT_TYPES: Record<string, string> = {
 	".svg": "image/svg+xml",
 	".json": "application/json; charset=utf-8",
 };
+
+/** Subscribe-to-snapshot buffer caps; beyond this the cursor path recovers. */
+export const LIVE_BUFFER_BYTES = 2 * 1024 * 1024;
+export const LIVE_BUFFER_FRAMES = 2000;
+
+interface SnapshotReply {
+	info: SessionInfo;
+	entries: unknown[];
+	leafId: string | null;
+	more: boolean;
+	covered: string[];
+	resume: boolean;
+}
+
+/**
+ * Ask for the window after `since`, falling back to a full snapshot when Pi no
+ * longer knows the cursor (forked, compacted away, or simply bogus).
+ */
+async function requestSnapshot(
+	hub: Hub,
+	id: string,
+	since: string | undefined,
+	log: (message: string) => void,
+): Promise<SnapshotReply> {
+	if (since) {
+		try {
+			return { ...(await hub.snapshot(id, undefined, since)), resume: true };
+		} catch (error) {
+			log(`resume cursor ${since} rejected (${(error as Error).message}); sending a full snapshot`);
+		}
+	}
+	return { ...(await hub.snapshot(id, undefined, undefined)), resume: false };
+}
 
 export async function startServer(options: ServerOptions): Promise<RunningServer> {
 	const assets = await loadAssets(options.clientDir);
@@ -153,9 +187,10 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 	});
 
 	try {
-		// Provisional paint from the JSONL tail while the child boots (~1.3 s).
-		// The authoritative, windowed snapshot replaces it once `get_entries` answers.
-		const provisional = await hub.provisional(sessionId);
+		// A reconnect that carries a cursor already has a transcript: skip the
+		// provisional repaint and resume from the durable entry cursor instead.
+		const cursor = url.searchParams.get("since") ?? undefined;
+		const provisional = cursor ? null : await hub.provisional(sessionId);
 		if (provisional) {
 			send(frameSnapshot(provisional.info, provisional.entries, provisional.leafId, provisional.more));
 		}
@@ -164,10 +199,53 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 		// The index-only path lands on a new Pi id: tell the client before the
 		// snapshot so its URL and session key keep pointing at this transcript.
 		if (info.id !== sessionId) send(JSON.stringify({ t: "opened", session: info }));
-		const snapshot = await hub.snapshot(info.id);
-		send(frameSnapshot(snapshot.info, snapshot.entries, snapshot.leafId, snapshot.more));
-		subscriptions.push(hub.subscribe(info.id, send));
+
+		// Subscribe *before* `get_entries` and buffer what the child emits in
+		// between, so a client connecting mid-turn cannot miss the start of a
+		// message. Records without an entry identity (status, UI dialogs) are
+		// order-independent and go out immediately.
+		const buffer: Array<{ frame: string; key: string }> = [];
+		let bytes = 0;
+		let overflowed = false;
+		let buffering = true;
+		subscriptions.push(
+			hub.subscribe(info.id, (frame, key) => {
+				if (!key || !buffering) {
+					send(frame);
+					return;
+				}
+				buffer.push({ frame, key });
+				bytes += frame.length;
+				if (bytes > LIVE_BUFFER_BYTES || buffer.length > LIVE_BUFFER_FRAMES) {
+					// Bounded recovery below: close the gap with the durable cursor
+					// instead of holding an unbounded turn in memory.
+					overflowed = true;
+					buffer.length = 0;
+					bytes = 0;
+				}
+			}),
+		);
 		subscriptions.push(hub.watch((frame) => send(frame)));
+
+		let resumeFrom = cursor;
+		for (let attempt = 0; ; attempt += 1) {
+			const snapshot = await requestSnapshot(hub, info.id, resumeFrom, log);
+			send(frameSnapshot(snapshot.info, snapshot.entries, snapshot.leafId, snapshot.more, snapshot.resume));
+			const covered = new Set(snapshot.covered);
+			for (const item of buffer) {
+				if (!covered.has(item.key)) send(item.frame);
+			}
+			buffer.length = 0;
+			bytes = 0;
+			const overflow = overflowed;
+			overflowed = false;
+			if (!overflow || attempt >= 2) break;
+			// Overflowed while waiting: ask the cursor for exactly what was dropped.
+			// With no leaf yet (empty session) the next pass takes a fresh window.
+			resumeFrom = snapshot.leafId ?? undefined;
+		}
+		buffering = false;
+
 		void hub
 			.footer(info.id)
 			.then((footer) => {

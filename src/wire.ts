@@ -61,10 +61,14 @@ export function frameSnapshot(
 	entries: unknown[],
 	leafId: string | null,
 	more = false,
+	resume = false,
 ): string {
 	// `more` means older entries exist before `entries[0]`; the client offers
 	// "load earlier" and asks for the previous window with an `earlier` frame.
-	return JSON.stringify({ t: "snapshot", session, entries, leafId, more });
+	// `resume` marks a cursor delta the client appends instead of replacing.
+	const frame: Record<string, unknown> = { t: "snapshot", session, entries, leafId, more };
+	if (resume) frame["resume"] = true;
+	return JSON.stringify(frame);
 }
 
 /** One older window of entries, answering an `earlier` frame. */

@@ -59,8 +59,14 @@ const state = {
 
 function socketUrl(sessionId) {
 	const scheme = location.protocol === "https:" ? "wss" : "ws";
-	const suffix = sessionId ? `?session=${encodeURIComponent(sessionId)}` : "";
-	return `${scheme}://${location.host}/ws${suffix}`;
+	const params = new URLSearchParams();
+	if (sessionId) params.set("session", sessionId);
+	// Reconnect with the durable entry cursor when this page already holds the
+	// transcript: the hub then sends only the delta instead of the full window.
+	const cursor = sessionId && state.sessionId === sessionId ? lastEntryId() : null;
+	if (cursor) params.set("since", cursor);
+	const query = params.toString();
+	return `${scheme}://${location.host}/ws${query ? `?${query}` : ""}`;
 }
 
 function connect(sessionId) {
@@ -217,7 +223,8 @@ function handleFrame(frame) {
 			break;
 		case "snapshot":
 			state.info = frame.session;
-			renderSnapshot(frame.entries ?? [], frame.more === true);
+			if (frame.resume === true) renderResume(frame.entries ?? []);
+			else renderSnapshot(frame.entries ?? [], frame.more === true);
 			applyInfo();
 			break;
 		case "history":
@@ -354,6 +361,14 @@ function oldestEntryId() {
 	return state.entries.find((entry) => typeof entry?.id === "string")?.id ?? null;
 }
 
+function lastEntryId() {
+	for (let index = state.entries.length - 1; index >= 0; index -= 1) {
+		const id = state.entries[index]?.id;
+		if (typeof id === "string") return id;
+	}
+	return null;
+}
+
 function earlierButton() {
 	const button = document.createElement("button");
 	button.type = "button";
@@ -475,6 +490,21 @@ function renderSnapshot(entries, more) {
 	const distance = state.stick ? ui.log.clientHeight : ui.log.scrollHeight - ui.log.scrollTop;
 	if (state.stick) state.stick = true;
 	mergeTail(entries, more);
+	renderTranscript(distance);
+}
+
+/**
+ * Resume delta from the durable cursor: append entries this client did not have
+ * yet, keep the loaded window's `more`, and repaint from `state.entries`. Live
+ * DOM is replaced by its entries, so a message painted live is neither lost nor
+ * painted twice, and `state.entries` stays the resume anchor.
+ */
+function renderResume(entries) {
+	const known = new Set(state.entries.map((entry) => entry?.id).filter(Boolean));
+	const fresh = entries.filter((entry) => typeof entry?.id !== "string" || !known.has(entry.id));
+	if (fresh.length === 0) return;
+	const distance = state.stick ? ui.log.clientHeight : ui.log.scrollHeight - ui.log.scrollTop;
+	state.entries = [...state.entries, ...fresh];
 	renderTranscript(distance);
 }
 

@@ -67,13 +67,20 @@ interface SessionHeader {
 interface LiveSession {
 	proc: RpcChild;
 	info: SessionInfo;
-	subs: Set<(frame: string) => void>;
+	subs: Set<Subscriber>;
 	idleTimer?: NodeJS.Timeout;
 	branch?: string;
 	footerTimer?: NodeJS.Timeout;
+	/** Timestamp of the assistant message currently streaming (or last done). */
+	assistantTs?: number;
 }
 
-type Subscriber = (frame: string) => void;
+/**
+ * A subscriber gets the verbatim frame plus an optional coverage key describing
+ * the entry the record belongs to. Pi's RPC events carry no entry id, so the key
+ * is the only way a socket can tell "already in the snapshot" from "newer".
+ */
+type Subscriber = (frame: string, key?: string) => void;
 
 const SESSION_FILE = /\.jsonl$/;
 
@@ -215,15 +222,25 @@ export class Hub {
 	async snapshot(
 		id: string,
 		limit = WINDOW_ENTRIES,
-	): Promise<{ info: SessionInfo; entries: unknown[]; leafId: string | null; more: boolean }> {
+		since?: string,
+	): Promise<{ info: SessionInfo; entries: unknown[]; leafId: string | null; more: boolean; covered: string[] }> {
 		const live = this.require(id);
-		const data = (await live.proc.command({ type: "get_entries" })) as {
+		// `since` is Pi's durable cursor: only entries strictly after that entry.
+		const data = (await live.proc.command({ type: "get_entries", ...(since ? { since } : {}) })) as {
 			entries: unknown[];
 			leafId: string | null;
 		};
 		const entries = data.entries ?? [];
 		const windowed = entries.slice(-limit);
-		return { info: live.info, entries: windowed, leafId: data.leafId ?? null, more: entries.length > windowed.length };
+		return {
+			info: live.info,
+			entries: windowed,
+			leafId: data.leafId ?? null,
+			more: entries.length > windowed.length,
+			// Coverage is computed over the full response, not the window: a buffered
+			// record for an entry older than the window is still a duplicate.
+			covered: coverageKeys(entries),
+		};
 	}
 
 	/**
@@ -485,6 +502,8 @@ export class Hub {
 		const target = live ?? this.pendingSession(info);
 		if (!target) return;
 		const typed = record as { type?: string; name?: string; message?: unknown; assistantMessageEvent?: { type?: string } };
+		// Stamp the entry identity once, before the status bookkeeping below.
+		const key = coverageKey(target, typed);
 
 		switch (typed.type) {
 			case "agent_start":
@@ -521,7 +540,7 @@ export class Hub {
 				break;
 		}
 
-		this.broadcast(target, frameEvent(raw));
+		this.broadcast(target, frameEvent(raw), key);
 	}
 
 	private pendingSession(info: SessionInfo): LiveSession | undefined {
@@ -687,10 +706,10 @@ export class Hub {
 		return live;
 	}
 
-	private broadcast(live: LiveSession, frame: string): void {
+	private broadcast(live: LiveSession, frame: string, key?: string): void {
 		for (const subscriber of live.subs) {
 			try {
-				subscriber(frame);
+				subscriber(frame, key);
 			} catch {
 				live.subs.delete(subscriber);
 			}
@@ -795,6 +814,45 @@ export class Hub {
 			return undefined;
 		}
 	}
+}
+
+// ---------------------------------------------------------- coverage keys
+
+/**
+ * Coverage key for a live record: the message identity Pi also stores on the
+ * entry. Streaming updates belong to the assistant message that last started or
+ * ended; tool executions belong to that same message (they carry its calls).
+ */
+function coverageKey(target: LiveSession, record: { type?: string; message?: unknown }): string | undefined {
+	const message = record.message as { role?: unknown; timestamp?: unknown } | undefined;
+	const role = typeof message?.role === "string" ? message.role : undefined;
+	const stamp = typeof message?.timestamp === "number" ? message.timestamp : undefined;
+	switch (record.type) {
+		case "message_start":
+		case "message_end":
+			if (!role || stamp === undefined) return undefined;
+			if (role === "assistant") target.assistantTs = stamp;
+			return `msg:${role}:${stamp}`;
+		case "message_update":
+		case "tool_execution_start":
+		case "tool_execution_update":
+		case "tool_execution_end":
+		case "turn_end":
+			return target.assistantTs === undefined ? undefined : `msg:assistant:${target.assistantTs}`;
+		default:
+			return undefined;
+	}
+}
+
+/** Coverage keys for a snapshot: one per entry that carries a message. */
+export function coverageKeys(entries: unknown[]): string[] {
+	const keys: string[] = [];
+	for (const entry of entries) {
+		const message = (entry as { message?: { role?: unknown; timestamp?: unknown } } | null)?.message;
+		if (!message || typeof message.role !== "string" || typeof message.timestamp !== "number") continue;
+		keys.push(`msg:${message.role}:${message.timestamp}`);
+	}
+	return keys;
 }
 
 // ------------------------------------------------------------ jsonl windows
