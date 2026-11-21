@@ -261,6 +261,8 @@ function handle(line) {
 				text: command.message,
 				streamingBehavior: command.streamingBehavior ?? null,
 			});
+			// Fire-and-forget records a test wants to arrive while a subscriber is live.
+			for (const event of JSON.parse(env.FAKE_PI_ON_PROMPT ?? "[]")) send(event);
 			// `prompt` with a streaming behavior models a busy run: the text joins
 			// the pending queue (real Pi would also start a turn when idle, which the
 			// fixture cannot model; tests assert the command and the queue, not a run).

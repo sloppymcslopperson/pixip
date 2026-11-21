@@ -388,6 +388,9 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 		// Policy is per session (cwd + data dir + CLI), so it goes on the session
 		// socket, not on the list; the composer needs it before the first submit.
 		send(framePolicy(hub.policy(info.id)));
+		// Addon status/widgets are fire-and-forget: replay the current cache so a
+		// late tab sees the same footer without waiting for the extension to emit.
+		for (const frame of hub.addonUiFrames(info.id)) send(frame);
 
 		// Subscribe *before* `get_entries` and buffer what the child emits in
 		// between, so a client connecting mid-turn cannot miss the start of a

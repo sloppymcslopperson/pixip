@@ -493,6 +493,20 @@ details.tool.empty > summary { color: var(--fg-faint); }
 #footer .left [data-level="warning"], #footer .left[data-level="warning"] { color: var(--warn); }
 #footer .left[data-level="error"] { color: var(--err); }
 #footer .right { color: var(--fg-dim); }
+#footer .addon-statuses {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	color: var(--fg-dim);
+}
+#footer .addon-widgets { display: flex; flex-direction: column; gap: 2px; margin-bottom: 3px; }
+#footer .addon-widget {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	max-height: 8.7em;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+}
 
 /* ---- command menu (06) ---- */
 #menu {

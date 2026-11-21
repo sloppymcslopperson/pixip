@@ -105,10 +105,18 @@ interface SessionHeader {
 	name?: string;
 }
 
+/** Current extension UI, keyed by the addon's status/widget key. */
+interface AddonUiCache {
+	statuses: Map<string, string>;
+	widgets: Map<string, { placement: "above" | "below"; frame: string }>;
+}
+
 interface LiveSession {
 	proc: RpcChild;
 	info: SessionInfo;
 	subs: Set<Subscriber>;
+	/** Latest setStatus/setWidget records, replayed to a late subscriber. */
+	addonUi?: AddonUiCache;
 	idleTimer?: NodeJS.Timeout;
 	branch?: string;
 	footerTimer?: NodeJS.Timeout;
@@ -1043,6 +1051,25 @@ export class Hub {
 		live.proc.send({ type: "extension_ui_response", id: requestId, ...fields });
 	}
 
+	/**
+	 * Cached fire-and-forget addon UI, in render order: aboveEditor widgets,
+	 * status entries, then belowEditor widgets. Frames stay verbatim; the client
+	 * has one rendering path for live and replayed requests.
+	 */
+	addonUiFrames(id: string): string[] {
+		const cache = this.live.get(id)?.addonUi;
+		if (!cache) return [];
+		const frames: string[] = [];
+		for (const widget of cache.widgets.values()) {
+			if (widget.placement === "above") frames.push(frameEvent(widget.frame));
+		}
+		for (const frame of cache.statuses.values()) frames.push(frameEvent(frame));
+		for (const widget of cache.widgets.values()) {
+			if (widget.placement === "below") frames.push(frameEvent(widget.frame));
+		}
+		return frames;
+	}
+
 	subscribe(id: string, subscriber: Subscriber): () => void {
 		const live = this.live.get(id);
 		if (!live) return () => {};
@@ -1178,7 +1205,18 @@ export class Hub {
 		const live = this.live.get(info.id);
 		const target = live ?? this.pendingSession(info);
 		if (!target) return;
-		const typed = record as { type?: string; name?: string; message?: unknown; assistantMessageEvent?: { type?: string } };
+		const typed = record as {
+			type?: string;
+			name?: string;
+			message?: unknown;
+			assistantMessageEvent?: { type?: string };
+			method?: string;
+			statusKey?: string;
+			statusText?: unknown;
+			widgetKey?: string;
+			widgetLines?: unknown;
+			widgetPlacement?: string;
+		};
 		// Stamp the entry identity once, before the status bookkeeping below.
 		const key = coverageKey(target, typed);
 
@@ -1214,11 +1252,53 @@ export class Hub {
 				this.scheduleFooter(target);
 				break;
 			}
+			case "extension_ui_request":
+				this.cacheAddonUi(target, typed, raw);
+				break;
 			default:
 				break;
 		}
 
 		this.broadcast(target, frameEvent(raw), key);
+	}
+
+	private cacheAddonUi(
+		live: LiveSession,
+		request: {
+			method?: string;
+			statusKey?: string;
+			statusText?: unknown;
+			widgetKey?: string;
+			widgetLines?: unknown;
+			widgetPlacement?: string;
+		},
+		raw: string,
+	): void {
+		if (request.method !== "setStatus" && request.method !== "setWidget") return;
+		live.addonUi ??= { statuses: new Map(), widgets: new Map() };
+		if (request.method === "setStatus") {
+			const key = request.statusKey;
+			if (typeof key !== "string" || key.length === 0) return;
+			if (typeof request.statusText === "string" && request.statusText.length > 0) {
+				live.addonUi.statuses.set(key, raw);
+			} else {
+				live.addonUi.statuses.delete(key);
+			}
+			return;
+		}
+		const key = request.widgetKey;
+		if (typeof key !== "string" || key.length === 0) return;
+		const lines = Array.isArray(request.widgetLines)
+			? request.widgetLines.filter((line): line is string => typeof line === "string")
+			: [];
+		if (lines.length === 0) {
+			live.addonUi.widgets.delete(key);
+			return;
+		}
+		live.addonUi.widgets.set(key, {
+			placement: request.widgetPlacement === "belowEditor" ? "below" : "above",
+			frame: raw,
+		});
 	}
 
 	private pendingSession(info: SessionInfo): LiveSession | undefined {

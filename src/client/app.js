@@ -17,6 +17,7 @@ import { classifyInput, commandQuery, filterCommands, isAllowed, menuCatalog, me
 import { crumbTrail, filterDirEntries, initialDirectory, parentDirectory } from "./directoryPicker.js";
 import { queueCount, queueFromEvent, queueTexts, restoreText } from "./queue.js";
 import { flattenTree } from "./tree.js";
+import { addonStatusText, addonWidgets, applyAddonUi, createAddonUi } from "./addonUi.js";
 import { formatSession } from "./sessionInfo.js";
 import {
 	contextLevel,
@@ -73,6 +74,9 @@ const ui = {
 	input: $("#input"),
 	send: $("#send"),
 	footer: $("#footer"),
+	footerAbove: $("#footer .addon-widgets.above"),
+	footerStatuses: $("#footer .addon-statuses"),
+	footerBelow: $("#footer .addon-widgets.below"),
 	sheet: $("#sheet"),
 	toast: $("#toast"),
 };
@@ -94,6 +98,7 @@ const state = {
 	coarse: window.matchMedia("(pointer: coarse)").matches,
 	renderQueued: false,
 	footer: null,
+	addon: createAddonUi(), // Pi extension setStatus/setWidget state
 	models: [],
 	levels: [],
 	dynamicCommands: [], // live get_commands entries for the `/` menu
@@ -211,6 +216,7 @@ async function showList() {
 	state.entries = [];
 	state.more = false;
 	state.loadingEarlier = false;
+	state.addon = createAddonUi();
 	ui.session.hidden = true;
 	ui.composer.hidden = true;
 	ui.footer.hidden = true;
@@ -869,6 +875,7 @@ function showPendingSession() {
 	state.entries = [];
 	state.more = false;
 	state.loadingEarlier = false;
+	state.addon = createAddonUi();
 	state.policy = null;
 	state.dynamicCommands = [];
 	state.queue = { steering: [], followUp: [] };
@@ -945,6 +952,7 @@ function openSession(id) {
 	state.entries = [];
 	state.more = false;
 	state.loadingEarlier = false;
+	state.addon = createAddonUi();
 	state.stick = true;
 	ui.title.textContent = "connecting…";
 	ui.sub.textContent = id.slice(0, 8);
@@ -1536,8 +1544,27 @@ function scheduleFlush(target) {
 
 // -------------------------------------------------------------------- footer
 
+function renderAddonWidgets(container, placement) {
+	const widgets = addonWidgets(state.addon, placement);
+	container.hidden = widgets.length === 0;
+	container.textContent = "";
+	for (const widget of widgets) {
+		const row = document.createElement("div");
+		row.className = "addon-widget";
+		row.dataset.key = widget.key;
+		// Addon text may carry ANSI styling; ansiToHtml escapes all markup.
+		row.innerHTML = ansiToHtml(widget.lines.join("\n"));
+		container.append(row);
+	}
+}
+
 function renderFooter() {
 	const footer = state.footer;
+	const status = addonStatusText(state.addon);
+	ui.footerStatuses.hidden = status.length === 0;
+	ui.footerStatuses.innerHTML = ansiToHtml(status);
+	renderAddonWidgets(ui.footerAbove, "above");
+	renderAddonWidgets(ui.footerBelow, "below");
 	if (!footer) return;
 	const pwd = ui.footer.querySelector(".pwd");
 	const left = ui.footer.querySelector(".left");
@@ -1795,6 +1822,10 @@ function handleUiRequest(request) {
 	const method = request.method;
 	if (method === "notify") {
 		notice(request.message ?? "");
+		return;
+	}
+	if (applyAddonUi(state.addon, request)) {
+		renderFooter();
 		return;
 	}
 	if (!["select", "confirm", "input", "editor"].includes(method)) return;
