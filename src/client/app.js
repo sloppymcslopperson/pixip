@@ -6,6 +6,8 @@ import {
 	renderAssistant,
 	renderAssistantBody,
 	renderEntry,
+	pendingErrorHtml,
+	pendingSessionHtml,
 	summarizeArgs,
 	textOf,
 	toolBlock,
@@ -86,6 +88,7 @@ const state = {
 	restarting: false, // old daemon announced a restart; socket is about to close
 	restartWasBusy: false, // a turn was in flight when the restart was announced
 	restartNoticePending: false, // paint the interruption notice after the reconnect snapshot
+	pendingCreate: null, // dashboard `new` action waiting for the first session id
 	tools: new Map(), // toolCallId -> <details>
 	coarse: window.matchMedia("(pointer: coarse)").matches,
 	renderQueued: false,
@@ -147,6 +150,10 @@ function connect(sessionId) {
 		// the card or the one-at-a-time guard; the snapshot restores the transcript.
 		state.bashRunning = false;
 		state.bash.clear();
+		if (state.pendingCreate) {
+			failPendingSession("daemon disconnected");
+			return;
+		}
 		if (!state.sessionId) return;
 		const delay = Math.min(2000, 200 * 2 ** state.retries++);
 		toast(state.restarting ? `pixip restarting — reconnecting… (${delay}ms)` : `reconnecting… (${delay}ms)`);
@@ -173,12 +180,19 @@ function route() {
 	const match = /^#s=(.+)$/.exec(location.hash);
 	const id = match ? decodeURIComponent(match[1]) : null;
 	if (id) openSession(id);
-	else showList();
+	else if (location.hash === "#new") {
+		// A reload lands here without a create in flight: fall back to the dashboard.
+		if (!state.pendingCreate) {
+			history.replaceState(null, "", "");
+			void showList();
+		}
+	} else showList();
 }
 
 async function showList() {
 	state.sessionId = null;
 	state.info = null;
+	state.pendingCreate = null;
 	state.tools.clear();
 	state.streaming = null;
 	state.pendingUser = null;
@@ -257,7 +271,7 @@ function renderList(sessions, defaultCwd = state.defaultCwd, home = state.home) 
 	form.addEventListener("submit", (event) => {
 		event.preventDefault();
 		const cwd = form.querySelector("input")?.value?.trim();
-		if (cwd) send({ t: "create", cwd });
+		if (cwd) beginNewSession(cwd);
 	});
 	form.querySelector(".browse")?.addEventListener("click", () => {
 		void openDirectorySheet(initialDirectory(state.defaultCwd, state.home));
@@ -844,8 +858,72 @@ async function purgeStored(kind, item) {
 	}
 }
 
+function beginNewSession(cwd) {
+	state.pendingCreate = { cwd };
+	history.pushState(null, "", "#new");
+	showPendingSession();
+	// The dashboard socket is still open; the `opened` frame will carry the id.
+	send({ t: "create", cwd });
+}
+
+function showPendingSession() {
+	state.sessionId = null;
+	state.info = null;
+	state.tools.clear();
+	state.streaming = null;
+	state.pendingUser = null;
+	state.entries = [];
+	state.more = false;
+	state.loadingEarlier = false;
+	state.policy = null;
+	state.dynamicCommands = [];
+	state.queue = { steering: [], followUp: [] };
+	renderQueue();
+	closeMenu();
+	state.bashRunning = false;
+	state.quitting = false;
+	state.bash.clear();
+	ui.list.hidden = true;
+	ui.session.hidden = false;
+	ui.composer.hidden = false;
+	ui.footer.hidden = true;
+	ui.dock.hidden = false;
+	ui.stop.hidden = true;
+	ui.back.hidden = false;
+	ui.settings.hidden = true;
+	ui.log.innerHTML = pendingSessionHtml();
+	ui.title.textContent = "new session";
+	ui.sub.textContent = "starting…";
+	ui.dot.hidden = false;
+	ui.dot.className = "dot busy";
+	ui.input.value = "";
+	ui.input.disabled = true;
+	ui.send.disabled = true;
+	document.title = "new session · pixip";
+}
+
+function failPendingSession(message) {
+	state.pendingCreate = null;
+	ui.log.innerHTML = pendingErrorHtml(String(message));
+	const back = document.createElement("button");
+	back.type = "button";
+	back.className = "row";
+	back.textContent = "back to sessions";
+	back.addEventListener("click", () => {
+		location.hash = "";
+	});
+	ui.log.append(back);
+	ui.title.textContent = "new session";
+	ui.sub.textContent = "failed";
+	ui.dot.className = "dot error";
+	ui.input.disabled = true;
+	ui.send.disabled = true;
+	document.title = "new session · pixip";
+}
+
 function openSession(id) {
 	if (state.sessionId === id) return;
+	state.pendingCreate = null;
 	state.sessionId = id;
 	state.restarting = false;
 	state.restartWasBusy = false;
@@ -956,6 +1034,14 @@ function handleFrame(frame) {
 		case "opened": {
 			const id = frame.session?.id;
 			if (typeof id !== "string") break;
+			if (state.pendingCreate) {
+				// The pending view already owns the screen; swap the URL and connect.
+				state.pendingCreate = null;
+				state.sessionId = null;
+				history.replaceState(null, "", `#s=${encodeURIComponent(id)}`);
+				openSession(id);
+				break;
+			}
 			if (state.sessionId && state.ws) {
 				// An index-only session reattached under a new Pi id: keep this socket
 				// and transcript, and move the URL to the new id without reconnecting.
@@ -1030,6 +1116,10 @@ function handleFrame(frame) {
 			openThinkingSheet(frame.current);
 			break;
 		case "error":
+			if (state.pendingCreate) {
+				failPendingSession(frame.message);
+				break;
+			}
 			if (state.loadingEarlier) {
 				const distance = state.stick ? ui.log.clientHeight : ui.log.scrollHeight - ui.log.scrollTop;
 				state.loadingEarlier = false;

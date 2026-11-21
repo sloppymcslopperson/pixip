@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { markdownToHtml } from "../src/client/markdown.js";
-import { ansiToHtml, bashCardHtml, escapeHtml, renderAssistantBody, renderMessage, summarizeArgs, textOf, toolBlock } from "../src/client/render.js";
+import { ansiToHtml, bashCardHtml, escapeHtml, pendingErrorHtml, pendingSessionHtml, renderAssistantBody, renderMessage, summarizeArgs, textOf, toolBlock } from "../src/client/render.js";
 
 describe("ansi", () => {
 	it("maps SGR colors to spans and leaves text alone", () => {
@@ -159,5 +159,22 @@ describe("markdown", () => {
 		assert.match(html, /<details class="think">/);
 		assert.match(html, /\*\*raw\*\* &lt;i&gt;/);
 		assert.equal(html.includes("<strong>"), false);
+	});
+});
+
+
+describe("pending new session", () => {
+	it("renders the starting row before an id exists", () => {
+		assert.equal(
+			pendingSessionHtml(),
+			'<div class="block meta starting pending-session">starting session…</div>',
+		);
+	});
+
+	it("renders and escapes a create failure", () => {
+		assert.equal(
+			pendingErrorHtml("<boom>"),
+			'<div class="block meta error pending-session">could not start session: &lt;boom&gt;</div>',
+		);
 	});
 });

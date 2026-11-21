@@ -92,6 +92,8 @@ export class RpcChild {
 	private seq = 0;
 	private exited = false;
 	private closed = false;
+	/** `onExit` fires once, whether the child exits or fails to spawn. */
+	private exitReported = false;
 
 	constructor(options: RpcChildOptions) {
 		this.options = options;
@@ -106,6 +108,11 @@ export class RpcChild {
 		this.child.stderr.on("data", (chunk: Buffer) => {
 			options.onStderr?.(chunk.toString("utf8"));
 		});
+		const reportExit = (code: number | null, signal: NodeJS.Signals | null) => {
+			if (this.exitReported) return;
+			this.exitReported = true;
+			options.onExit?.(code, signal);
+		};
 		this.child.on("exit", (code, signal) => {
 			this.exited = true;
 			for (const [, entry] of this.pending) {
@@ -113,11 +120,19 @@ export class RpcChild {
 				entry.reject(new Error("pi exited before responding"));
 			}
 			this.pending.clear();
-			options.onExit?.(code, signal);
+			reportExit(code, signal);
 		});
 		this.child.on("error", (error) => {
 			this.exited = true;
 			options.onStderr?.(`spawn failed: ${error.message}\n`);
+			// A spawn error has no `exit`; fail pending commands (and `get_state`
+			// during create) instead of waiting for the request timeout.
+			for (const [, entry] of this.pending) {
+				if (entry.timer) clearTimeout(entry.timer);
+				entry.reject(new Error(`pi failed to start: ${error.message}`));
+			}
+			this.pending.clear();
+			reportExit(null, null);
 		});
 	}
 

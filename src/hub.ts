@@ -1104,7 +1104,7 @@ export class Hub {
 		// Register before the first command so records that arrive early find it.
 		this.live.set(SYMBOL_PENDING, live);
 
-		const state = (await proc.command({ type: "get_state" })) as {
+		let state: {
 			sessionId?: string;
 			sessionFile?: string;
 			sessionName?: string;
@@ -1113,6 +1113,15 @@ export class Hub {
 			messageCount?: number;
 			isStreaming?: boolean;
 		};
+		try {
+			state = (await proc.command({ type: "get_state" })) as typeof state;
+		} catch (error) {
+			// A child that never answered is not a session: drop the pending entry
+			// and close the pipe so a failed create rejects instead of leaking it.
+			this.live.delete(SYMBOL_PENDING);
+			await proc.close().catch(() => {});
+			throw error;
+		}
 
 		if (!state.sessionId) throw new Error("pi did not report a session id");
 		info.id = state.sessionId;

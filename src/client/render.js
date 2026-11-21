@@ -6,6 +6,16 @@ import { escapeHtml, markdownToHtml } from "./markdown.js";
 
 export { escapeHtml };
 
+/** History row while the dashboard's `new` action is waiting for Pi. */
+export function pendingSessionHtml() {
+	return '<div class="block meta starting pending-session">starting session…</div>';
+}
+
+/** History row when creating the session failed before any id existed. */
+export function pendingErrorHtml(message) {
+	return `<div class="block meta error pending-session">could not start session: ${escapeHtml(message)}</div>`;
+}
+
 const SGR = /\u001b\[([0-9;]*)m/y;
 const OSC = /\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g;
 const CSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
