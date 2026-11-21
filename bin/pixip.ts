@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { spawn } from "node:child_process";
+import { closeSync, openSync } from "node:fs";
 import { mkdir, open } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,13 +17,16 @@ import {
 	fetchSessions,
 	logSize,
 	portAvailable,
+	readDaemonState,
 	readLogTail,
 	refreshDaemon,
 	runningDaemon,
 	startDaemon,
 	stopDaemon,
+	waitForHealth,
 	writeDaemonState,
 } from "../src/daemon.ts";
+import type { SessionInfo } from "../src/wire.ts";
 
 /**
  * pixip — supervisor + web UI for Pi sessions.
@@ -61,6 +66,8 @@ interface Options {
 	whenIdle: boolean;
 	/** `restart --timeout <seconds>` */
 	timeoutS: number;
+	/** Internal: this process is the detached restart helper. */
+	detached: boolean;
 }
 
 function parseArgs(argv: string[], command: Command): Options {
@@ -80,6 +87,7 @@ function parseArgs(argv: string[], command: Command): Options {
 		force: false,
 		whenIdle: false,
 		timeoutS: 300,
+		detached: false,
 	};
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index];
@@ -135,6 +143,10 @@ function parseArgs(argv: string[], command: Command): Options {
 			case "--timeout":
 				options.timeoutS = Number(next());
 				break;
+			case "--detached":
+				// Internal flag of the restart helper; not part of the public surface.
+				options.detached = true;
+				break;
 			case "--help":
 			case "-h":
 				printHelp();
@@ -174,15 +186,21 @@ function printHelp(): void {
 Commands:
   (none)|serve        serve in the foreground (default)
   start               detach a daemon, write the pid/state, print the URL
-  stop                SIGTERM the daemon and clean its pid file
+  stop                SIGTERM the daemon and clean its pid file. From inside a
+                      pixip session this restarts instead, so an agent cannot
+                      take the service down; use a shell outside pixip to stop it
   status [--json]     pid, URL, uptime and session count; non-zero when down
   logs [-f] [--lines] tail <data-dir>/pixip.log (-f follows)
   refresh             soft reload: assets, command policy, session index and the
                       catalog; live children and sockets stay up
   restart [--force] [--when-idle] [--timeout <s>]
                       replace the process; sessions survive in their JSONL.
-                      Refuses while a session is busy unless --force;
-                      --when-idle waits up to --timeout (default 300s, exit 2)
+                      The stop/start runs in a detached helper, so this also
+                      works when issued from inside a pixip session (that turn
+                      ends, the daemon comes back). Refuses while a session is
+                      busy unless --force; --when-idle waits for the other
+                      sessions (the calling one does not count) up to --timeout
+                      (default 300s, exit 2)
 
 Options:
 ${serveOptions}
@@ -330,6 +348,19 @@ async function cmdStart(options: Options): Promise<void> {
 }
 
 async function cmdStop(options: Options): Promise<void> {
+	// Never let a bash tool inside a session take the service down. A stop from
+	// inside pixip is a restart from the caller's point of view: the calling turn
+	// ends, the daemon comes back. A shell outside pixip still stops for real.
+	if (insidePixip()) {
+		const running = await runningDaemon(options.dataDir);
+		if (!running) {
+			process.stdout.write(`pixip is not running for ${options.dataDir}\n`);
+			return;
+		}
+		process.stderr.write("pixip stop requested from inside a pixip session: restarting instead\n");
+		return await cmdRestart({ ...options, force: true });
+	}
+
 	const result = await stopDaemon(options.dataDir);
 	if (!result.stopped) {
 		process.stdout.write(`pixip is not running for ${options.dataDir}\n`);
@@ -423,7 +454,77 @@ async function cmdRefresh(options: Options): Promise<void> {
 	process.stdout.write(`reloaded ${report.reloaded.join(", ")} (${report.reloads} total)\n`);
 }
 
+/**
+ * `/fit`-style self-update: a bash tool runs inside a Pi child of the daemon it
+ * wants to replace. Stopping the daemon kills that child (and this CLI with it),
+ * so the stop/start must happen in a process outside that tree. `PIXIP_SESSION_ID`
+ * is inherited by every child of the hub's Pi processes; it identifies the
+ * calling session, which is about to end and therefore must not count as busy.
+ */
+function callerSession(): string | undefined {
+	const id = process.env["PIXIP_SESSION_ID"]?.trim();
+	return id || undefined;
+}
+
+/** Is this CLI running as a child of a pixip-managed Pi session? */
+function insidePixip(): boolean {
+	return process.env["PIXIP_INSIDE"] === "1" || Boolean(callerSession());
+}
+
+function isCaller(session: SessionInfo, caller: string | undefined): boolean {
+	if (!caller) return false;
+	return session.logicalId === caller || session.id === caller;
+}
+
+/** Spawn the detached helper that performs the actual stop/start. */
+function spawnRestartHelper(options: Options): void {
+	const logFd = openSync(daemonPaths(options.dataDir).log, "a");
+	try {
+		// Strip the caller marker: the helper is not a session, and the new
+		// daemon's own children get a fresh one from the hub anyway.
+		const env = { ...process.env };
+		delete env["PIXIP_SESSION_ID"];
+		const child = spawn(
+			process.execPath,
+			[fileURLToPath(import.meta.url), "restart", "--detached", "--data-dir", options.dataDir],
+			{
+				detached: true,
+				stdio: ["ignore", logFd, logFd],
+				cwd: process.cwd(),
+				env,
+			},
+		);
+		child.unref();
+	} finally {
+		closeSync(logFd);
+	}
+}
+
+/**
+ * Helper body: wait out the old daemon, then start the same serve args. It logs
+ * to `<data-dir>/pixip.log`, so a restart from inside a session leaves evidence
+ * even though the calling turn is gone.
+ */
+async function runRestartHelper(options: Options): Promise<void> {
+	const note = (message: string) => log(`[restart helper] ${message}`);
+	const running = await runningDaemon(options.dataDir);
+	const args = running && running.args.length > 0 ? running.args : serveArgs(options);
+	if (running) {
+		note(`stopping pid ${running.pid}`);
+		const stopped = await stopDaemon(options.dataDir);
+		if (!stopped.stopped) {
+			note(`pid ${running.pid} did not stop`);
+			process.exitCode = 1;
+			return;
+		}
+	}
+	const state = await startDaemon({ dataDir: options.dataDir, args });
+	note(`listening on ${state.url} (pid ${state.pid})`);
+}
+
 async function cmdRestart(options: Options): Promise<void> {
+	if (options.detached) return await runRestartHelper(options);
+
 	const running = await runningDaemon(options.dataDir);
 	if (!running) {
 		// Idempotent: restarting a stopped data dir is just a start.
@@ -431,11 +532,14 @@ async function cmdRestart(options: Options): Promise<void> {
 		return;
 	}
 
+	const caller = callerSession();
+	const busyNow = async () =>
+		busySessions(await fetchSessions(running.url).catch(() => [])).filter((session) => !isCaller(session, caller));
+
 	if (options.whenIdle) {
 		const deadline = Date.now() + options.timeoutS * 1000;
 		for (;;) {
-			const sessions = await fetchSessions(running.url).catch(() => []);
-			const busy = busySessions(sessions);
+			const busy = await busyNow();
 			if (busy.length === 0) break;
 			if (Date.now() >= deadline) {
 				process.stderr.write(`still busy after ${options.timeoutS}s: ${describeSessions(busy)}\n`);
@@ -445,17 +549,37 @@ async function cmdRestart(options: Options): Promise<void> {
 			await delay(1000);
 		}
 	} else if (!options.force) {
-		const busy = busySessions(await fetchSessions(running.url).catch(() => []));
+		const busy = await busyNow();
 		if (busy.length > 0) {
 			throw new Error(`refusing to restart while busy: ${describeSessions(busy)}; use --force or --when-idle`);
 		}
 	}
 
-	const args = running.args.length > 0 ? running.args : serveArgs(options);
-	const stopped = await stopDaemon(options.dataDir);
-	if (!stopped.stopped) throw new Error(`pixip (pid ${running.pid}) did not stop`);
-	const state = await startDaemon({ dataDir: options.dataDir, args });
-	process.stdout.write(`pixip restarted on ${state.url} (pid ${state.pid})\n`);
+	// Hand the destructive half to a detached helper. This process may be a child
+	// of a Pi child that is about to be stopped, so it must not be the one doing
+	// `stopDaemon()`; the helper survives the shutdown and starts the replacement.
+	spawnRestartHelper(options);
+
+	// A normal shell waits here and prints the new URL. Inside a session this
+	// process is killed when the old daemon stops its child; the helper finishes
+	// the job and logs it.
+	const deadline = Date.now() + 30_000;
+	for (;;) {
+		const state = await readDaemonState(options.dataDir).catch(() => undefined);
+		if (state && state.pid !== running.pid) {
+			const health = await waitForHealth(state.url, 1000, state.pid).catch(() => undefined);
+			if (health) {
+				process.stdout.write(`pixip restarted on ${state.url} (pid ${state.pid})\n`);
+				return;
+			}
+		}
+		if (Date.now() >= deadline) {
+			process.stderr.write(`restart helper did not bring pixip back; see ${daemonPaths(options.dataDir).log}\n`);
+			process.exitCode = 1;
+			return;
+		}
+		await delay(100);
+	}
 }
 
 main().catch((error: unknown) => {

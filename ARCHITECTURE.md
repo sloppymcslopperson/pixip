@@ -177,10 +177,21 @@ client asset, so `commands` rides on the asset re-read.
 
 A hard restart is explicit: `pixip restart` refuses while a session is busy
 unless `--force`, or waits for every session to be idle with `--when-idle`
-(bounded by `--timeout`, default 300 s, exit 2 on timeout). The CLI stops the old
-process (SIGTERM, then SIGKILL) and spawns the same serve args. Nothing is lost
-that the JSONL does not already hold, and the client reconnects with backoff and
-its durable cursor.
+(bounded by `--timeout`, default 300 s, exit 2 on timeout).
+
+The stop/start itself runs in a **detached helper** (`restart --detached`, stdio
+to `<data-dir>/pixip.log`), not in the CLI process. This is what makes a restart
+issued from inside a pixip session work: a bash tool is a child of the Pi child
+the old daemon is about to stop, so the foreground CLI dies with its session.
+The helper is in its own session (`setsid` + `unref`), survives that shutdown,
+waits for the old pid to exit, and starts the same serve args. `PIXIP_INSIDE=1`
+and `PIXIP_SESSION_ID` are exported to every Pi child, so the CLI knows it is
+inside a session: `--when-idle` ignores the calling session (it is the one being
+replaced) and `pixip stop` from inside is turned into a forced restart instead of
+taking the service down. A shell outside pixip still stops for real.
+
+Nothing is lost that the JSONL does not already hold, and the client reconnects
+with backoff and its durable cursor.
 
 ## Built-in slash commands
 

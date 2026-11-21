@@ -115,8 +115,11 @@ collide. One process owns a data dir at a time: the bare foreground command
 refuses to start when a daemon already owns it. Soft refresh (`pixip refresh`, `SIGHUP`, or the header's `reload`) keeps
 children and sockets, and its endpoint is loopback-only because the UI has no
 auth. Hard restart refuses while a session is busy unless `--force`;
-`--when-idle` waits up to `--timeout` seconds (default 300, exit 2) and is the
-safe way to pick up hub changes from inside pixip. The phone reconnects with
+`--when-idle` waits up to `--timeout` seconds (default 300, exit 2) for the other
+sessions and is the safe way to pick up hub changes from inside pixip: the
+stop/start runs in a detached helper that survives the calling session, and
+`pixip stop` issued from inside a session restarts instead of taking the service
+down (use a shell outside pixip to really stop it). The phone reconnects with
 backoff and its durable cursor, and sessions reattach from their JSONL.
 
 ## Not yet

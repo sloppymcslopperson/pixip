@@ -846,7 +846,7 @@ export class Hub {
 			command: this.options.piBin,
 			args: [...input.args, ...this.options.extraPiArgs],
 			cwd: input.cwd,
-			env: { ...this.options.env, PIXIP_SESSION_ID: logicalId },
+			env: { ...this.options.env, PIXIP_SESSION_ID: logicalId, PIXIP_INSIDE: "1" },
 			onRecord: (raw, record) => this.onRecord(info, raw, record),
 			onStderr: (chunk) => this.options.log(`[pi ${input.cwd}] ${chunk.trimEnd()}`),
 			onExit: (code, signal) => {

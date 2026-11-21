@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -165,6 +165,30 @@ describe("daemon lifecycle", () => {
 		await run(["stop", "--data-dir", dir]);
 	});
 
+	it("turns stop from inside a pixip session into a restart", async () => {
+		const dir = await root();
+		const { pid } = await start(dir);
+		const result = await run(["stop", "--data-dir", dir], { PIXIP_INSIDE: "1" });
+		assert.equal(result.code, 0, result.stderr);
+		assert.match(result.stderr, /restarting instead/);
+		const state = await readDaemonState(dir);
+		assert.ok(state && state.pid !== pid);
+		assert.equal(pidAlive(pid), false);
+		// From a normal shell the same command really stops it.
+		const stopped = await run(["stop", "--data-dir", dir]);
+		assert.equal(stopped.code, 0, stopped.stderr);
+		assert.match(stopped.stdout, /stopped pixip/);
+		assert.equal(await runningDaemon(dir), undefined);
+	});
+
+	it("does not start a daemon when an inside stop finds none running", async () => {
+		const dir = await root();
+		const result = await run(["stop", "--data-dir", dir], { PIXIP_INSIDE: "1" });
+		assert.equal(result.code, 0, result.stderr);
+		assert.match(result.stdout, /not running/);
+		assert.equal(await runningDaemon(dir), undefined);
+	});
+
 	it("answers SIGHUP with a soft refresh", async () => {
 		const dir = await root();
 		const { url, pid } = await start(dir);
@@ -233,6 +257,51 @@ describe("hard restart", () => {
 		assert.equal(after.length, 1);
 		assert.equal(after[0]?.id, id);
 		assert.equal(after[0]?.state, "stopped");
+		await run(["stop", "--data-dir", dir]);
+	});
+
+	it("does the stop/start in a detached helper that survives its caller", async () => {
+		const dir = await root();
+		const { pid } = await start(dir);
+		// Start a foreground restart, wait until the helper has logged its first
+		// line (it is alive and owns the stop/start), then kill the foreground.
+		// The helper is in its own session, so the daemon still comes back.
+		const child = spawn(process.execPath, [CLI, "restart", "--data-dir", dir], { stdio: "ignore" });
+		await waitFor(async () => {
+			const log = await readFile(join(dir, "pixip.log"), "utf8").catch(() => "");
+			return log.includes("[restart helper]");
+		}, 15_000);
+		child.kill("SIGKILL");
+		await waitFor(async () => {
+			const state = await runningDaemon(dir);
+			return Boolean(state && state.pid !== pid);
+		}, 15_000);
+		assert.equal(pidAlive(pid), false);
+		await run(["stop", "--data-dir", dir]);
+	});
+
+	it("exposes the helper directly with --detached", async () => {
+		const dir = await root();
+		const { pid } = await start(dir);
+		const replaced = await run(["restart", "--detached", "--data-dir", dir]);
+		assert.equal(replaced.code, 0, replaced.stderr);
+		const state = await readDaemonState(dir);
+		assert.ok(state && state.pid !== pid);
+		await run(["stop", "--data-dir", dir]);
+	});
+
+	it("--when-idle does not wait for the calling session", async () => {
+		const dir = await root();
+		const { url, pid } = await start(dir, { FAKE_PI_IS_STREAMING: "1" });
+		const created = await createSession(url, dir);
+		const logicalId = String(created["logicalId"]);
+		assert.ok(logicalId);
+		const restarted = await run(["restart", "--data-dir", dir, "--when-idle", "--timeout", "1"], {
+			PIXIP_SESSION_ID: logicalId,
+		});
+		assert.equal(restarted.code, 0, restarted.stderr);
+		const state = await readDaemonState(dir);
+		assert.ok(state && state.pid !== pid);
 		await run(["stop", "--data-dir", dir]);
 	});
 
