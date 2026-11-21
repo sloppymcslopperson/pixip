@@ -1,6 +1,7 @@
 ---
 grilled: true
 leg: tui-parity-1
+commit: "91c2e62"
 ---
 
 pixip can run as a managed background daemon and refresh itself: a soft reload of assets, command policy and the session index without touching live children, and a hard restart that survives via JSONL. This is what lets the agent edit pixip and pick up its own changes mid-session, and lets the user keep pixip up across shells.
