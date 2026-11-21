@@ -218,6 +218,40 @@ describe("built-in commands over the socket", () => {
 		await hub.shutdown();
 	});
 
+	it("mirrors the pending queue and restores it on clear_queue", async () => {
+		const paths = await fixtureRoot();
+		const { hub, server, url } = await boot(paths, {
+			FAKE_PI_SESSION_ID: OLD_ID,
+			FAKE_PI_FOLLOW_UP: JSON.stringify(["summarize when finished"]),
+		});
+		const inbox = await connect(url);
+		await waitFor(() => framesOf(inbox, "snapshot").length > 0);
+
+		const queueEvents = () =>
+			framesOf(inbox, "event")
+				.map((frame) => frame["ev"] as { type?: string; steering?: string[]; followUp?: string[] })
+				.filter((event) => event?.type === "queue_update");
+
+		inbox.ws.send(JSON.stringify({ t: "steer", text: "change direction" }));
+		await waitFor(() => queueEvents().some((event) => event.steering?.[0] === "change direction"));
+		assert.deepEqual(queueEvents().at(-1)?.followUp, ["summarize when finished"]);
+
+		inbox.ws.send(JSON.stringify({ t: "clear_queue" }));
+		await waitFor(() => framesOf(inbox, "queue").length > 0);
+		const cleared = framesOf(inbox, "queue").at(-1);
+		assert.deepEqual(cleared?.["steering"], ["change direction"]);
+		assert.deepEqual(cleared?.["followUp"], ["summarize when finished"]);
+		// The fixture emits a fresh complete event, so the chips clear themselves.
+		await waitFor(() =>
+			queueEvents().some((event) => (event.steering ?? []).length === 0 && (event.followUp ?? []).length === 0),
+		);
+		assert.equal((await records(paths)).filter((record) => record["type"] === "clear_queue").length, 1);
+
+		inbox.close();
+		await server.close();
+		await hub.shutdown();
+	});
+
 	it("answers copy with Pi's last assistant text", async () => {
 		const paths = await fixtureRoot();
 		const { hub, server, url } = await boot(paths, { FAKE_PI_SESSION_ID: OLD_ID, FAKE_PI_LAST_TEXT: "the last answer" });

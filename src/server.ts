@@ -16,6 +16,7 @@ import {
 	frameModels,
 	frameOpened,
 	framePolicy,
+	frameQueue,
 	frameSnapshot,
 	frameThinking,
 	WIRE_VERSION,
@@ -399,6 +400,11 @@ async function handleCommand(
 			case "steer":
 				await hub.steer(sessionId, String(message["text"] ?? ""));
 				break;
+			case "clear_queue": {
+				const texts = await hub.clearQueue(sessionId);
+				send(frameQueue(texts.steering, texts.followUp));
+				break;
+			}
 			case "bash": {
 				// The client owns the id: it paints the card optimistically and matches
 				// verbatim `bash_execution_update` events by it.

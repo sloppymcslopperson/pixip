@@ -88,6 +88,7 @@ Hub → client:
 | `copy` | `text` | answer to a `copy` frame: Pi's last assistant text (`null` if none) |
 | `policy` | `policy` (`allow`, `deny`, `bash`) | effective per-session command policy |
 | `commands` | `commands` (`name`, `description?`, `source`) | live `get_commands` entries for the `/` menu; sent once per attach, cached by the client |
+| `queue` | `steering`, `followUp` | answer to `clear_queue`: the texts Pi removed, restored into the composer unsent |
 | `bash` | `id`, `command`, `excludeFromContext`, `output`, `exitCode`, `cancelled`, `truncated`, `fullOutputPath?`, `error?` | terminal result for `!`/`!!`; chunks arrive as `event` |
 | `error` | `message` | protocol/command failure |
 
@@ -97,7 +98,8 @@ Client → hub:
 |---|---|---|
 | `create` | `cwd`, `name?` | spawn a new session |
 | `prompt` | `text`, `streamingBehavior?` | `prompt` (`"steer"` while busy: extension commands must still execute) |
-| `steer` | `text` | `steer` (plain text only) |
+| `steer` | `text` | `steer` (plain text only); the chips follow Pi's verbatim `queue_update` events |
+| `clear_queue` | – | `clear_queue`; answered with a `queue` frame carrying the restored texts |
 | `bash` | `id`, `command`, `excludeFromContext` | `bash`; `id` is repeated on streamed updates and the final frame |
 | `compact` | `instructions?` | `compact` (`customInstructions`) |
 | `set_session_name` | `name` | `set_session_name` |

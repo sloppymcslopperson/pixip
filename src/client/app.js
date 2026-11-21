@@ -12,6 +12,7 @@ import {
 	toolCallsOf,
 } from "./render.js";
 import { classifyInput, commandQuery, filterCommands, isAllowed, menuCatalog, menuInsertText } from "./commands.js";
+import { queueCount, queueFromEvent, queueTexts, restoreText } from "./queue.js";
 import { formatSession } from "./sessionInfo.js";
 import {
 	contextLevel,
@@ -49,6 +50,7 @@ const ui = {
 	log: $("#log"),
 	dock: $("#dock"),
 	menu: $("#menu"),
+	queue: $("#queue"),
 	composer: $("#composer"),
 	input: $("#input"),
 	send: $("#send"),
@@ -73,6 +75,7 @@ const state = {
 	levels: [],
 	dynamicCommands: [], // live get_commands entries for the `/` menu
 	menu: { items: [], index: 0 },
+	queue: { steering: [], followUp: [] }, // Pi's pending steer/follow-up texts
 	policy: null, // effective per-session command policy (hub-resolved)
 	bashRunning: false,
 	quitting: false,
@@ -157,6 +160,8 @@ async function showList() {
 	state.pendingUser = null;
 	state.policy = null;
 	state.dynamicCommands = [];
+	state.queue = { steering: [], followUp: [] };
+	renderQueue();
 	closeMenu();
 	state.bashRunning = false;
 	state.quitting = false;
@@ -234,6 +239,8 @@ function openSession(id) {
 	state.pendingUser = null;
 	state.policy = null;
 	state.dynamicCommands = [];
+	state.queue = { steering: [], followUp: [] };
+	renderQueue();
 	closeMenu();
 	state.bashRunning = false;
 	state.quitting = false;
@@ -332,6 +339,9 @@ function handleFrame(frame) {
 		case "commands":
 			state.dynamicCommands = Array.isArray(frame.commands) ? frame.commands : [];
 			if (!ui.menu.hidden) renderMenu();
+			break;
+		case "queue":
+			restoreClearedQueue(frame);
 			break;
 		case "bash":
 			finishBash(frame);
@@ -684,6 +694,18 @@ function handleEvent(event) {
 		case "extension_ui_request":
 			handleUiRequest(event);
 			break;
+		case "queue_update": {
+			// The event carries the complete queue: replace, never append.
+			state.queue = queueFromEvent(event);
+			if (queueCount(state.queue) > 0) {
+				// The chips below are the honest pending state; the optimistic echo
+				// would otherwise duplicate a message that has not reached Pi yet.
+				state.pendingUser?.remove();
+				state.pendingUser = null;
+			}
+			renderQueue();
+			break;
+		}
 		case "session_info_changed":
 			if (state.info) state.info.name = event.name;
 			applyInfo();
@@ -1274,6 +1296,71 @@ ui.menu.addEventListener("pointerdown", (event) => {
 	event.preventDefault();
 	chooseMenu(Number(row.dataset.index));
 });
+
+// --------------------------------------------------------------- queue chips
+
+/**
+ * Pending steering/follow-up chips above the composer (07). Pi's `queue_update`
+ * carries the whole queue, so this replaces the chips; the only action is the
+ * X, which clears both lists and restores the texts into the composer.
+ */
+function renderQueue() {
+	const queue = state.queue;
+	const count = queueCount(queue);
+	if (count === 0) {
+		if (ui.queue.hidden) return;
+		ui.queue.hidden = true;
+		ui.queue.textContent = "";
+		scheduleScroll();
+		return;
+	}
+	ui.queue.textContent = "";
+	const head = document.createElement("div");
+	head.className = "queue-head";
+	const label = document.createElement("span");
+	label.className = "queue-label";
+	label.textContent = `${count} queued`;
+	const clear = document.createElement("button");
+	clear.type = "button";
+	clear.className = "queue-clear";
+	clear.setAttribute("aria-label", "Clear queued messages");
+	clear.title = "clear and restore to the composer";
+	clear.textContent = "×";
+	clear.addEventListener("click", () => send({ t: "clear_queue" }));
+	head.append(label, clear);
+
+	const chips = document.createElement("div");
+	chips.className = "queue-chips";
+	for (const text of queueTexts(queue)) {
+		const chip = document.createElement("button");
+		chip.type = "button";
+		chip.className = "queue-chip";
+		chip.textContent = text;
+		chip.title = "tap to expand";
+		chip.addEventListener("click", () => chip.classList.toggle("expanded"));
+		chips.append(chip);
+	}
+	ui.queue.append(head, chips);
+	ui.queue.hidden = false;
+	scheduleScroll();
+}
+
+/** `clear_queue` answer: chips go away, texts return to the composer unsent. */
+function restoreClearedQueue(frame) {
+	const cleared = queueFromEvent(frame);
+	state.queue = { steering: [], followUp: [] };
+	renderQueue();
+	const count = queueCount(cleared);
+	const text = restoreText(cleared, ui.input.value);
+	if (count > 0 && text !== ui.input.value) {
+		ui.input.value = text;
+		resize();
+		ui.input.focus();
+		ui.input.setSelectionRange(text.length, text.length);
+	}
+	toast(count > 0 ? `restored ${count} queued message${count === 1 ? "" : "s"}` : "queue already empty");
+	scheduleScroll();
+}
 
 function resize() {
 	ui.input.style.height = "auto";

@@ -385,6 +385,22 @@ export class Hub {
 	}
 
 	/**
+	 * `clear_queue`: drop every queued steering/follow-up message and return the
+	 * texts. One call clears both lists (RPC semantics); the client restores them
+	 * into the composer and never sends them automatically.
+	 */
+	async clearQueue(id: string): Promise<{ steering: string[]; followUp: string[] }> {
+		const live = this.require(id);
+		const data = (await live.proc.command({ type: "clear_queue" })) as {
+			steering?: unknown;
+			followUp?: unknown;
+		} | null;
+		const texts = (value: unknown): string[] =>
+			Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+		return { steering: texts(data?.steering), followUp: texts(data?.followUp) };
+	}
+
+	/**
 	 * Run one `!`/`!!` command through Pi's RPC `bash`. The caller-supplied id is
 	 * repeated on every `bash_execution_update`, so the client can stream into the
 	 * card it already painted without the hub parsing events.

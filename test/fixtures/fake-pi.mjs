@@ -30,6 +30,11 @@ let leafId = env.FAKE_PI_LEAF ?? entries.at(-1)?.id ?? null;
 const during = JSON.parse(env.FAKE_PI_DURING ?? "[]");
 const duringEntry = env.FAKE_PI_DURING_ENTRY ? JSON.parse(env.FAKE_PI_DURING_ENTRY) : undefined;
 const onFooter = JSON.parse(env.FAKE_PI_ON_FOOTER ?? "[]");
+// Pending steering/follow-up queue: `queue_update` always carries the complete
+// current queue, and `clear_queue` empties both lists and returns the texts.
+const steering = [];
+let followUp = JSON.parse(env.FAKE_PI_FOLLOW_UP ?? "[]");
+const emitQueue = () => send({ type: "queue_update", steering: [...steering], followUp: [...followUp] });
 
 // Pi allocates a fresh session id on every spawn (even when reattached at an
 // existing path); a file that already has a header keeps its id.
@@ -191,7 +196,17 @@ function handle(line) {
 		}
 		case "steer":
 			logRecord({ type: "steer", id: command.id, text: command.message });
+			steering.push(command.message);
+			emitQueue();
 			return ok(command.id, "steer", {});
+		case "clear_queue": {
+			logRecord({ type: "clear_queue" });
+			const data = { steering: [...steering], followUp: [...followUp] };
+			steering.length = 0;
+			followUp = [];
+			emitQueue();
+			return ok(command.id, "clear_queue", data);
+		}
 		case "bash": {
 			logRecord({
 				type: "bash",

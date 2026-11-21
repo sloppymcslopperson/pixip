@@ -158,6 +158,14 @@ export function framePolicy(policy: CommandPolicy): string {
 }
 
 /**
+ * Answer to a `clear_queue` frame: the texts Pi removed, so the client can
+ * restore them into the composer (the TUI's Esc behaviour).
+ */
+export function frameQueue(steering: string[], followUp: string[]): string {
+	return JSON.stringify({ t: "queue", steering, followUp });
+}
+
+/**
  * Terminal `bash` frame. `id` is the client-generated id also used for the RPC
  * command, so streamed `bash_execution_update` events and this result agree
  * without the hub parsing event payloads.
