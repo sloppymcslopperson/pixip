@@ -1,6 +1,7 @@
 ---
 grilled: true
 leg: tui-parity-1
+commit: "5dee5b4"
 ---
 
 `/`, `/command args`, `!cmd` and `!!cmd` must behave like Pi's TUI from the pixip composer. This slice owns the prefix classifier, the shared command registry/policy (whitelist/blacklist), bash execution, and the prompt/steer dispatch that keeps extension commands working while busy.

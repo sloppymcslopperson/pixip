@@ -44,3 +44,9 @@ Slice 3 of the TUI-parity leg for dogfooding: a pixip session has to be manageab
 - Do not round-trip through `get_entries` for `/session`; use the footer + `get_state` the hub already serves.
 - Keep the policy/notice behaviour from `00`; this ticket must not bypass it.
 - Screenshots (390/1280) are the owner's step; note the gap in the ticket when closing.
+
+### Addendum (grilled 2026-11-21)
+
+- `/session` renders its meta block in the existing bottom sheet (`sheet()`), not
+  in the transcript: it is local UI, scrolls nowhere, and adds nothing to model
+  context. Same for the no-argument `/name` readout (toast stays as decided).
