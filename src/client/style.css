@@ -147,6 +147,7 @@ main { flex: 1; min-height: 0; }
 .block.assistant .who { color: var(--accent); }
 .block.meta { border-left-color: var(--line); color: var(--fg-dim); font-size: 0.87em; }
 .block.starting { border-left-color: var(--accent); color: var(--fg-faint); font-style: italic; }
+.block.restart { border-left-color: var(--accent); color: var(--fg-dim); }
 /* "load earlier": a full-width affordance above the oldest painted entry. */
 .earlier {
 	flex: 0 0 auto;

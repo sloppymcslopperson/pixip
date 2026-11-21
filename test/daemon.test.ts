@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, before, describe, it } from "node:test";
 
+import WebSocket from "ws";
+
 import { pidAlive, readDaemonState, refreshDaemon, runningDaemon, fetchHealth, fetchSessions } from "../src/daemon.ts";
 
 const CLI = fileURLToPath(new URL("../bin/pixip.ts", import.meta.url));
@@ -257,6 +259,59 @@ describe("hard restart", () => {
 		assert.equal(after.length, 1);
 		assert.equal(after[0]?.id, id);
 		assert.equal(after[0]?.state, "stopped");
+		await run(["stop", "--data-dir", dir]);
+	});
+
+	it("announces a restart and reattaches the same logical session on reconnect", async () => {
+		const dir = await root();
+		const sessionId = "01a1fb3f-aaaa-7664-b952-f6673a2c7a8c";
+		const entry = {
+			type: "message",
+			id: "m1",
+			parentId: null,
+			timestamp: "2026-11-21T00:00:01.000Z",
+			message: { role: "user", timestamp: 111, content: [{ type: "text", text: "hi" }] },
+		};
+		const fakeEnv = {
+			FAKE_PI_SESSION_ID: sessionId,
+			FAKE_PI_NEW_SESSION_ID: sessionId,
+			FAKE_PI_ENTRIES: JSON.stringify([entry]),
+			FAKE_PI_LEAF: "m1",
+		};
+		const { url, pid } = await start(dir, fakeEnv);
+		const created = await createSession(url, dir);
+		const logicalId = String(created["logicalId"]);
+
+		const ws = new WebSocket(`${url.replace(/^http/, "ws")}ws?session=${encodeURIComponent(sessionId)}`);
+		const frames: Array<Record<string, unknown>> = [];
+		ws.on("message", (data) => frames.push(JSON.parse(String(data)) as Record<string, unknown>));
+		await waitFor(async () => frames.some((frame) => frame["t"] === "snapshot"), 10_000);
+		const first = frames.find((frame) => frame["t"] === "snapshot");
+		assert.equal((first?.["entries"] as unknown[]).length, 1);
+
+		const restarted = await run(["restart", "--data-dir", dir, "--force"], fakeEnv);
+		assert.equal(restarted.code, 0, restarted.stderr);
+		assert.ok(frames.some((frame) => frame["t"] === "restarting"));
+		const state = await readDaemonState(dir);
+		assert.ok(state && state.pid !== pid);
+
+		// Reconnect with the durable cursor: the new daemon reattaches the same
+		// logical session and the delta is empty, so the known entry is not painted
+		// twice.
+		const reopened = new WebSocket(
+			`${state.url.replace(/^http/, "ws")}ws?session=${encodeURIComponent(sessionId)}&since=m1`,
+		);
+		const next: Array<Record<string, unknown>> = [];
+		reopened.on("message", (data) => next.push(JSON.parse(String(data)) as Record<string, unknown>));
+		await waitFor(async () => next.some((frame) => frame["t"] === "snapshot"), 15_000);
+		const snapshot = next.find((frame) => frame["t"] === "snapshot");
+		assert.equal(snapshot?.["resume"], true);
+		assert.equal((snapshot?.["session"] as Record<string, unknown>)["logicalId"], logicalId);
+		assert.equal((snapshot?.["entries"] as unknown[]).length, 0);
+		const sessions = await fetchSessions(state.url);
+		assert.ok(sessions.some((session) => session.logicalId === logicalId));
+		ws.close();
+		reopened.close();
 		await run(["stop", "--data-dir", dir]);
 	});
 

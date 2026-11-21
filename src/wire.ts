@@ -140,6 +140,11 @@ export function frameError(message: string): string {
 	return JSON.stringify({ t: "error", message });
 }
 
+/** The old daemon tells live sockets it is being replaced before it closes. */
+export function frameRestarting(): string {
+	return JSON.stringify({ t: "restarting" });
+}
+
 export function frameFooter(footer: FooterData): string {
 	return JSON.stringify({ t: "footer", footer });
 }

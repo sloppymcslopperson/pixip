@@ -330,10 +330,16 @@ async function serve(options: Options): Promise<void> {
 	process.on("SIGHUP", () => void softRefresh("SIGHUP"));
 
 	let closing = false;
-	const shutdown = async (signal: string) => {
+	const shutdown = async (signal: string, restart = false) => {
 		if (closing) return;
 		closing = true;
 		log(`${signal}: shutting down`);
+		if (restart) {
+			// SIGUSR2 means the helper is replacing this daemon: give live sockets
+			// the explicit `restarting` frame, then a moment to flush it before close.
+			hub.announceRestart();
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
 		await server.close();
 		await hub.shutdown();
 		await clearDaemonState(options.dataDir);
@@ -341,6 +347,7 @@ async function serve(options: Options): Promise<void> {
 	};
 	process.on("SIGINT", () => void shutdown("SIGINT"));
 	process.on("SIGTERM", () => void shutdown("SIGTERM"));
+	process.on("SIGUSR2", () => void shutdown("SIGUSR2", true));
 }
 
 // --------------------------------------------------------------- lifecycle
@@ -520,7 +527,8 @@ async function runRestartHelper(options: Options): Promise<void> {
 	const args = running && running.args.length > 0 ? running.args : serveArgs(options);
 	if (running) {
 		note(`stopping pid ${running.pid}`);
-		const stopped = await stopDaemon(options.dataDir);
+		// SIGUSR2 tells the old daemon this is a restart, so it announces it.
+		const stopped = await stopDaemon(options.dataDir, undefined, "SIGUSR2");
 		if (!stopped.stopped) {
 			note(`pid ${running.pid} did not stop`);
 			process.exitCode = 1;

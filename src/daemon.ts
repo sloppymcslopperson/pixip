@@ -204,12 +204,19 @@ function waitForPidExit(pid: number, timeoutMs: number): Promise<boolean> {
 	});
 }
 
-/** SIGTERM, wait, then SIGKILL; always clears a stale pid file. */
-export async function stopDaemon(dataDir: string, waitMs = 10_000): Promise<{ stopped: boolean; state?: DaemonState }> {
+/**
+ * Signal, wait, then SIGKILL; always clears a stale pid file. A restart passes
+ * `SIGUSR2` so the old daemon can announce the replacement before closing.
+ */
+export async function stopDaemon(
+	dataDir: string,
+	waitMs = 10_000,
+	signal: NodeJS.Signals = "SIGTERM",
+): Promise<{ stopped: boolean; state?: DaemonState }> {
 	const state = await runningDaemon(dataDir);
 	if (!state) return { stopped: false };
 	try {
-		process.kill(state.pid, "SIGTERM");
+		process.kill(state.pid, signal);
 	} catch {
 		// already gone: fall through to the liveness check
 	}

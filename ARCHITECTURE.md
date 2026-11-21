@@ -238,6 +238,18 @@ taking the service down. A shell outside pixip still stops for real.
 Nothing is lost that the JSONL does not already hold, and the client reconnects
 with backoff and its durable cursor.
 
+A restart is announced before it happens. The helper stops the old daemon with
+`SIGUSR2` instead of `SIGTERM`; the daemon's handler broadcasts a
+`{"t":"restarting"}` frame to every live session socket, gives it ~50 ms to
+flush, and then closes. The browser shows `restarting…`, disables the composer,
+and keeps its durable entry cursor. If a turn was streaming when the frame
+arrived, the first reconnect snapshot appends a local (non-transcript) notice
+saying the turn was interrupted; it is never sent to Pi or persisted. The new
+daemon reattaches the same logical session on reconnect (spawning it from the
+JSONL or the index record), so the URL and transcript anchor stay stable.
+Unexpected daemon crashes have no frame; the same socket-close reconnect path
+still applies, without claiming a planned restart.
+
 ## Built-in slash commands
 
 The classifier in `src/client/commands.js` marks the RPC-drivable TUI built-ins;

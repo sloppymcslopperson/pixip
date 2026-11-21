@@ -9,7 +9,7 @@ import { resolveSessionPolicy, type CommandLayer } from "./commands.ts";
 import { resolveModelArgument, resolveThinkingArgument } from "./client/commands.js";
 import { exportFileName } from "./client/sessionInfo.js";
 import { fallbackTitle, normalizeTitle, titlePrompt } from "./titles.ts";
-import { frameError, frameEvent, frameFooter, frameModels, framePolicy, frameSessions, frameSnapshot, frameStatus } from "./wire.ts";
+import { frameError, frameEvent, frameFooter, frameModels, framePolicy, frameRestarting, frameSessions, frameSnapshot, frameStatus } from "./wire.ts";
 import type { BashResult, CommandPolicy, DynamicCommand, FooterData, ModelSummary, SessionInfo, SessionState } from "./wire.ts";
 
 const run = promisify(execFile);
@@ -356,6 +356,16 @@ export class Hub {
 		const found = await this.findStored(this.trashRoot, id);
 		if (!found) throw new Error(`unknown deleted session ${id}`);
 		await rm(found.dir, { recursive: true, force: true });
+	}
+
+	/**
+	 * Tell every live session socket that the daemon is being replaced. Called on
+	 * the restart signal before shutdown, so the client can show `restarting`
+	 * instead of having to infer it from a bare socket close.
+	 */
+	announceRestart(): void {
+		const frame = frameRestarting();
+		for (const live of this.live.values()) this.broadcast(live, frame);
 	}
 
 	async shutdown(): Promise<void> {

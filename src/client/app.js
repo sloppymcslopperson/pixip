@@ -82,6 +82,9 @@ const state = {
 	stick: true,
 	streaming: null, // { section, text }
 	pendingUser: null,
+	restarting: false, // old daemon announced a restart; socket is about to close
+	restartWasBusy: false, // a turn was in flight when the restart was announced
+	restartNoticePending: false, // paint the interruption notice after the reconnect snapshot
 	tools: new Map(), // toolCallId -> <details>
 	coarse: window.matchMedia("(pointer: coarse)").matches,
 	renderQueued: false,
@@ -145,7 +148,7 @@ function connect(sessionId) {
 		state.bash.clear();
 		if (!state.sessionId) return;
 		const delay = Math.min(2000, 200 * 2 ** state.retries++);
-		toast(`reconnecting… (${delay}ms)`);
+		toast(state.restarting ? `pixip restarting — reconnecting… (${delay}ms)` : `reconnecting… (${delay}ms)`);
 		setTimeout(() => connect(state.sessionId), delay);
 	};
 }
@@ -178,6 +181,9 @@ async function showList() {
 	state.tools.clear();
 	state.streaming = null;
 	state.pendingUser = null;
+	state.restarting = false;
+	state.restartWasBusy = false;
+	state.restartNoticePending = false;
 	state.policy = null;
 	state.dynamicCommands = [];
 	state.queue = { steering: [], followUp: [] };
@@ -831,6 +837,9 @@ async function purgeStored(kind, item) {
 function openSession(id) {
 	if (state.sessionId === id) return;
 	state.sessionId = id;
+	state.restarting = false;
+	state.restartWasBusy = false;
+	state.restartNoticePending = false;
 	state.tools.clear();
 	state.streaming = null;
 	state.pendingUser = null;
@@ -890,12 +899,36 @@ function handleFrame(frame) {
 			}
 			break;
 		}
-		case "snapshot":
+		case "snapshot": {
+			const wasRestarting = state.restarting;
+			const interrupted = wasRestarting && state.restartWasBusy;
+			if (wasRestarting) {
+				state.restarting = false;
+				state.restartWasBusy = false;
+				state.restartNoticePending = true;
+				// The old child was aborted: drop the live/optimistic DOM references,
+				// then repaint from entries so a half-rendered turn or a prompt that
+				// never reached Pi cannot survive as a ghost block.
+				state.streaming = null;
+				state.pendingUser = null;
+			}
 			state.info = frame.session;
 			if (frame.resume === true) renderResume(frame.entries ?? []);
 			else if (frame.replace === true) renderReplace(frame.entries ?? [], frame.more === true);
 			else renderSnapshot(frame.entries ?? [], frame.more === true);
+			if (wasRestarting) renderTranscript();
 			applyInfo();
+			if (state.restartNoticePending) {
+				state.restartNoticePending = false;
+				appendRestartNotice(interrupted);
+			}
+			break;
+		}
+		case "restarting":
+			state.restarting = true;
+			state.restartWasBusy = Boolean(state.streaming || state.info?.state === "busy" || state.pendingUser);
+			applyInfo();
+			toast("pixip restarting…");
 			break;
 		case "history":
 			prependHistory(frame.entries ?? [], frame.more === true);
@@ -1002,23 +1035,24 @@ function handleFrame(frame) {
 function applyInfo() {
 	const info = state.info;
 	if (!info) return;
+	const restarting = state.restarting;
 	const name = info.name ?? info.id.slice(0, 8);
 	ui.title.textContent = name;
 	document.title = `${name} · pixip`;
 	// Separators live inside the `.wide` wrapper so hiding it on narrow screens
 	// does not leave dangling "· ·" separators behind.
-	let subtitle = escapeHtml(info.state);
+	let subtitle = escapeHtml(restarting ? "restarting…" : info.state);
 	const wide = [info.model, info.thinkingLevel].filter(Boolean).map((part) => escapeHtml(part));
 	if (wide.length > 0) subtitle += ` · <span class="wide">${wide.join(" · ")}</span>`;
 	if (info.messageCount) subtitle += ` · ${info.messageCount} msg`;
 	ui.sub.innerHTML = subtitle;
-	ui.sub.title = [info.state, info.model, info.thinkingLevel].filter(Boolean).join(" · ");
+	ui.sub.title = [restarting ? "restarting" : info.state, info.model, info.thinkingLevel].filter(Boolean).join(" · ");
 	ui.dot.hidden = false;
-	ui.dot.className = `dot ${info.state}`;
-	const stopped = info.state === "stopped" || info.state === "error";
-	const starting = info.state === "starting";
-	ui.input.disabled = stopped || starting;
-	ui.send.disabled = stopped || starting;
+	ui.dot.className = `dot ${restarting ? "busy" : info.state}`;
+	const stopped = !restarting && (info.state === "stopped" || info.state === "error");
+	const starting = !restarting && info.state === "starting";
+	ui.input.disabled = restarting || stopped || starting;
+	ui.send.disabled = restarting || stopped || starting;
 	// The provisional transcript is already readable; this only says the child
 	// is still booting and live events have not started yet.
 	let startingHint = ui.log.querySelector(".starting");
@@ -1228,6 +1262,17 @@ function renderResume(entries) {
 	const distance = state.stick ? ui.log.clientHeight : ui.log.scrollHeight - ui.log.scrollTop;
 	state.entries = [...state.entries, ...fresh];
 	renderTranscript(distance);
+}
+
+/** Local, non-transcript notice for the restart: never sent to Pi or persisted. */
+function appendRestartNotice(interrupted) {
+	const note = document.createElement("div");
+	note.className = "block meta restart";
+	note.textContent = interrupted
+		? "pixip restarted — the previous turn was interrupted"
+		: "pixip restarted";
+	ui.log.append(note);
+	scrollToEnd();
 }
 
 /** Prepend one older window, keeping the reading position. */
