@@ -403,6 +403,13 @@ details.tool.empty > summary { color: var(--fg-faint); }
 	padding: 0 14px;
 	font-weight: 600;
 }
+#new-row button.browse {
+	background: var(--bg-soft);
+	border: 1px solid var(--line);
+	color: var(--fg-dim);
+	font-weight: 500;
+}
+#new-row button.browse:hover { color: var(--accent); border-color: var(--accent); }
 
 /* ---- status line (TUI footer parity) ---- */
 /* The dock owns the bottom of the viewport: menu above the composer, status
@@ -639,6 +646,78 @@ details.tool.empty > summary { color: var(--fg-faint); }
 #sheet .settings-row input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(--accent); }
 #sheet .settings-text { flex: 1; font-size: 13px; color: var(--fg); }
 #sheet .settings-hint { margin: 8px 2px 12px; font-size: 11px; line-height: 1.4; color: var(--fg-faint); }
+
+/* ---- directory picker (00) ---- */
+/* Keep the sheet's background full-bleed, but centre its content at the same
+   width as the dashboard column instead of stretching rows on a wide screen. */
+#sheet .dir-sheet { width: 100%; max-width: 760px; margin-inline: auto; }
+#sheet .dir-crumbs {
+	display: flex;
+	gap: 2px;
+	overflow-x: auto;
+	overscroll-behavior-x: contain;
+	margin-bottom: 8px;
+	padding-bottom: 2px;
+	white-space: nowrap;
+}
+#sheet .dir-crumb {
+	flex: none;
+	background: none;
+	border: 0;
+	border-radius: 6px;
+	padding: 3px 4px;
+	color: var(--fg-dim);
+	font-size: 12px;
+}
+#sheet .dir-crumb + .dir-crumb::before { content: "›"; margin-right: 4px; color: var(--fg-faint); }
+#sheet .dir-crumb:disabled { color: var(--fg); }
+#sheet .dir-crumb:not(:disabled):hover { color: var(--accent); background: var(--bg-soft); }
+#sheet .dir-error { margin: 0 2px 8px; color: var(--err); font-size: 12px; overflow-wrap: anywhere; }
+#sheet .dir-list {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	max-height: 44dvh;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	margin-bottom: 10px;
+}
+#sheet .dir-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	text-align: left;
+	background: var(--bg-soft);
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	padding: 10px;
+	color: var(--fg);
+}
+#sheet .dir-row:hover { border-color: var(--accent); }
+#sheet .dir-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+#sheet .dir-parent .dir-name { color: var(--fg-faint); }
+#sheet .dir-badge {
+	flex: none;
+	border: 1px solid var(--line);
+	border-radius: 999px;
+	padding: 0 6px;
+	font-size: 9.5px;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--fg-faint);
+}
+#sheet .dir-empty { padding: 10px 2px; color: var(--fg-faint); font-size: 12px; }
+#sheet .dir-use { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); color: var(--accent); }
+#sheet .dir-mkdir { display: flex; gap: 8px; margin-bottom: 8px; }
+#sheet .dir-mkdir input { flex: 1; min-width: 0; margin-bottom: 0; }
+#sheet .dir-mkdir button {
+	flex: none;
+	padding: 0 12px;
+	border-radius: 10px;
+	border: 1px solid var(--line);
+	background: var(--bg-soft);
+}
 
 /* ---- session tree sheet (08) ---- */
 #sheet .tree {

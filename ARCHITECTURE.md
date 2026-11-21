@@ -123,12 +123,27 @@ Client → hub:
 | `ui` | `id`, `value` \| `confirmed` \| `cancelled` | `extension_ui_response` |
 
 REST is only for discovery, process verbs and downloads: `GET /api/sessions`,
-`POST /api/sessions`, `POST /api/sessions/:id/stop`,
+`POST /api/sessions`, `GET /api/dirs?path=`, `POST /api/dirs`,
+`POST /api/sessions/:id/stop`,
 `GET /api/sessions/:id/export.html` and `GET /api/sessions/:id/export.jsonl`
 (both `Content-Disposition: attachment`), `GET /api/info`, `GET /health`
 (`pid`, `startedAt`, `reloads`) and `POST /api/refresh` (loopback-only soft
 refresh). Streaming never uses HTTP requests.
 
+## New-session directory picker
+
+The dashboard's `browse` action fills the new-session path field from a bottom
+sheet; it never creates a session itself. Listing is a discovery REST call
+(`GET /api/dirs?path=`), so the hot websocket path is untouched.
+
+Browsing is fenced to `$HOME`: `src/dirs.ts` resolves both the requested path
+and home with `realpath`, refuses anything outside, and hides symlinks whose
+target escapes. Dot-directories and files are never listed. A child with a
+`.git` entry is a repo root and sorts first with a badge; the rest are
+case-insensitive alphabetical. `POST /api/dirs` creates one visible path
+segment under the current directory (`mkdir`, no `-p`) and rejects traversal,
+collisions and names starting with a dot. Paths are absolute or `~`-relative;
+relative input is resolved against home.
 ## Status line and session controls
 
 The footer mirrors Pi's own footer component

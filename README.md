@@ -62,9 +62,10 @@ do in the TUI.
 ## What works today
 
 - session list grouped by cwd with collapsible sections (collapsed by default),
-  live state (idle/busy/stopped/error), create from a path or from a group's `+`,
-  open, stop, wake/reattach; collapsing keeps hot/warm sessions and each
-  group's newest session visible by default, configurable from the header gear;
+  live state (idle/busy/stopped/error), create from a typed path, from the
+  home-fenced directory picker (`browse`), or from a group's `+`, open, stop,
+  wake/reattach; collapsing keeps hot/warm sessions and each group's newest
+  session visible by default, configurable from the header gear;
 - streamed transcript: user/assistant text, thinking collapsed, tool calls with
   ANSI output, error styling, durations;
 - composer: send while idle, steer while streaming, abort via `stop`;

@@ -4,6 +4,7 @@ import { basename, extname, join, normalize } from "node:path";
 
 import { WebSocketServer, type WebSocket } from "ws";
 
+import { createDirectory, DirError, listDirectories } from "./dirs.ts";
 import { Hub } from "./hub.ts";
 import {
 	frameBash,
@@ -201,6 +202,16 @@ async function handleHttp(
 			send(200, JSON.stringify({ ok: true, wire: WIRE_VERSION, defaultCwd: process.cwd(), home: process.env["HOME"] ?? "" }));
 			return;
 		}
+		if (req.method === "GET" && url.pathname === "/api/dirs") {
+			send(200, JSON.stringify(await listDirectories(url.searchParams.get("path"), osHome())));
+			return;
+		}
+		if (req.method === "POST" && url.pathname === "/api/dirs") {
+			const body = await readBody(req);
+			const parsed = JSON.parse(body || "{}") as { path?: string; name?: unknown };
+			send(200, JSON.stringify(await createDirectory(parsed.path, parsed.name, osHome())));
+			return;
+		}
 		if (req.method === "GET" && url.pathname === "/api/sessions") {
 			send(200, JSON.stringify(await hub.list()));
 			return;
@@ -256,9 +267,14 @@ async function handleHttp(
 		}
 		send(200, asset, CONTENT_TYPES[extname(normalized)] ?? "application/octet-stream");
 	} catch (error) {
+		const status = error instanceof DirError ? error.status : 500;
 		log(`http error: ${(error as Error).message}`);
-		send(500, JSON.stringify({ error: (error as Error).message }));
+		send(status, JSON.stringify({ error: (error as Error).message }));
 	}
+}
+
+function osHome(): string {
+	return process.env["HOME"] ?? process.cwd();
 }
 
 async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: string) => void): Promise<void> {
