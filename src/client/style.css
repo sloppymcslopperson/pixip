@@ -78,6 +78,7 @@ button, input, textarea { font: inherit; color: inherit; }
 .scale-btn:disabled { opacity: 0.35; }
 /* Current level sits between the buttons, tabular so the header does not jitter. */
 .scale-value { min-width: 3.4ch; text-align: center; font-size: 10.5px; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+.settings-btn { padding: 4px 6px; font-size: 14px; }
 #stop { margin-left: 16px; color: var(--err); border-color: color-mix(in srgb, var(--err) 45%, var(--line)); }
 
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--fg-faint); flex: none; }
@@ -342,6 +343,49 @@ details.tool.empty > summary { color: var(--fg-faint); }
 .row .row-name { font-weight: 600; font-size: 14px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row .row-cwd { color: var(--fg-faint); font-size: 11.5px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row .row-state { font-size: 11px; color: var(--fg-faint); }
+
+/* ---- session groups (group by cwd) ---- */
+.group { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.group-head { display: flex; align-items: stretch; gap: 6px; min-width: 0; }
+.group-toggle,
+.group-title {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	align-items: baseline;
+	gap: 7px;
+	text-align: left;
+	background: none;
+	border: 0;
+	padding: 7px 4px;
+	color: var(--fg-dim);
+}
+.group-toggle:hover { color: var(--fg); }
+.group-toggle[aria-expanded="true"] { color: var(--fg); }
+.group-chevron { flex: none; width: 1ch; color: var(--fg-faint); }
+.group-path {
+	flex: 1;
+	min-width: 0;
+	font-size: 12.5px;
+	font-weight: 600;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.group-count { flex: none; font-size: 10.5px; color: var(--fg-faint); white-space: nowrap; }
+.group-new {
+	flex: none;
+	width: 34px;
+	min-height: 34px;
+	background: none;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	color: var(--fg-dim);
+	font-size: 18px;
+	line-height: 1;
+}
+.group-new:hover { color: var(--accent); border-color: var(--accent); }
+.group-rows { display: flex; flex-direction: column; gap: 6px; }
 #new-row { display: flex; gap: 8px; margin-bottom: 4px; }
 #new-row input {
 	flex: 1;
@@ -583,6 +627,18 @@ details.tool.empty > summary { color: var(--fg-faint); }
 	color: var(--fg);
 }
 #sheet .sheet-actions a.sheet-download:hover { border-color: var(--accent); }
+#sheet .settings-row {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	padding: 12px;
+	border: 1px solid var(--line);
+	border-radius: 10px;
+	background: var(--bg-soft);
+}
+#sheet .settings-row input { width: auto; margin: 2px 0 0; flex: none; accent-color: var(--accent); }
+#sheet .settings-text { flex: 1; font-size: 13px; color: var(--fg); }
+#sheet .settings-hint { margin: 8px 2px 12px; font-size: 11px; line-height: 1.4; color: var(--fg-faint); }
 
 /* ---- session tree sheet (08) ---- */
 #sheet .tree {

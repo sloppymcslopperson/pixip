@@ -198,7 +198,7 @@ async function handleHttp(
 			return;
 		}
 		if (req.method === "GET" && url.pathname === "/api/info") {
-			send(200, JSON.stringify({ ok: true, wire: WIRE_VERSION, defaultCwd: process.cwd() }));
+			send(200, JSON.stringify({ ok: true, wire: WIRE_VERSION, defaultCwd: process.cwd(), home: process.env["HOME"] ?? "" }));
 			return;
 		}
 		if (req.method === "GET" && url.pathname === "/api/sessions") {
@@ -268,7 +268,7 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 	};
 
 	if (!sessionId) {
-		send(frameHello(await hub.list(), process.cwd()));
+		send(frameHello(await hub.list(), process.cwd(), process.env["HOME"] ?? ""));
 		const unwatch = hub.watch((frame) => send(frame));
 		ws.on("close", unwatch);
 		ws.on("message", (data) => {

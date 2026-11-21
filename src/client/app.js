@@ -22,6 +22,18 @@ import {
 	footerStatsRight,
 } from "./footer.js";
 import {
+	COLLAPSED_STORAGE_KEY,
+	KEEP_ACTIVE_STORAGE_KEY,
+	countLabel,
+	groupLabel,
+	groupSessions,
+	groupView,
+	parseCollapsed,
+	parseKeepActive,
+	serializeCollapsed,
+	serializeKeepActive,
+} from "./sessionGroups.js";
+import {
 	DEFAULT_PERCENT,
 	STORAGE_KEY,
 	STEPS,
@@ -41,6 +53,7 @@ const ui = {
 	title: $("#title"),
 	sub: $("#sub"),
 	dot: $("#dot"),
+	settings: $("#settings"),
 	reload: $("#reload"),
 	stop: $("#stop"),
 	scaleDown: $("#scale-down"),
@@ -85,6 +98,11 @@ const state = {
 	more: false, // older entries exist before entries[0]
 	loadingEarlier: false,
 	scale: DEFAULT_PERCENT, // transcript text size, percent (device-local)
+	home: "", // $HOME for dashboard path shortening (device-local cache)
+	defaultCwd: "", // last discovery value, so list refreshes do not clear the form
+	sessions: [], // last dashboard list, for local re-renders
+	collapsed: readCollapsedGroups(), // cwd key -> true when collapsed
+	keepActive: readKeepActive(), // pin hot/warm/newest when collapsed
 };
 
 // ------------------------------------------------------------------ transport
@@ -176,6 +194,7 @@ async function showList() {
 	ui.dock.hidden = true;
 	ui.stop.hidden = true;
 	ui.back.hidden = true;
+	ui.settings.hidden = false;
 	ui.list.hidden = false;
 	ui.title.textContent = "sessions";
 	ui.sub.textContent = "";
@@ -188,9 +207,11 @@ async function showList() {
 	let info = {};
 	try {
 		info = await (await fetch("/api/info")).json();
+		if (typeof info.defaultCwd === "string") state.defaultCwd = info.defaultCwd;
+		if (typeof info.home === "string") state.home = info.home;
 	} catch {}
 	const sessions = await listSessions();
-	renderList(sessions, info.defaultCwd);
+	renderList(sessions, state.defaultCwd, state.home);
 }
 
 async function listSessions() {
@@ -201,11 +222,18 @@ async function listSessions() {
 	}
 }
 
-function renderList(sessions, defaultCwd) {
+function renderList(sessions, defaultCwd = state.defaultCwd, home = state.home) {
+	// A list refresh (or a local toggling re-render) must not discard a path the
+	// user is typing into the new-session form.
+	const draft = ui.list.querySelector("#new-row input")?.value;
+	state.sessions = Array.isArray(sessions) ? sessions : [];
+	if (typeof defaultCwd === "string") state.defaultCwd = defaultCwd;
+	if (typeof home === "string") state.home = home;
 	ui.list.textContent = "";
 	const form = document.createElement("form");
 	form.id = "new-row";
-	form.innerHTML = `<input name="cwd" value="${escapeHtml(defaultCwd ?? "")}" placeholder="/path/to/project" autocapitalize="off" autocorrect="off" spellcheck="false" /><button type="submit">new</button>`;
+	const value = draft !== undefined ? draft : state.defaultCwd ?? "";
+	form.innerHTML = `<input name="cwd" value="${escapeHtml(value)}" placeholder="/path/to/project" autocapitalize="off" autocorrect="off" spellcheck="false" /><button type="submit">new</button>`;
 	form.addEventListener("submit", (event) => {
 		event.preventDefault();
 		const cwd = form.querySelector("input")?.value?.trim();
@@ -213,23 +241,145 @@ function renderList(sessions, defaultCwd) {
 	});
 	ui.list.append(form);
 
-	if (sessions.length === 0) {
+	const groups = groupSessions(state.sessions);
+	if (groups.length === 0) {
 		const empty = document.createElement("div");
 		empty.className = "row row-state";
 		empty.textContent = "no sessions yet";
 		ui.list.append(empty);
 		return;
 	}
-	for (const session of sessions) {
-		const row = document.createElement("button");
-		row.className = "row";
-		row.dataset.id = session.id;
-		row.innerHTML = `<div class="row-top"><span class="dot ${session.state}"></span><span class="row-name">${escapeHtml(session.name ?? session.id.slice(0, 8))}</span><span class="row-state">${escapeHtml(session.state)} · ${relativeTime(session.lastActivity)}</span></div><div class="row-cwd">${escapeHtml(session.cwd)}</div>`;
-		row.addEventListener("click", () => {
-			location.hash = `s=${encodeURIComponent(session.id)}`;
+	for (const group of groups) ui.list.append(renderGroup(group));
+}
+
+function renderGroup(group) {
+	const section = document.createElement("section");
+	section.className = "group";
+	section.dataset.cwd = group.key;
+	// Open states persist; a group seen for the first time starts collapsed.
+	const collapsed = state.collapsed[group.key] !== false;
+	const view = groupView(group, collapsed, state.keepActive);
+	// The toggle exists when collapsing would actually hide a row, even while the
+	// group is open (expanded `view.hidden` is always 0 by definition).
+	const canToggle = groupView(group, true, state.keepActive).hidden > 0;
+	const head = document.createElement("div");
+	head.className = "group-head";
+	const control = document.createElement(canToggle ? "button" : "div");
+	control.className = canToggle ? "group-toggle" : "group-title";
+	if (canToggle) {
+		control.type = "button";
+		control.setAttribute("aria-expanded", String(!collapsed));
+		control.addEventListener("click", () => {
+			state.collapsed[group.key] = !collapsed;
+			saveCollapsedGroups();
+			renderList(state.sessions);
 		});
-		ui.list.append(row);
+		const chevron = document.createElement("span");
+		chevron.className = "group-chevron";
+		chevron.textContent = collapsed ? "▸" : "▾";
+		control.append(chevron);
 	}
+	const path = document.createElement("span");
+	path.className = "group-path";
+	path.textContent = groupLabel(group, state.home);
+	path.title = group.key || "unknown cwd";
+	const count = document.createElement("span");
+	count.className = "group-count";
+	count.textContent = countLabel(group.sessions.length, view.hidden);
+	control.append(path, count);
+	head.append(control);
+	if (group.cwd) {
+		const add = document.createElement("button");
+		add.type = "button";
+		add.className = "group-new";
+		add.textContent = "+";
+		add.title = "new session here";
+		add.setAttribute("aria-label", `New session in ${groupLabel(group, state.home)}`);
+		add.addEventListener("click", () => send({ t: "create", cwd: group.cwd }));
+		head.append(add);
+	}
+	section.append(head);
+	if (view.rows.length > 0) {
+		const rows = document.createElement("div");
+		rows.className = "group-rows";
+		for (const session of view.rows) rows.append(sessionRow(session));
+		section.append(rows);
+	}
+	return section;
+}
+
+function sessionRow(session) {
+	const row = document.createElement("button");
+	row.type = "button";
+	row.className = "row";
+	row.dataset.id = session.id;
+	const stateClass = escapeHtml(session.state);
+	row.innerHTML = `<div class="row-top"><span class="dot ${stateClass}"></span><span class="row-name">${escapeHtml(session.name ?? session.id.slice(0, 8))}</span><span class="row-state">${stateClass} · ${relativeTime(session.lastActivity)}</span></div>`;
+	row.addEventListener("click", () => {
+		location.hash = `s=${encodeURIComponent(session.id)}`;
+	});
+	return row;
+}
+
+function readCollapsedGroups() {
+	try {
+		return parseCollapsed(localStorage.getItem(COLLAPSED_STORAGE_KEY));
+	} catch {
+		return {};
+	}
+}
+
+function saveCollapsedGroups() {
+	try {
+		localStorage.setItem(COLLAPSED_STORAGE_KEY, serializeCollapsed(state.collapsed));
+	} catch {}
+}
+
+function readKeepActive() {
+	try {
+		return parseKeepActive(localStorage.getItem(KEEP_ACTIVE_STORAGE_KEY));
+	} catch {
+		return true;
+	}
+}
+
+function saveKeepActive() {
+	try {
+		localStorage.setItem(KEEP_ACTIVE_STORAGE_KEY, serializeKeepActive(state.keepActive));
+	} catch {}
+}
+
+function openSettingsSheet() {
+	const target = ui.sheet;
+	target.hidden = false;
+	target.textContent = "";
+	const heading = document.createElement("div");
+	heading.className = "sheet-title";
+	heading.textContent = "settings";
+	const label = document.createElement("label");
+	label.className = "settings-row";
+	const checkbox = document.createElement("input");
+	checkbox.type = "checkbox";
+	checkbox.checked = state.keepActive;
+	checkbox.addEventListener("change", () => {
+		state.keepActive = checkbox.checked;
+		saveKeepActive();
+		renderList(state.sessions);
+	});
+	const text = document.createElement("span");
+	text.className = "settings-text";
+	text.textContent = "Keep hot/warm and newest sessions visible when collapsed";
+	label.append(checkbox, text);
+	const hint = document.createElement("div");
+	hint.className = "settings-hint";
+	hint.textContent = "Hot = busy or starting · warm = idle. Off hides every row when a group is collapsed.";
+	const actions = document.createElement("div");
+	actions.className = "sheet-actions";
+	const close = document.createElement("button");
+	close.textContent = "close";
+	close.addEventListener("click", closeSheet);
+	actions.append(close);
+	target.append(heading, label, hint, actions);
 }
 
 function openSession(id) {
@@ -253,6 +403,7 @@ function openSession(id) {
 	ui.dock.hidden = false;
 	ui.stop.hidden = false;
 	ui.back.hidden = false;
+	ui.settings.hidden = true;
 	ui.log.textContent = "";
 	state.entries = [];
 	state.more = false;
@@ -270,10 +421,14 @@ function openSession(id) {
 function handleFrame(frame) {
 	switch (frame.t) {
 		case "hello":
-			if (!state.sessionId) void listSessions().then((sessions) => renderList(sessions, frame.defaultCwd));
+			if (!state.sessionId) {
+				if (typeof frame.defaultCwd === "string") state.defaultCwd = frame.defaultCwd;
+				if (typeof frame.home === "string") state.home = frame.home;
+				void listSessions().then((sessions) => renderList(sessions, state.defaultCwd, state.home));
+			}
 			break;
 		case "sessions":
-			if (!state.sessionId) renderList(frame.sessions ?? [], undefined);
+			if (!state.sessionId) renderList(frame.sessions ?? [], state.defaultCwd, state.home);
 			break;
 		case "snapshot":
 			state.info = frame.session;
@@ -1659,6 +1814,7 @@ async function softRefresh() {
 }
 
 ui.reload.addEventListener("click", () => void softRefresh());
+ui.settings.addEventListener("click", openSettingsSheet);
 
 window.addEventListener("hashchange", route);
 

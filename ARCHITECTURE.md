@@ -78,7 +78,7 @@ Hub → client:
 
 | frame | fields | notes |
 |---|---|---|
-| `hello` | `v`, `sessions`, `defaultCwd` | sent on a session-less socket |
+| `hello` | `v`, `sessions`, `defaultCwd`, `home` | sent on a session-less socket |
 | `sessions` | `sessions` | list refresh |
 | `snapshot` | `session`, `entries`, `leafId`, `more`, `replace?` | (re)places the window; `more` = older entries exist, so "load earlier" is offered; `replace` drops windows loaded before a compaction or `/new` |
 | `history` | `entries`, `more` | answer to `earlier`: the window just before the oldest held entry |
@@ -306,6 +306,13 @@ still the way to make the child itself fast, and is deliberately not done (1 vCP
 2 GB).
 
 ## UI strategy (responsiveness on a phone)
+
+- dashboard sessions are grouped by exact cwd (trailing slashes trimmed; blank
+  cwd is one `unknown cwd` group), ordered by newest activity. A collapsed group
+  keeps every hot (`busy`/`starting`) or warm (`idle`) session plus its newest
+  session visible; the engine is the pure `src/client/sessionGroups.js`. Collapse
+  state and the pinning toggle are device-local (`localStorage`), and group paths
+  are shortened with `home` from `/api/info`/`hello`;
 
 - append-only DOM for live events; deltas buffered and flushed in one rAF
   (`textContent += …`), never a full re-render per delta;

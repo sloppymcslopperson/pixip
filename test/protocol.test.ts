@@ -64,8 +64,9 @@ describe("wire frames", () => {
 	});
 
 	it("advertises the wire version with the session list", () => {
-		const frame = JSON.parse(frameHello([], "/tmp"));
+		const frame = JSON.parse(frameHello([], "/tmp", "/home/x"));
 		assert.equal(frame.v, WIRE_VERSION);
 		assert.equal(frame.defaultCwd, "/tmp");
+		assert.equal(frame.home, "/home/x");
 	});
 });

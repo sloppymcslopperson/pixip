@@ -61,8 +61,10 @@ do in the TUI.
 
 ## What works today
 
-- session list with live state (idle/busy/stopped/error), create from a path,
-  open, stop, wake/reattach;
+- session list grouped by cwd with collapsible sections (collapsed by default),
+  live state (idle/busy/stopped/error), create from a path or from a group's `+`,
+  open, stop, wake/reattach; collapsing keeps hot/warm sessions and each
+  group's newest session visible by default, configurable from the header gear;
 - streamed transcript: user/assistant text, thinking collapsed, tool calls with
   ANSI output, error styling, durations;
 - composer: send while idle, steer while streaming, abort via `stop`;
@@ -79,6 +81,8 @@ do in the TUI.
 - transcript text size: `A−`/`A+` in the header, seven steps from 50 % to 150 %,
   device-local (`localStorage`), scaling only the transcript so the composer and
   the rest of the chrome stay fixed (long-press resets, `Ctrl/Cmd` `-`/`+`/`0`);
+- dashboard settings sheet from the header gear, with a device-local toggle for
+  keeping hot/warm and newest sessions visible in collapsed groups;
 - extension dialogs (`select`/`confirm`/`input`/`editor`) rendered as a sheet and
   answered from the phone; `notify` as a toast;
 - reconnect with backoff, durable entry-cursor resume and a stable pixip logical

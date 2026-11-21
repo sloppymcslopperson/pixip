@@ -160,8 +160,8 @@ export function frameCommands(commands: DynamicCommand[]): string {
 	return JSON.stringify({ t: "commands", commands });
 }
 
-export function frameHello(sessions: SessionInfo[], defaultCwd?: string): string {
-	return JSON.stringify({ t: "hello", v: WIRE_VERSION, sessions, defaultCwd });
+export function frameHello(sessions: SessionInfo[], defaultCwd?: string, home?: string): string {
+	return JSON.stringify({ t: "hello", v: WIRE_VERSION, sessions, defaultCwd, home });
 }
 
 /**
