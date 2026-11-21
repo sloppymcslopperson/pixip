@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { LineBuffer } from "../src/rpc.ts";
-import { frameEvent, frameHello, frameSnapshot, WIRE_VERSION } from "../src/wire.ts";
+import { frameEvent, frameHello, frameHistory, frameSnapshot, WIRE_VERSION } from "../src/wire.ts";
 
 describe("LineBuffer", () => {
 	it("splits only on LF and strips one CR", () => {
@@ -50,6 +50,17 @@ describe("wire frames", () => {
 		assert.equal(frame.t, "snapshot");
 		assert.equal(frame.leafId, "leaf");
 		assert.equal(frame.session.id, "s1");
+	});
+
+	it("flags older entries on a windowed snapshot and answers a history frame", () => {
+		const snapshot = JSON.parse(
+			frameSnapshot({ id: "s1", cwd: "/tmp", state: "starting", lastActivity: 1 }, [], null, true),
+		);
+		assert.equal(snapshot.more, true);
+		const history = JSON.parse(frameHistory([{ type: "message", id: "m1" }], false));
+		assert.equal(history.t, "history");
+		assert.equal(history.more, false);
+		assert.equal(history.entries.length, 1);
 	});
 
 	it("advertises the wire version with the session list", () => {

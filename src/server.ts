@@ -5,7 +5,7 @@ import { extname, join, normalize } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 
 import { Hub } from "./hub.ts";
-import { frameError, frameHello, frameModels, frameSnapshot, frameThinking, WIRE_VERSION } from "./wire.ts";
+import { frameError, frameHello, frameHistory, frameModels, frameSnapshot, frameThinking, WIRE_VERSION } from "./wire.ts";
 
 export interface ServerOptions {
 	host: string;
@@ -143,23 +143,35 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 		for (const unsubscribe of subscriptions) unsubscribe();
 		subscriptions = [];
 	});
-
-	try {
-		const info = await hub.attach(sessionId);
-		const snapshot = await hub.snapshot(sessionId);
-		send(frameSnapshot(snapshot.info, snapshot.entries, snapshot.leafId));
-		subscriptions.push(hub.subscribe(sessionId, send));
-		subscriptions.push(hub.watch((frame) => send(frame)));
-		void hub.footer(sessionId).then((footer) => {
-			send(JSON.stringify({ t: "footer", footer }));
-		});
-	} catch (error) {
-		send(frameError((error as Error).message));
-	}
-
+	// Bind before the attach await: "load earlier" may arrive while the child
+	// is still booting, and a listener added later would drop that frame.
 	ws.on("message", (data) => {
 		void handleCommand(String(data), sessionId, hub, send, log);
 	});
+
+	try {
+		// Provisional paint from the JSONL tail while the child boots (~1.3 s).
+		// The authoritative, windowed snapshot replaces it once `get_entries` answers.
+		const provisional = await hub.provisional(sessionId);
+		if (provisional) {
+			send(frameSnapshot(provisional.info, provisional.entries, provisional.leafId, provisional.more));
+		}
+		await hub.attach(sessionId);
+		const snapshot = await hub.snapshot(sessionId);
+		send(frameSnapshot(snapshot.info, snapshot.entries, snapshot.leafId, snapshot.more));
+		subscriptions.push(hub.subscribe(sessionId, send));
+		subscriptions.push(hub.watch((frame) => send(frame)));
+		void hub
+			.footer(sessionId)
+			.then((footer) => {
+				send(JSON.stringify({ t: "footer", footer }));
+			})
+			.catch(() => {
+				// Detached between attach and footer: the status frame already says so.
+			});
+	} catch (error) {
+		send(frameError((error as Error).message));
+	}
 }
 
 async function handleCommand(
@@ -210,6 +222,12 @@ async function handleCommand(
 			case "abort":
 				await hub.abort(sessionId);
 				break;
+			case "earlier": {
+				const before = String(message["before"] ?? "");
+				const window = await hub.earlier(sessionId, before);
+				send(frameHistory(window.entries, window.more));
+				break;
+			}
 			case "models": {
 				const result = await hub.models(sessionId);
 				send(frameModels(result.models, result.current));

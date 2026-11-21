@@ -50,6 +50,9 @@ const state = {
 	footer: null,
 	models: [],
 	levels: [],
+	entries: [], // what the client currently knows, oldest first
+	more: false, // older entries exist before entries[0]
+	loadingEarlier: false,
 };
 
 // ------------------------------------------------------------------ transport
@@ -114,6 +117,9 @@ async function showList() {
 	state.tools.clear();
 	state.streaming = null;
 	state.pendingUser = null;
+	state.entries = [];
+	state.more = false;
+	state.loadingEarlier = false;
 	ui.session.hidden = true;
 	ui.composer.hidden = true;
 	ui.footer.hidden = true;
@@ -188,6 +194,10 @@ function openSession(id) {
 	ui.stop.hidden = false;
 	ui.back.hidden = false;
 	ui.log.textContent = "";
+	state.entries = [];
+	state.more = false;
+	state.loadingEarlier = false;
+	state.stick = true;
 	ui.title.textContent = "connecting…";
 	ui.sub.textContent = id.slice(0, 8);
 	ui.dot.className = "dot busy";
@@ -207,8 +217,11 @@ function handleFrame(frame) {
 			break;
 		case "snapshot":
 			state.info = frame.session;
-			renderSnapshot(frame.entries ?? []);
+			renderSnapshot(frame.entries ?? [], frame.more === true);
 			applyInfo();
+			break;
+		case "history":
+			prependHistory(frame.entries ?? [], frame.more === true);
 			break;
 		case "status":
 			if (frame.session?.id === state.sessionId || !state.sessionId) {
@@ -235,6 +248,11 @@ function handleFrame(frame) {
 			openThinkingSheet(frame.current);
 			break;
 		case "error":
+			if (state.loadingEarlier) {
+				const distance = state.stick ? ui.log.clientHeight : ui.log.scrollHeight - ui.log.scrollTop;
+				state.loadingEarlier = false;
+				renderTranscript(distance);
+			}
 			toast(frame.message);
 			break;
 		default:
@@ -259,8 +277,21 @@ function applyInfo() {
 	ui.dot.hidden = false;
 	ui.dot.className = `dot ${info.state}`;
 	const stopped = info.state === "stopped" || info.state === "error";
-	ui.input.disabled = stopped;
-	ui.send.disabled = stopped;
+	const starting = info.state === "starting";
+	ui.input.disabled = stopped || starting;
+	ui.send.disabled = stopped || starting;
+	// The provisional transcript is already readable; this only says the child
+	// is still booting and live events have not started yet.
+	let startingHint = ui.log.querySelector(".starting");
+	if (starting && !startingHint) {
+		startingHint = document.createElement("div");
+		startingHint.className = "block meta starting";
+		startingHint.textContent = "starting pi…";
+		ui.log.append(startingHint);
+		scrollToEnd();
+	} else if (!starting) {
+		startingHint?.remove();
+	}
 	if (stopped && !ui.log.querySelector(".wake")) {
 		const wake = document.createElement("button");
 		wake.className = "row wake";
@@ -275,27 +306,80 @@ function applyInfo() {
 
 // ---------------------------------------------------------------- snapshot
 
-function renderSnapshot(entries) {
-	ui.log.textContent = "";
-	state.tools.clear();
-	const calls = new Map();
-	const fragment = document.createDocumentFragment();
-	const append = (html) => {
-		if (!html) return;
-		const template = document.createElement("template");
-		template.innerHTML = html;
-		fragment.append(template.content);
-	};
+/** Bytes of DOM a 200-entry window costs; the first paint only pays for a slice. */
+const FIRST_PAINT_BYTES = 24 * 1024;
+const FILL_CHUNK_BYTES = 32 * 1024;
 
+let fillTimer = 0;
+let fillToken = 0;
+
+/**
+ * Merge an incoming window (provisional tail or authoritative snapshot) into the
+ * client's entries. Windows the user already loaded stay; duplicates are dropped
+ * in favour of the newer copy.
+ */
+function mergeTail(entries, more) {
+	const previous = state.entries;
+	const ids = new Set(entries.map((entry) => entry?.id).filter(Boolean));
+	const cut = previous.findIndex((entry) => entry?.id && ids.has(entry.id));
+	const keep = cut > 0 ? cut : 0;
+	const merged = [...previous.slice(0, keep), ...entries];
+	const seen = new Set();
+	const out = [];
+	for (let index = merged.length - 1; index >= 0; index -= 1) {
+		const entry = merged[index];
+		const id = entry?.id;
+		if (typeof id === "string") {
+			if (seen.has(id)) continue;
+			seen.add(id);
+		}
+		out.push(entry);
+	}
+	out.reverse();
+	state.entries = out;
+	state.more = more;
+}
+
+function oldestEntryId() {
+	return state.entries.find((entry) => typeof entry?.id === "string")?.id ?? null;
+}
+
+function earlierButton() {
+	const button = document.createElement("button");
+	button.type = "button";
+	button.className = "earlier";
+	button.textContent = state.loadingEarlier ? "loading…" : "load earlier";
+	button.disabled = state.loadingEarlier;
+	button.addEventListener("click", () => {
+		const before = oldestEntryId();
+		if (!before || state.loadingEarlier) return;
+		state.loadingEarlier = true;
+		button.textContent = "loading…";
+		button.disabled = true;
+		send({ t: "earlier", before });
+	});
+	return button;
+}
+
+/** Rough DOM cost of an entry, used to keep the first paint small. */
+function entryWeight(entry) {
+	try {
+		return JSON.stringify(entry).length;
+	} catch {
+		return 512;
+	}
+}
+
+function htmlOf(entries, calls) {
+	const blocks = [];
 	for (const entry of entries) {
 		if (entry?.type === "message" && entry.message?.role === "assistant") {
-			for (const call of toolCallsOf(entry.message.content)) calls.set(call.id, call);
-			append(renderAssistant(entry.message.content, false));
+			blocks.push(renderAssistant(entry.message.content, false));
 			continue;
 		}
 		if (entry?.type === "message" && entry.message?.role === "toolResult") {
 			const call = calls.get(entry.message.toolCallId);
-			append(
+			blocks.push(
 				toolBlock(
 					entry.message.toolName ?? call?.name ?? "tool",
 					call ? summarizeArgs(call.name, call.arguments) : "",
@@ -307,17 +391,92 @@ function renderSnapshot(entries) {
 			);
 			continue;
 		}
-		append(renderEntry(entry));
+		blocks.push(renderEntry(entry));
 	}
-	if (entries.length === 0) {
-		const hint = document.createElement("div");
-		hint.className = "block meta";
-		hint.textContent = "no messages yet — say something";
-		fragment.append(hint);
+	return blocks.join("");
+}
+
+/**
+ * Paint `state.entries`: the newest slice synchronously (the first-paint
+ * budget), then the rest in chunks above it. `distance` is the target
+ * `scrollHeight - scrollTop` (clientHeight for a pinned view), applied after
+ * every chunk so prepended content never moves what the reader is looking at.
+ * One innerHTML assignment per chunk instead of per entry.
+ */
+function renderTranscript(distance = null) {
+	const restore = () => {
+		if (distance !== null) ui.log.scrollTop = Math.max(0, ui.log.scrollHeight - distance);
+	};
+	clearTimeout(fillTimer);
+	fillToken += 1;
+	const token = fillToken;
+
+	state.tools.clear();
+	const calls = new Map();
+	for (const entry of state.entries) {
+		if (entry?.type === "message" && entry.message?.role === "assistant") {
+			for (const call of toolCallsOf(entry.message.content)) calls.set(call.id, call);
+		}
 	}
-	ui.log.append(fragment);
-	for (const node of ui.log.querySelectorAll("details.tool")) state.tools.set(node.dataset.call, node);
-	scrollToEnd(true);
+
+	const entries = state.entries;
+	let start = entries.length;
+	let bytes = 0;
+	while (start > 0 && (bytes === 0 || bytes < FIRST_PAINT_BYTES)) {
+		start -= 1;
+		bytes += entryWeight(entries[start]);
+	}
+	const older = state.more && oldestEntryId() ? earlierButton() : null;
+
+	ui.log.innerHTML = entries.length === 0
+		? '<div class="block meta">no messages yet — say something</div>'
+		: htmlOf(entries.slice(start), calls);
+	if (older) ui.log.prepend(older);
+	restore();
+	const trackTools = () => {
+		for (const node of ui.log.querySelectorAll("details.tool")) state.tools.set(node.dataset.call, node);
+	};
+	trackTools();
+
+	// Older entries of the same window fill in above, chunk by chunk. The
+	// distance from the bottom is held constant, so a pinned view stays pinned.
+	const fill = () => {
+		if (token !== fillToken || start === 0) return;
+		let from = start;
+		let chunkBytes = 0;
+		while (from > 0 && chunkBytes < FILL_CHUNK_BYTES) {
+			from -= 1;
+			chunkBytes += entryWeight(entries[from]);
+		}
+		ui.log.insertAdjacentHTML("afterbegin", htmlOf(entries.slice(from, start), calls));
+		if (older) ui.log.prepend(older);
+		restore();
+		trackTools();
+		start = from;
+		if (start > 0) fillTimer = setTimeout(fill, 0);
+	};
+	if (start > 0) fillTimer = setTimeout(fill, 0);
+}
+
+/** Replace the transcript with a new window, keeping the reading position. */
+function renderSnapshot(entries, more) {
+	// Pinned: stay at the bottom. Elsewhere: keep the same distance from the
+	// bottom, which is exactly the same content once new entries are painted.
+	const distance = state.stick ? ui.log.clientHeight : ui.log.scrollHeight - ui.log.scrollTop;
+	if (state.stick) state.stick = true;
+	mergeTail(entries, more);
+	renderTranscript(distance);
+}
+
+/** Prepend one older window, keeping the reading position. */
+function prependHistory(entries, more) {
+	state.loadingEarlier = false;
+	const distance = state.stick ? ui.log.clientHeight : ui.log.scrollHeight - ui.log.scrollTop;
+	const known = new Set(state.entries.map((entry) => entry?.id).filter(Boolean));
+	const older = entries.filter((entry) => typeof entry?.id !== "string" || !known.has(entry.id));
+	if (older.length > 0) state.entries = [...older, ...state.entries];
+	state.more = more;
+	renderTranscript(distance);
 }
 
 // ------------------------------------------------------------------- events

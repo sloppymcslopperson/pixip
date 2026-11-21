@@ -74,6 +74,7 @@ button, input, textarea { font: inherit; color: inherit; }
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--fg-faint); flex: none; }
 .dot.busy { background: var(--warn); animation: pulse 1.1s ease-in-out infinite; }
 .dot.idle { background: var(--ok); }
+.dot.starting { background: var(--accent); animation: pulse 1.1s ease-in-out infinite; }
 .dot.stopped { background: var(--fg-faint); }
 .dot.error { background: var(--err); }
 @keyframes pulse { 50% { opacity: 0.35; } }
@@ -117,6 +118,20 @@ main { flex: 1; min-height: 0; }
 .block.assistant { border-left-color: var(--accent); }
 .block.assistant .who { color: var(--accent); }
 .block.meta { border-left-color: var(--line); color: var(--fg-dim); font-size: 13px; }
+.block.starting { border-left-color: var(--accent); color: var(--fg-faint); font-style: italic; }
+/* "load earlier": a full-width affordance above the oldest painted entry. */
+.earlier {
+	flex: 0 0 auto;
+	width: 100%;
+	background: var(--bg-soft);
+	border: 1px solid var(--line);
+	border-radius: 10px;
+	color: var(--fg-dim);
+	padding: 8px 12px;
+	font-size: 12.5px;
+}
+.earlier:hover:not(:disabled) { color: var(--fg); border-color: var(--accent); }
+.earlier:disabled { opacity: 0.6; }
 .meta-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-faint); }
 .meta-body { white-space: pre-wrap; overflow-wrap: anywhere; }
 

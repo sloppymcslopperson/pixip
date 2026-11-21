@@ -54,8 +54,20 @@ export function frameSessions(sessions: SessionInfo[]): string {
 	return JSON.stringify({ t: "sessions", v: WIRE_VERSION, sessions });
 }
 
-export function frameSnapshot(session: SessionInfo, entries: unknown[], leafId: string | null): string {
-	return JSON.stringify({ t: "snapshot", session, entries, leafId });
+export function frameSnapshot(
+	session: SessionInfo,
+	entries: unknown[],
+	leafId: string | null,
+	more = false,
+): string {
+	// `more` means older entries exist before `entries[0]`; the client offers
+	// "load earlier" and asks for the previous window with an `earlier` frame.
+	return JSON.stringify({ t: "snapshot", session, entries, leafId, more });
+}
+
+/** One older window of entries, answering an `earlier` frame. */
+export function frameHistory(entries: unknown[], more: boolean): string {
+	return JSON.stringify({ t: "history", entries, more });
 }
 
 export function frameStatus(session: SessionInfo): string {
