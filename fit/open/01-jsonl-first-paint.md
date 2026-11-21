@@ -1,7 +1,3 @@
----
-grilled: true
----
-
 Opening a stopped session costs ~1.3 s because a fresh `pi --mode rpc` child must boot before `get_state` answers.
 
 ### Goal

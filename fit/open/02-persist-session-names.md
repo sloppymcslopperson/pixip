@@ -1,7 +1,3 @@
----
-grilled: true
----
-
 Stopped sessions show their id prefix because the disk scan only reads the JSONL header, while the display name lives in a `session_info` entry.
 
 ### Goal

@@ -1,7 +1,3 @@
----
-grilled: true
----
-
 The transcript shows raw markdown (`| tables |`, `**bold**`, backticks) where the TUI renders it.
 
 ### Goal

@@ -81,19 +81,20 @@ Rules:
 
 ## Working the board
 
-`open/` is the work queue, in filename order. Each ticket there is pre-grilled
-(`grilled: true` in frontmatter) and carries its own Goal / Done when / files, so a
-fresh agent can start without a planning round:
+`open/` is the work queue, in filename order. Tickets are **not** pre-grilled: the
+owner wants the clarifying-question round, so `/fit work` should grill before
+implementing (goal, scope, acceptance, files, edge cases, tests, constraints) and
+then set `grilled: true` with the answers.
 
 ```bash
 # in this directory
-/fit work 5 nogrill autocommit
+/fit work          # one ticket, grill first
+/fit work 5        # the whole queue, grilling each ticket as it starts
 ```
 
-`/fit work` takes in_progress first, then `open/` in priority order. `nogrill`
-skips the clarifying-question round (the tickets are already decided);
-`autocommit` commits only the files a ticket changed and then commits the board.
-Drop to `/fit work` (no count) to take one ticket at a time.
+`/fit work` takes in_progress first, then `open/` in priority order. Add
+`autocommit` only when the owner asks for it; add `review` to leave tickets in
+`in_progress` for a human to close. Do not pass `nogrill`.
 
 Definition of done for every ticket: `npm run check` green, plus `tools/shot.mjs`
 at 390 and 1280 for anything that touches the client. `--dev` only reloads client

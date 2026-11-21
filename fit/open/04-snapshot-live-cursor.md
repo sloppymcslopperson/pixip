@@ -1,7 +1,3 @@
----
-grilled: true
----
-
 Entries that arrive between `get_entries` and the subscription are lost, so a client connecting mid-turn can miss the start of a message.
 
 ### Goal

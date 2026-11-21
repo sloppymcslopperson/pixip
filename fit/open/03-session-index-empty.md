@@ -1,7 +1,3 @@
----
-grilled: true
----
-
 Pi writes the session JSONL on the first message, so a session created and detached without a prompt disappears from the list.
 
 ### Goal
