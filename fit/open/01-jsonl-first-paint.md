@@ -4,26 +4,29 @@ Opening a stopped session costs ~1.3 s because a fresh `pi --mode rpc` child mus
 
 First paint under 300 ms on a cold attach, without adding a warm-child pool (this box is 1 vCPU / 2 GB).
 
-### Approach (decided)
+### Decisions (owner, 2026-11-21)
 
-Paint from the session JSONL first, then reconcile:
+- The provisional first paint shows the **last ~200 entries**, not the whole file, with a "load earlier" affordance for the rest. A 17 MB session must not blow the budget.
+- No warm pool; read the JSONL while the child boots.
 
-1. On open, read the JSONL for that session and send a snapshot built from its entries immediately, with the session marked `state: "starting"`.
+### Approach
+
+1. On open, read the session JSONL, parse the tail (~200 entries), and send a snapshot built from it with the session marked `state: "starting"`.
 2. Spawn the child as today; when `get_state`/`get_entries` answer, send the authoritative snapshot and continue with live events.
-3. Ignore the duplicate paint cost: replacing the log once is cheaper than a 1.3 s blank screen.
+3. The client replaces the provisional transcript with the live snapshot, keeping scroll position when pinned to the bottom.
 
 ### Done when
 
-- `state: "starting"` is shown while the child boots, and the transcript is visible before it answers.
-- Entries parse from disk without a live child (skip unparsable lines; never throw on a truncated tail).
-- The client replaces the provisional transcript with the live snapshot without losing scroll position when the user is pinned to the bottom.
+- `state: "starting"` is visible while the child boots and the transcript is already readable.
+- Tail parsing skips unparsable lines and a truncated final line; it never throws.
+- "load earlier" fetches the preceding window from the hub (one additional frame type), and the client keeps it when the live snapshot arrives.
 - Measured: cold attach to first paint under 300 ms on this box, recorded in ARCHITECTURE.md next to the existing numbers.
 
 ### Files
 
-`src/hub.ts` (JSONL snapshot path), `src/server.ts` (open flow), `src/client/app.js` (starting state + snapshot replace), `ARCHITECTURE.md`.
+`src/hub.ts` (JSONL tail + window reader), `src/server.ts` (open flow + earlier window), `src/wire.ts` (window frame), `src/client/app.js`, `ARCHITECTURE.md`.
 
 ### Notes
 
-- Reuse the existing header reader logic in `hub.ts` rather than adding a second JSONL parser.
-- Do not subscribe before the child is up; the gap is covered by the authoritative snapshot.
+- Reuse the existing header reader rather than adding a second JSONL parser.
+- Do not subscribe before the child is up; the authoritative snapshot covers the gap.

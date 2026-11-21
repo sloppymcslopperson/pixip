@@ -88,13 +88,15 @@ then set `grilled: true` with the answers.
 
 ```bash
 # in this directory
-/fit work          # one ticket, grill first
-/fit work 5        # the whole queue, grilling each ticket as it starts
+/fit work 5 autocommit   # the queue: grill each ticket, close it, commit it
+/fit work                # one ticket at a time
 ```
 
-`/fit work` takes in_progress first, then `open/` in priority order. Add
-`autocommit` only when the owner asks for it; add `review` to leave tickets in
-`in_progress` for a human to close. Do not pass `nogrill`.
+`/fit work` takes in_progress first, then `open/` in priority order. The owner's
+standing answer (2026-11-21): close verified tickets and commit one commit per
+ticket, so `autocommit` without `review` is the expected mode. Do not pass
+`nogrill` — grilling is wanted. Tickets whose decisions are already recorded under
+`### Decisions` only need the remaining gaps grilled, not everything again.
 
 Definition of done for every ticket: `npm run check` green, plus `tools/shot.mjs`
 at 390 and 1280 for anything that touches the client. `--dev` only reloads client
