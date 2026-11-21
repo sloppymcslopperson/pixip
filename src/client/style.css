@@ -108,7 +108,10 @@ main { flex: 1; min-height: 0; }
 	color: var(--fg-faint);
 	margin-bottom: 2px;
 }
-.block .text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.block .text { overflow-wrap: anywhere; }
+.block.user .text { white-space: pre-wrap; }
+/* Streaming deltas are raw markdown in one text node: keep their newlines. */
+.block .text.live-text { white-space: pre-wrap; }
 .block.user { border-left-color: var(--user); }
 .block.user .who { color: var(--user); }
 .block.assistant { border-left-color: var(--accent); }
@@ -116,6 +119,78 @@ main { flex: 1; min-height: 0; }
 .block.meta { border-left-color: var(--line); color: var(--fg-dim); font-size: 13px; }
 .meta-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-faint); }
 .meta-body { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* ---- rendered markdown (assistant text only) ---- */
+.block.assistant .text > :first-child { margin-top: 0; }
+.block.assistant .text > :last-child { margin-bottom: 0; }
+.block.assistant .text p { margin: 0 0 0.7em; }
+.block.assistant .text h1,
+.block.assistant .text h2,
+.block.assistant .text h3,
+.block.assistant .text h4,
+.block.assistant .text h5,
+.block.assistant .text h6 { margin: 1em 0 0.45em; font-weight: 700; line-height: 1.25; }
+.block.assistant .text h1 { font-size: 1.3em; }
+.block.assistant .text h2 { font-size: 1.18em; }
+.block.assistant .text h3 { font-size: 1.08em; }
+.block.assistant .text h4,
+.block.assistant .text h5,
+.block.assistant .text h6 { font-size: 1em; color: var(--fg-dim); }
+.block.assistant .text ul,
+.block.assistant .text ol { margin: 0 0 0.7em; padding-left: 1.45em; }
+.block.assistant .text li { margin: 0.15em 0; }
+.block.assistant .text li > ul,
+.block.assistant .text li > ol { margin: 0.15em 0 0; }
+.block.assistant .text li.task-list-item { list-style: none; margin-left: -1.3em; }
+.block.assistant .text input[type="checkbox"] { accent-color: var(--accent); margin-right: 0.45em; }
+.block.assistant .text blockquote {
+	margin: 0 0 0.7em;
+	padding: 0.1em 0 0.1em 0.8em;
+	border-left: 3px solid var(--line);
+	color: var(--fg-dim);
+}
+.block.assistant .text a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.block.assistant .text hr { border: 0; border-top: 1px solid var(--line); margin: 1em 0; }
+/* Inline code and fenced code share the ANSI palette (mono, soft surface). */
+.block.assistant .text code {
+	font-family: var(--mono);
+	font-size: 0.92em;
+	background: var(--bg-soft);
+	border: 1px solid var(--line);
+	border-radius: 4px;
+	padding: 0.05em 0.3em;
+}
+.block.assistant .text pre {
+	margin: 0 0 0.7em;
+	padding: 9px 11px;
+	background: var(--bg-soft);
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	overflow-x: auto;
+}
+/* Fenced content is verbatim: no reflow, no inherited inline-code chrome. */
+.block.assistant .text pre code {
+	font-size: 12.5px;
+	line-height: 1.4;
+	background: none;
+	border: 0;
+	border-radius: 0;
+	padding: 0;
+	white-space: pre;
+	display: block;
+}
+.md-table {
+	margin: 0 0 0.7em;
+	overflow-x: auto;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	-webkit-overflow-scrolling: touch;
+}
+.md-table table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+.md-table th,
+.md-table td { padding: 5px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: normal; }
+.md-table th { background: var(--bg-soft); font-weight: 700; white-space: nowrap; }
+.md-table tr:last-child td { border-bottom: 0; }
 
 details.think { margin: 6px 0; color: var(--fg-dim); font-size: 13px; }
 details.think summary { cursor: pointer; color: var(--fg-faint); font-size: 12px; }

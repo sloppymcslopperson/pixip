@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { ansiToHtml, escapeHtml, summarizeArgs, textOf, toolBlock } from "../src/client/render.js";
+import { markdownToHtml } from "../src/client/markdown.js";
+import { ansiToHtml, escapeHtml, renderAssistantBody, renderMessage, summarizeArgs, textOf, toolBlock } from "../src/client/render.js";
 
 describe("ansi", () => {
 	it("maps SGR colors to spans and leaves text alone", () => {
@@ -52,5 +53,73 @@ describe("rendering", () => {
 
 	it("escapes tool names and summaries", () => {
 		assert.equal(escapeHtml('<a href="x">'), "&lt;a href=&quot;x&quot;&gt;");
+	});
+});
+
+describe("markdown", () => {
+	it("renders gfm blocks and inline markup", () => {
+		const html = markdownToHtml(
+			"# Title\n\n**bold** and *it* and `code`\n\n- one\n- two\n\n> quoted\n\n[link](https://example.com)a\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n```js\nconst x = 1;\n```\n",
+		);
+		assert.match(html, /<h1>Title<\/h1>/);
+		assert.match(html, /<strong>bold<\/strong>/);
+		assert.match(html, /<em>it<\/em>/);
+		assert.match(html, /<code>code<\/code>/);
+		assert.match(html, /<ul>[\s\S]*<li>one<\/li>/);
+		assert.match(html, /<blockquote>[\s\S]*quoted/);
+		assert.match(html, /<table>[\s\S]*<td>1<\/td>/);
+		assert.match(html, /<pre><code class="language-js">const x = 1;\n<\/code><\/pre>/);
+	});
+
+	it("wraps tables in a scroll container", () => {
+		const html = markdownToHtml("| a |\n|---|\n| 1 |\n");
+		assert.match(html, /^<div class="md-table"><table>/);
+		assert.match(html, /<\/table>\s*<\/div>$/);
+	});
+
+	it("opens links in a new tab", () => {
+		const html = markdownToHtml("[docs](https://example.com/a?b=1&c=2)");
+		assert.match(html, /<a href="https:\/\/example.com\/a\?b=1&amp;c=2" target="_blank" rel="noopener noreferrer">docs<\/a>/);
+	});
+
+	it("keeps in-page anchors and drops unsafe schemes", () => {
+		assert.match(markdownToHtml("[top](#top)"), /<a href="#top"/);
+		const unsafe = markdownToHtml("[click](javascript:alert(1))");
+		assert.equal(unsafe.includes("javascript:"), false);
+		assert.match(unsafe, /click/);
+	});
+
+	it("escapes raw html instead of executing it", () => {
+		const html = markdownToHtml("<div onclick=\"x()\">hi</div>\n\n<script>alert(1)</script>");
+		assert.equal(html.includes("<div"), false);
+		assert.equal(html.includes("<script"), false);
+		assert.match(html, /&lt;div onclick=&quot;x\(\)&quot;&gt;hi&lt;\/div&gt;/);
+		assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+	});
+
+	it("escapes markup inside fenced code and keeps it verbatim", () => {
+		const html = markdownToHtml("```\n<b>a</b>\n  indented\n```");
+		assert.match(html, /&lt;b&gt;a&lt;\/b&gt;\n  indented/);
+	});
+
+	it("renders nothing for empty input", () => {
+		assert.equal(markdownToHtml(""), "");
+		assert.equal(markdownToHtml("   \n"), "");
+		assert.equal(markdownToHtml(undefined), "");
+	});
+
+	it("leaves user messages literal and renders assistant ones", () => {
+		const user = renderMessage({ role: "user", content: [{ type: "text", text: "**not bold** <b>" }] });
+		assert.match(user, /\*\*not bold\*\* &lt;b&gt;/);
+		assert.equal(user.includes("<strong>"), false);
+		const assistant = renderMessage({ role: "assistant", content: [{ type: "text", text: "**bold**" }] });
+		assert.match(assistant, /<strong>bold<\/strong>/);
+	});
+
+	it("keeps thinking blocks as escaped ansi text", () => {
+		const html = renderAssistantBody([{ type: "thinking", thinking: "**raw** <i>" }], false);
+		assert.match(html, /<details class="think">/);
+		assert.match(html, /\*\*raw\*\* &lt;i&gt;/);
+		assert.equal(html.includes("<strong>"), false);
 	});
 });

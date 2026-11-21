@@ -1,18 +1,15 @@
-// Pure rendering helpers. No DOM, no imports: the browser loads this as a module
-// and `node --test` imports the same file, so what the tests cover is what ships.
+// Pure rendering helpers. No DOM: the browser loads this as a module and
+// `node --test` imports the same file, so what the tests cover is what ships.
+// Markdown lives in `./markdown.js`, which imports the vendored renderer.
+
+import { escapeHtml, markdownToHtml } from "./markdown.js";
+
+export { escapeHtml };
 
 const SGR = /\u001b\[([0-9;]*)m/y;
 const OSC = /\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g;
 const CSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
 const ESC = /\u001b[@-Z\\-_]/g;
-
-export function escapeHtml(value) {
-	return String(value)
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;");
-}
 
 /** ANSI SGR -> spans. Cursor moves, OSC titles and other CSI are dropped. */
 export function ansiToHtml(text) {
@@ -209,7 +206,7 @@ export function renderAssistantBody(content, includeTools = true) {
 			if (inner.trim()) html += `<details class="think"><summary>thinking</summary><div>${inner}</div></details>`;
 		} else if (block.type === "toolCall") tools.push(block);
 	}
-	const body = ansiToHtml(text.join(""));
+	const body = markdownToHtml(text.join(""));
 	if (body.trim()) html += `<div class="text">${body}</div>`;
 	if (includeTools) {
 		for (const call of tools) html += toolBlock(call.name, summarizeArgs(call.name, call.arguments), "", "", null, call.id ?? "");
