@@ -80,11 +80,12 @@ Hub → client:
 |---|---|---|
 | `hello` | `v`, `sessions`, `defaultCwd` | sent on a session-less socket |
 | `sessions` | `sessions` | list refresh |
-| `snapshot` | `session`, `entries`, `leafId`, `more` | (re)places the window; `more` = older entries exist, so "load earlier" is offered |
+| `snapshot` | `session`, `entries`, `leafId`, `more`, `replace?` | (re)places the window; `more` = older entries exist, so "load earlier" is offered; `replace` drops windows loaded before a compaction or `/new` |
 | `history` | `entries`, `more` | answer to `earlier`: the window just before the oldest held entry |
 | `status` | `session` | state/name/model changes |
 | `event` | `ev` | **verbatim** Pi record |
-| `opened` | `session` | reply to `create` |
+| `opened` | `session`, `rekey?` | reply to `create`; `rekey` when `/new` moved the session to a new Pi id |
+| `copy` | `text` | answer to a `copy` frame: Pi's last assistant text (`null` if none) |
 | `policy` | `policy` (`allow`, `deny`, `bash`) | effective per-session command policy |
 | `bash` | `id`, `command`, `excludeFromContext`, `output`, `exitCode`, `cancelled`, `truncated`, `fullOutputPath?`, `error?` | terminal result for `!`/`!!`; chunks arrive as `event` |
 | `error` | `message` | protocol/command failure |
@@ -97,6 +98,12 @@ Client → hub:
 | `prompt` | `text`, `streamingBehavior?` | `prompt` (`"steer"` while busy: extension commands must still execute) |
 | `steer` | `text` | `steer` (plain text only) |
 | `bash` | `id`, `command`, `excludeFromContext` | `bash`; `id` is repeated on streamed updates and the final frame |
+| `compact` | `instructions?` | `compact` (`customInstructions`) |
+| `set_session_name` | `name` | `set_session_name` |
+| `new_session` | – | `new_session`; the hub re-keys and sends `opened` with `rekey` |
+| `resnapshot` | – | full `snapshot` with `replace: true` |
+| `copy` | – | `get_last_assistant_text`, answered with a `copy` frame |
+| `set_model_query` / `set_thinking_query` | `query` | resolve against `get_available_models` / levels, then set |
 | `abort` | – | `abort` |
 | `earlier` | `before` (entry id) | hub reads the preceding window from the JSONL and replies with `history` |
 | `stop` | – | detach process, keep JSONL |
@@ -157,6 +164,31 @@ unless `--force`, or waits for every session to be idle with `--when-idle`
 process (SIGTERM, then SIGKILL) and spawns the same serve args. Nothing is lost
 that the JSONL does not already hold, and the client reconnects with backoff and
 its durable cursor.
+
+## Built-in slash commands
+
+The classifier in `src/client/commands.js` marks the RPC-drivable TUI built-ins;
+`src/client/app.js` keeps one handler per name and the hub is a thin wrapper:
+
+- `/compact [instructions]` → `compact`; after `compaction_end` the client sends
+  `resnapshot`, so the shrunken context replaces the loaded windows;
+- `/name [name]` → toast the name, or `set_session_name` (the header follows the
+  status frame);
+- `/session` → local meta sheet from the snapshot `session` and the footer;
+  no RPC, nothing added to the model context;
+- `/copy` → `get_last_assistant_text`; `navigator.clipboard` with a sheet
+  fallback for browsers without it;
+- `/model [provider/model]`, `/thinking [level]` → the footer sheets, or a
+  server-side resolve (exact provider/id, exact id, unique suffix / unique
+  prefix) and a toast with the closest matches when unknown or ambiguous;
+- `/new` → `new_session` in the same child; the hub mutates the live session in
+  place (so the event closure survives), moves it to the new Pi id, appends the
+  id to the index `piIds`, and sends `opened` with `rekey` to every tab, which
+  then asks for a replacement snapshot;
+- `/resume` → the session list; `/quit` → `stop` (detach) then the list.
+
+Every handler is only reachable through the `00` classifier, so the per-session
+policy and the TUI-only notices apply unchanged.
 
 ## Composer commands, `!`/`!!` and policy
 

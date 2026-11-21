@@ -70,6 +70,8 @@ do in the TUI.
   model context), slash-command passthrough for extension commands/templates/
   skills, and a restrict-only per-session command policy (`pixip.json`,
   `--allow-command`/`--deny-command`/`--no-bash`) — see `docs/parity.md`;
+- the RPC-drivable built-ins from the composer: `/compact`, `/name`, `/session`,
+  `/copy`, `/model`, `/thinking`, `/new`, `/resume`, `/quit`;
 - per-session model and thinking level, picked from the footer (`get_available_models`
   / `set_model`, `get_available_thinking_levels` / `set_thinking_level`);
 - the TUI status line: pwd + branch + session name, token totals, cost, context
@@ -119,8 +121,8 @@ backoff and its durable cursor, and sessions reattach from their JSONL.
 - TUI visual parity: diff/syntax colouring and the TUI's own theme colours (theme
   values are `okhsl`, which browsers do not support without conversion — see
   `85-theme-tokens`);
-- built-in slash handlers (`02-builtin-commands` is next), the command menu,
-  queue display and branch/session commands (tracked in `docs/parity.md`);
+- the `/` command menu, queue display and branch/session commands (tracked in
+  `docs/parity.md`);
 - worktree creation, image input, input history and `@file` completion;
 - virtualised transcript for very long sessions;
 - auth of any kind (bind loopback, or a private VPN interface — same posture as

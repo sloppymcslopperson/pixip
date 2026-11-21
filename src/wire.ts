@@ -82,12 +82,16 @@ export function frameSnapshot(
 	leafId: string | null,
 	more = false,
 	resume = false,
+	replace = false,
 ): string {
 	// `more` means older entries exist before `entries[0]`; the client offers
 	// "load earlier" and asks for the previous window with an `earlier` frame.
 	// `resume` marks a cursor delta the client appends instead of replacing.
+	// `replace` is a full window the client must adopt as-is (`resnapshot` after
+	// a compaction or a `/new` session): pre-compaction windows are dropped.
 	const frame: Record<string, unknown> = { t: "snapshot", session, entries, leafId, more };
 	if (resume) frame["resume"] = true;
+	if (replace) frame["replace"] = true;
 	return JSON.stringify(frame);
 }
 
@@ -118,6 +122,20 @@ export function frameThinking(levels: string[], current: string): string {
 
 export function frameHello(sessions: SessionInfo[], defaultCwd?: string): string {
 	return JSON.stringify({ t: "hello", v: WIRE_VERSION, sessions, defaultCwd });
+}
+
+/**
+ * The socket's session now has a new Pi id (`new_session`), so every tab
+ * following it must re-key. `rekey` distinguishes this from the index-only
+ * attach reply, which is followed by the hub's own snapshot.
+ */
+export function frameOpened(session: SessionInfo, rekey = false): string {
+	return JSON.stringify({ t: "opened", session, ...(rekey ? { rekey: true } : {}) });
+}
+
+/** Answer to a `copy` frame: the last assistant text (Pi may return `null`). */
+export function frameCopy(text: string | null): string {
+	return JSON.stringify({ t: "copy", text });
 }
 
 export function framePolicy(policy: CommandPolicy): string {

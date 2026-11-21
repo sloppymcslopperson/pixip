@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 
 import { RpcChild } from "./rpc.ts";
 import { resolveSessionPolicy, type CommandLayer } from "./commands.ts";
+import { resolveModelArgument, resolveThinkingArgument } from "./client/commands.js";
 import { frameError, frameEvent, frameFooter, frameModels, framePolicy, frameSessions, frameSnapshot, frameStatus } from "./wire.ts";
 import type { BashResult, CommandPolicy, FooterData, ModelSummary, SessionInfo, SessionState } from "./wire.ts";
 
@@ -117,6 +118,8 @@ export class Hub {
 	private readonly files = new Map<string, { mtimeMs: number; header: SessionHeader }>();
 	private readonly watchers = new Set<Subscriber>();
 	private index?: SessionIndexRecord[];
+	/** Sockets that must follow a session to a new Pi id (`new_session`). */
+	private readonly rekeyListeners = new Set<(from: string, info: SessionInfo) => void>();
 	/** Serializes index writes; every mutation is read-modify-write inside it. */
 	private indexWrite: Promise<void> = Promise.resolve();
 
@@ -499,6 +502,118 @@ export class Hub {
 		live.info.thinkingLevel = level;
 		this.emitStatus(live);
 		await this.sendFooter(live);
+	}
+
+	/** `/thinking <level>`: resolve against the levels Pi reports, then set. */
+	async setThinkingQuery(id: string, query: string): Promise<void> {
+		const { levels } = await this.thinkingLevels(id);
+		const resolved = resolveThinkingArgument(levels, query) as {
+			level?: string;
+			error?: string;
+		};
+		if (!resolved.level) throw new Error(resolved.error ?? `unknown thinking level "${query}"`);
+		await this.setThinking(id, resolved.level);
+	}
+
+	/** `/model <query>`: exact provider/id, exact id, then a unique suffix. */
+	async setModelQuery(id: string, query: string): Promise<void> {
+		const { models } = await this.models(id);
+		const resolved = resolveModelArgument(models, query) as {
+			model?: { id: string; provider: string };
+			error?: string;
+		};
+		if (!resolved.model) throw new Error(resolved.error ?? `unknown model "${query}"`);
+		await this.setModel(id, resolved.model.provider, resolved.model.id);
+	}
+
+	/** `/name <name>`: Pi appends the rename and emits `session_info_changed`. */
+	async setName(id: string, name: string): Promise<void> {
+		const live = this.require(id);
+		await live.proc.command({ type: "set_session_name", name });
+		live.info.name = name;
+		this.emitStatus(live);
+	}
+
+	/** `/compact [instructions]`: manual compaction; the client resnapshots after. */
+	async compact(id: string, instructions?: string): Promise<void> {
+		const live = this.require(id);
+		await live.proc.command(
+			{ type: "compact", ...(instructions ? { customInstructions: instructions } : {}) },
+			{ timeoutMs: 0 },
+		);
+		// The context window and token totals changed; the footer must follow.
+		await this.sendFooter(live);
+	}
+
+	/** `/copy`: Pi's own last assistant text, not a client-side reconstruction. */
+	async lastAssistantText(id: string): Promise<string | null> {
+		const live = this.require(id);
+		const data = (await live.proc.command({ type: "get_last_assistant_text" })) as { text?: string | null } | null;
+		return typeof data?.text === "string" ? data.text : null;
+	}
+
+	/**
+	 * `/new`: a fresh session in the same child (TUI behaviour). Pi allocates the
+	 * new id, so the live entry, the socket's active id and the index `piIds` are
+	 * re-keyed; subscribers keep their socket and are told to follow.
+	 */
+	async newSession(id: string): Promise<SessionInfo> {
+		const live = this.require(id);
+		const result = (await live.proc.command(
+			{ type: "new_session" },
+			{ timeoutMs: this.options.promptTimeoutMs ?? 0 },
+		) as { cancelled?: boolean } | null) ?? {};
+		if (result.cancelled) throw new Error("new session was cancelled by an extension");
+
+		// `get_state` reports the new id; the response to `new_session` does not.
+		const state = (await live.proc.command({ type: "get_state" })) as {
+			sessionId?: string;
+			sessionFile?: string;
+			sessionName?: string;
+			model?: { id?: string };
+			thinkingLevel?: string;
+			messageCount?: number;
+			isStreaming?: boolean;
+		};
+		if (!state.sessionId) throw new Error("pi did not report a session id");
+
+		// Mutate the same object: the child's onRecord closure holds this reference,
+		// so replacing it would drop every later event.
+		const info = live.info;
+		const previous = info.id;
+		info.id = state.sessionId;
+		info.sessionFile = state.sessionFile ?? info.sessionFile;
+		info.name = state.sessionName;
+		info.model = state.model?.id ?? info.model;
+		info.thinkingLevel = state.thinkingLevel ?? info.thinkingLevel;
+		info.messageCount = state.messageCount ?? 0;
+		info.state = state.isStreaming ? "busy" : "idle";
+		info.lastActivity = Date.now();
+		this.live.delete(previous);
+		this.live.set(info.id, live);
+
+		if (info.logicalId) {
+			await this.upsertIndex(info, info.logicalId).catch((error: unknown) => {
+				this.options.log(`session index write failed: ${(error as Error).message}`);
+			});
+		}
+		for (const listener of this.rekeyListeners) {
+			try {
+				listener(previous, info);
+			} catch {
+				this.rekeyListeners.delete(listener);
+			}
+		}
+		this.emitStatus(live);
+		this.clearIdle(live);
+		if (info.state === "idle") this.scheduleIdle(live);
+		return info;
+	}
+
+	/** Follow a session to a new Pi id (registered by the socket layer). */
+	onRekey(listener: (from: string, info: SessionInfo) => void): () => void {
+		this.rekeyListeners.add(listener);
+		return () => this.rekeyListeners.delete(listener);
 	}
 
 	/** Answer an extension dialog (`ctx.ui.confirm` and friends) from the phone. */

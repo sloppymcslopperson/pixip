@@ -8,10 +8,12 @@ import { Hub } from "./hub.ts";
 import {
 	frameBash,
 	frameBashError,
+	frameCopy,
 	frameError,
 	frameHello,
 	frameHistory,
 	frameModels,
+	frameOpened,
 	framePolicy,
 	frameSnapshot,
 	frameThinking,
@@ -235,7 +237,7 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 		const unwatch = hub.watch((frame) => send(frame));
 		ws.on("close", unwatch);
 		ws.on("message", (data) => {
-			void handleCommand(String(data), () => null, hub, send, log);
+			void handleCommand(String(data), { id: null }, hub, send, log);
 		});
 		return;
 	}
@@ -243,7 +245,16 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 	let subscriptions: Array<() => void> = [];
 	// The socket starts on the URL's id; an index-only session reattaches under a
 	// fresh Pi id, and every later command must follow that id instead.
-	let activeId: string | null = sessionId;
+	const active: { id: string | null } = { id: sessionId };
+	// A `/new` in any tab re-keys the session; this socket follows instantly and
+	// tells the client, which then asks for a replacement snapshot.
+	subscriptions.push(
+		hub.onRekey((from, info) => {
+			if (active.id !== from) return;
+			active.id = info.id;
+			send(frameOpened(info, true));
+		}),
+	);
 	ws.on("close", () => {
 		for (const unsubscribe of subscriptions) unsubscribe();
 		subscriptions = [];
@@ -251,7 +262,7 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 	// Bind before the attach await: "load earlier" may arrive while the child
 	// is still booting, and a listener added later would drop that frame.
 	ws.on("message", (data) => {
-		void handleCommand(String(data), () => activeId, hub, send, log);
+		void handleCommand(String(data), active, hub, send, log);
 	});
 
 	try {
@@ -263,10 +274,10 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 			send(frameSnapshot(provisional.info, provisional.entries, provisional.leafId, provisional.more));
 		}
 		const info = await hub.attach(sessionId);
-		activeId = info.id;
+		active.id = info.id;
 		// The index-only path lands on a new Pi id: tell the client before the
 		// snapshot so its URL and session key keep pointing at this transcript.
-		if (info.id !== sessionId) send(JSON.stringify({ t: "opened", session: info }));
+		if (info.id !== sessionId) send(frameOpened(info));
 		// Policy is per session (cwd + data dir + CLI), so it goes on the session
 		// socket, not on the list; the composer needs it before the first submit.
 		send(framePolicy(hub.policy(info.id)));
@@ -332,7 +343,7 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 
 async function handleCommand(
 	raw: string,
-	activeId: () => string | null,
+	active: { id: string | null },
 	hub: Hub,
 	send: (frame: string) => void,
 	log: (message: string) => void,
@@ -346,14 +357,14 @@ async function handleCommand(
 	}
 
 	const type = message["t"];
-	const sessionId = activeId();
+	const sessionId = active.id;
 	try {
 		switch (type) {
 			case "create": {
 				const cwd = typeof message["cwd"] === "string" ? message["cwd"] : process.cwd();
 				const name = typeof message["name"] === "string" ? message["name"] : undefined;
 				const info = await hub.create(cwd, name);
-				send(JSON.stringify({ t: "opened", session: info }));
+				send(frameOpened(info));
 				return;
 			}
 			case "stop": {
@@ -420,6 +431,35 @@ async function handleCommand(
 			}
 			case "set_thinking": {
 				await hub.setThinking(sessionId, String(message["level"] ?? "off"));
+				break;
+			}
+			case "set_model_query":
+				await hub.setModelQuery(sessionId, String(message["query"] ?? ""));
+				break;
+			case "set_thinking_query":
+				await hub.setThinkingQuery(sessionId, String(message["query"] ?? ""));
+				break;
+			case "compact": {
+				const raw = message["instructions"];
+				const instructions = typeof raw === "string" && raw.trim() ? raw : undefined;
+				await hub.compact(sessionId, instructions);
+				break;
+			}
+			case "set_session_name":
+				await hub.setName(sessionId, String(message["name"] ?? ""));
+				break;
+			case "new_session":
+				// The rekey listener sends `opened`; the client answers with `resnapshot`.
+				await hub.newSession(sessionId);
+				break;
+			case "copy":
+				send(frameCopy(await hub.lastAssistantText(sessionId)));
+				break;
+			case "resnapshot": {
+				// A normal full snapshot, flagged so the client drops windows it
+				// loaded before a compaction or a `/new`.
+				const full = await hub.snapshot(sessionId);
+				send(frameSnapshot(full.info, full.entries, full.leafId, full.more, false, true));
 				break;
 			}
 			case "ui": {

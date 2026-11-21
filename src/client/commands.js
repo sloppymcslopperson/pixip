@@ -158,3 +158,44 @@ export function isAllowed(name, policy) {
 export function visibleCommands(policy) {
 	return COMMANDS.filter((command) => isAllowed(command.name, policy));
 }
+
+/**
+ * Resolve a `/model` argument against the models Pi reported. Ordered:
+ * exact `provider/id`, exact id, then a unique id/suffix. Ambiguous and unknown
+ * answers carry the closest matches so the caller can toast them.
+ */
+export function resolveModelArgument(models, query) {
+	const list = Array.isArray(models) ? models.filter((model) => model && typeof model.id === "string") : [];
+	const wanted = normalizeName(query).toLowerCase();
+	if (!wanted) return { error: "usage: /model [provider/model]" };
+	const providerId = (model) => `${model.provider ?? ""}/${model.id}`.toLowerCase();
+	const exactProvider = list.find((model) => providerId(model) === wanted);
+	if (exactProvider) return { model: exactProvider };
+	const exactId = list.filter((model) => model.id.toLowerCase() === wanted);
+	if (exactId.length === 1) return { model: exactId[0] };
+	if (exactId.length > 1) return { error: `ambiguous model "${query}": ${describeModels(exactId)}`, matches: exactId };
+	const suffix = list.filter((model) => model.id.toLowerCase().endsWith(wanted) || providerId(model).endsWith(wanted));
+	if (suffix.length === 1) return { model: suffix[0] };
+	if (suffix.length > 1) return { error: `ambiguous model "${query}": ${describeModels(suffix)}`, matches: suffix };
+	return { error: `unknown model "${query}"`, matches: [] };
+}
+
+/** Resolve a `/thinking` argument against the levels Pi reported (exact, then unique prefix). */
+export function resolveThinkingArgument(levels, query) {
+	const list = Array.isArray(levels) ? levels.filter((level) => typeof level === "string") : [];
+	const wanted = normalizeName(query).toLowerCase();
+	if (!wanted) return { error: "usage: /thinking [level]" };
+	const exact = list.filter((level) => level.toLowerCase() === wanted);
+	if (exact.length === 1) return { level: exact[0] };
+	const prefix = list.filter((level) => level.toLowerCase().startsWith(wanted));
+	if (prefix.length === 1) return { level: prefix[0] };
+	if (prefix.length > 1) return { error: `ambiguous thinking level "${query}": ${prefix.join(", ")}`, matches: prefix };
+	return { error: `unknown thinking level "${query}" (have: ${list.join(", ")})`, matches: [] };
+}
+
+function describeModels(models) {
+	return models
+		.slice(0, 5)
+		.map((model) => `${model.provider ?? ""}/${model.id}`)
+		.join(", ");
+}

@@ -12,6 +12,7 @@ import {
 	toolCallsOf,
 } from "./render.js";
 import { classifyInput, isAllowed } from "./commands.js";
+import { formatSession } from "./sessionInfo.js";
 import {
 	contextLevel,
 	footerPwdLine,
@@ -55,6 +56,7 @@ const state = {
 	levels: [],
 	policy: null, // effective per-session command policy (hub-resolved)
 	bashRunning: false,
+	quitting: false,
 	bash: new Map(), // bash id -> optimistic card, matched by event id
 	entries: [], // what the client currently knows, oldest first
 	more: false, // older entries exist before entries[0]
@@ -135,6 +137,7 @@ async function showList() {
 	state.pendingUser = null;
 	state.policy = null;
 	state.bashRunning = false;
+	state.quitting = false;
 	state.bash.clear();
 	state.entries = [];
 	state.more = false;
@@ -208,6 +211,7 @@ function openSession(id) {
 	state.pendingUser = null;
 	state.policy = null;
 	state.bashRunning = false;
+	state.quitting = false;
 	state.bash.clear();
 	ui.list.hidden = true;
 	ui.session.hidden = false;
@@ -240,6 +244,7 @@ function handleFrame(frame) {
 		case "snapshot":
 			state.info = frame.session;
 			if (frame.resume === true) renderResume(frame.entries ?? []);
+			else if (frame.replace === true) renderReplace(frame.entries ?? [], frame.more === true);
 			else renderSnapshot(frame.entries ?? [], frame.more === true);
 			applyInfo();
 			break;
@@ -250,6 +255,10 @@ function handleFrame(frame) {
 			if (frame.session?.id === state.sessionId || !state.sessionId) {
 				state.info = frame.session;
 				applyInfo();
+				if (state.quitting && frame.session.state === "stopped") {
+					state.quitting = false;
+					location.hash = "";
+				}
 			}
 			break;
 		case "opened": {
@@ -258,13 +267,32 @@ function handleFrame(frame) {
 			if (state.sessionId && state.ws) {
 				// An index-only session reattached under a new Pi id: keep this socket
 				// and transcript, and move the URL to the new id without reconnecting.
+				const changed = state.sessionId !== id;
 				state.sessionId = id;
+				if (frame.session) state.info = frame.session;
 				history.replaceState(null, "", `#s=${encodeURIComponent(id)}`);
+				if (frame.rekey === true && changed) {
+					// `/new` in the same child: the old transcript belongs to a
+					// different session, so ask for a replacement window.
+					state.entries = [];
+					state.more = false;
+					state.tools.clear();
+					state.streaming = null;
+					state.pendingUser = null;
+					state.bashRunning = false;
+					state.bash.clear();
+					ui.log.textContent = "";
+					send({ t: "resnapshot" });
+				}
+				applyInfo();
 			} else {
 				location.hash = `s=${encodeURIComponent(id)}`;
 			}
 			break;
 		}
+		case "copy":
+			void copyText(frame.text);
+			break;
 		case "event":
 			handleEvent(frame.ev);
 			break;
@@ -630,6 +658,11 @@ function handleEvent(event) {
 			if (state.info) state.info.name = event.name;
 			applyInfo();
 			break;
+		case "compaction_end":
+			// The compaction entry is not on the live event path and the context
+			// window shrank: re-request the transcript the way it is now.
+			send({ t: "resnapshot" });
+			break;
 		case "auto_retry_start":
 			toast(`retrying (${event.attempt}/${event.maxAttempts}): ${event.errorMessage ?? ""}`);
 			break;
@@ -819,8 +852,48 @@ function handleUiRequest(request) {
 
 // ------------------------------------------------------------------ composer
 
-/** pixip built-in handlers; `02-builtin-commands` fills this registry. */
-const builtinHandlers = {};
+/** pixip built-in handlers; the classifier in commands.js decides who gets here. */
+const builtinHandlers = {
+	compact(args) {
+		send({ t: "compact", ...(args ? { instructions: args } : {}) });
+	},
+	name(args) {
+		if (!args) {
+			toast(`name: ${state.info?.name || "(unnamed)"}`);
+			return;
+		}
+		send({ t: "set_session_name", name: args });
+	},
+	session() {
+		textSheet("session", formatSession(state.info, state.footer));
+	},
+	copy() {
+		send({ t: "copy" });
+	},
+	model(args) {
+		if (!args) {
+			send({ t: "models" });
+			return;
+		}
+		send({ t: "set_model_query", query: args });
+	},
+	thinking(args) {
+		if (!args) {
+			send({ t: "thinking" });
+			return;
+		}
+		send({ t: "set_thinking_query", query: args });
+	},
+	"new"() {
+		send({ t: "new_session" });
+	},
+	resume() {
+		location.hash = "";
+	},
+	quit() {
+		quitSession();
+	},
+};
 
 function clearInput() {
 	ui.input.value = "";
@@ -871,6 +944,14 @@ function submit() {
 	}
 }
 
+/** Replacement snapshot: a compaction or a `/new` invalidates loaded windows. */
+function renderReplace(entries, more) {
+	state.entries = [];
+	state.more = false;
+	state.stick = true;
+	renderSnapshot(entries, more);
+}
+
 function applyPolicy(policy) {
 	state.policy = policy && typeof policy === "object"
 		? {
@@ -887,6 +968,63 @@ function allowed(action) {
 	notice(`/${action.name} is blocked by the command policy`);
 	clearInput();
 	return false;
+}
+
+/** Soft quit: stop/detach the child, then return to the list. */
+function quitSession() {
+	send({ t: "stop" });
+	state.quitting = true;
+	// The status frame normally navigates; this is the fallback if the socket
+	// drops before it arrives.
+	setTimeout(() => {
+		if (!state.quitting) return;
+		state.quitting = false;
+		location.hash = "";
+	}, 500);
+}
+
+/** `/copy`: the hub supplies Pi's last assistant text; clipboard may be absent. */
+async function copyText(text) {
+	if (typeof text !== "string" || !text.trim()) {
+		toast("nothing to copy");
+		return;
+	}
+	try {
+		await navigator.clipboard.writeText(text);
+		toast("copied");
+	} catch {
+		copySheet(text);
+	}
+}
+
+function copySheet(text) {
+	const target = ui.sheet;
+	target.hidden = false;
+	target.textContent = "";
+	const heading = document.createElement("div");
+	heading.className = "sheet-title";
+	heading.textContent = "copy";
+	const body = document.createElement("pre");
+	body.className = "sheet-text";
+	body.textContent = text;
+	const actions = document.createElement("div");
+	actions.className = "sheet-actions";
+	const copy = document.createElement("button");
+	copy.textContent = "copy";
+	copy.addEventListener("click", async () => {
+		try {
+			await navigator.clipboard.writeText(text);
+			toast("copied");
+			closeSheet();
+		} catch {
+			toast("copy failed — select the text and copy manually");
+		}
+	});
+	const close = document.createElement("button");
+	close.textContent = "close";
+	close.addEventListener("click", closeSheet);
+	actions.append(copy, close);
+	target.append(heading, body, actions);
 }
 
 function submitSlash(text) {

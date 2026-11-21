@@ -16,8 +16,16 @@ const option = (name) => {
 
 const sessionDir = option("--session-dir") ?? process.cwd();
 const requested = option("--session");
-const sessionName = option("--name") ?? env.FAKE_PI_NAME;
+let sessionName = option("--name") ?? env.FAKE_PI_NAME;
+let model = {
+	id: env.FAKE_PI_MODEL ?? "fake-model",
+	provider: "fake",
+	contextWindow: 100_000,
+	reasoning: false,
+};
+let thinkingLevel = env.FAKE_PI_THINKING ?? "off";
 const entries = JSON.parse(env.FAKE_PI_ENTRIES ?? "[]");
+let messageCount = entries.filter((entry) => entry?.type === "message").length;
 let leafId = env.FAKE_PI_LEAF ?? entries.at(-1)?.id ?? null;
 const during = JSON.parse(env.FAKE_PI_DURING ?? "[]");
 const duringEntry = env.FAKE_PI_DURING_ENTRY ? JSON.parse(env.FAKE_PI_DURING_ENTRY) : undefined;
@@ -34,7 +42,7 @@ if (!sessionId && requested && existsSync(requested)) {
 	}
 }
 sessionId ??= env.FAKE_PI_NEW_SESSION_ID ?? randomUUID();
-const sessionFile = requested ?? `${sessionDir}/2026-11-21T00-00-00-000Z_${sessionId}.jsonl`;
+let sessionFile = requested ?? `${sessionDir}/2026-11-21T00-00-00-000Z_${sessionId}.jsonl`;
 
 if (env.FAKE_PI_LOG) {
 	appendFileSync(
@@ -73,9 +81,9 @@ function handle(line) {
 				sessionId,
 				sessionFile,
 				sessionName,
-				model: { id: env.FAKE_PI_MODEL ?? "fake-model", provider: "fake", contextWindow: 100_000, reasoning: false },
-				thinkingLevel: "off",
-				messageCount: entries.filter((entry) => entry?.type === "message").length,
+				model,
+				thinkingLevel,
+				messageCount,
 				isStreaming: env.FAKE_PI_IS_STREAMING === "1",
 				autoCompactionEnabled: true,
 			});
@@ -106,7 +114,65 @@ function handle(line) {
 			});
 		case "get_available_models":
 			if (env.FAKE_PI_RENAME_TO) send({ type: "session_info_changed", name: env.FAKE_PI_RENAME_TO });
-			return ok(command.id, "get_available_models", { models: [] });
+			return ok(command.id, "get_available_models", {
+				models: JSON.parse(env.FAKE_PI_MODELS ?? "[]"),
+			});
+		case "get_available_thinking_levels": {
+			const levels = (env.FAKE_PI_THINKING_LEVELS ?? "off").split(",").filter(Boolean);
+			return ok(command.id, "get_available_thinking_levels", {
+				levels,
+				current: thinkingLevel,
+			});
+		}
+		case "get_last_assistant_text":
+			return ok(command.id, "get_last_assistant_text", { text: env.FAKE_PI_LAST_TEXT ?? null });
+		case "set_session_name":
+			logRecord({ type: "set_session_name", name: command.name });
+			sessionName = command.name;
+			send({ type: "session_info_changed", name: command.name });
+			return ok(command.id, "set_session_name", {});
+		case "set_model": {
+			logRecord({ type: "set_model", provider: command.provider, modelId: command.modelId });
+			const available = JSON.parse(env.FAKE_PI_MODELS ?? "[]");
+			const found = available.find((item) => item?.id === command.modelId && item?.provider === command.provider);
+			model = { ...model, id: command.modelId, provider: command.provider, ...(found ?? {}) };
+			return ok(command.id, "set_model", { id: command.modelId, provider: command.provider });
+		}
+		case "set_thinking_level":
+			logRecord({ type: "set_thinking_level", level: command.level });
+			thinkingLevel = command.level;
+			return ok(command.id, "set_thinking_level", {});
+		case "new_session": {
+			logRecord({ type: "new_session" });
+			sessionId = env.FAKE_PI_NEW_SESSION_ID_AFTER ?? randomUUID();
+			sessionFile = `${sessionDir}/2026-11-21T00-00-00-000Z_${sessionId}.jsonl`;
+			sessionName = undefined;
+			messageCount = 0;
+			entries.length = 0;
+			leafId = null;
+			return ok(command.id, "new_session", { cancelled: false });
+		}
+		case "compact": {
+			logRecord({
+				type: "compact",
+				customInstructions: command.customInstructions ?? null,
+			});
+			if (env.FAKE_PI_COMPACTION !== "0") {
+				send({ type: "compaction_start", reason: "manual" });
+				send({
+					type: "compaction_end",
+					reason: "manual",
+					aborted: false,
+					result: { summary: "compacted", tokensBefore: 100 },
+				});
+			}
+			return ok(command.id, "compact", {
+				summary: "compacted",
+				firstKeptEntryId: null,
+				tokensBefore: 100,
+				estimatedTokensAfter: 10,
+			});
+		}
 		case "prompt": {
 			logRecord({
 				type: "prompt",

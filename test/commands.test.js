@@ -8,7 +8,9 @@ import {
 	classifyInput,
 	findCommand,
 	isAllowed,
+	resolveModelArgument,
 	resolvePolicy,
+	resolveThinkingArgument,
 	visibleCommands,
 } from "../src/client/commands.js";
 
@@ -157,5 +159,59 @@ describe("visibleCommands", () => {
 		assert.equal(names.includes("settings"), false);
 		assert.equal(names.includes("compact"), false);
 		assert.equal(names.includes("model"), true);
+	});
+});
+
+describe("resolveModelArgument", () => {
+	const models = [
+		{ id: "fake-model", provider: "fake" },
+		{ id: "fake-model", provider: "mirror" },
+		{ id: "other-model", provider: "acme" },
+		{ id: "deepseek-v4.1-flash", provider: "deepseek" },
+	];
+
+	it("prefers an exact provider/id", () => {
+		assert.equal(resolveModelArgument(models, "deepseek/deepseek-v4.1-flash").model?.provider, "deepseek");
+		assert.equal(resolveModelArgument(models, "ACME/OTHER-MODEL").model?.id, "other-model");
+	});
+
+	it("takes an exact id when it is unique", () => {
+		assert.equal(resolveModelArgument(models, "other-model").model?.provider, "acme");
+	});
+
+	it("reports an ambiguous exact id with the matches", () => {
+		const resolved = resolveModelArgument(models, "fake-model");
+		assert.equal(resolved.model, undefined);
+		assert.match(resolved.error, /ambiguous model/);
+		assert.equal(resolved.matches.length, 2);
+	});
+
+	it("falls back to a unique suffix", () => {
+		assert.equal(resolveModelArgument(models, "flash").model?.id, "deepseek-v4.1-flash");
+		assert.match(resolveModelArgument(models, "model").error, /ambiguous model/);
+	});
+
+	it("reports an unknown model and the empty command", () => {
+		assert.match(resolveModelArgument(models, "gpt").error, /unknown model/);
+		assert.deepEqual(resolveModelArgument(models, "gpt").matches, []);
+		assert.match(resolveModelArgument(models, "  ").error, /usage: \/model/);
+	});
+});
+
+describe("resolveThinkingArgument", () => {
+	const levels = ["off", "low", "medium", "high"];
+
+	it("matches exactly, then by unique prefix", () => {
+		assert.equal(resolveThinkingArgument(levels, "medium").level, "medium");
+		assert.equal(resolveThinkingArgument(levels, "med").level, "medium");
+		assert.equal(resolveThinkingArgument(levels, "H").level, "high");
+	});
+
+	it("reports ambiguous prefixes and unknown levels", () => {
+		assert.match(resolveThinkingArgument(["high", "higher"], "h").error, /ambiguous/);
+		const unknown = resolveThinkingArgument(levels, "turbo");
+		assert.match(unknown.error, /unknown thinking level/);
+		assert.match(unknown.error, /off, low, medium, high/);
+		assert.match(resolveThinkingArgument(levels, "").error, /usage: \/thinking/);
 	});
 });
