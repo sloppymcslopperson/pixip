@@ -1,0 +1,143 @@
+# TUI parity
+
+pixip is meant to replace AoE for Pi sessions, and the next leg exists because the
+owner wants to develop pixip **inside pixip**. This page is the coverage map: every
+Pi TUI command and composer behaviour, where pixip stands, and which ticket owns
+the gap. The board tickets remain the work units; this table is the source of
+truth for "can I stop using the terminal yet".
+
+Statuses: **done** · **`NN-ticket`** (planned/in progress) · **TUI-only** (no RPC
+surface, deliberately not ported; pixip shows a local notice instead of sending it
+to the model).
+
+## The dogfooding leg
+
+| Order | Ticket | What it unlocks |
+|---|---|---|
+| 1 | `00-prefix-commands` | `/`, `!`, `!!` classification, bash, command policy, prompt/steer dispatch |
+| 2 | `01-daemon-refresh` | run pixip as a background daemon; soft reload and `--when-idle` restart so the agent can update pixip mid-session |
+| 3 | `05-builtin-commands` | `/compact`, `/name`, `/session`, `/copy`, `/model`, `/thinking`, `/new`, `/resume`, `/quit` |
+| 4 | `06-command-menu` | `/` suggestion menu and the status line below the composer |
+| 5 | `07-queue-display` | visible steering/follow-up queue with clear/restore |
+| 6 | `08-session-commands` | `/tree`, `/fork`, `/clone`, `/import`, `/export` |
+
+`10-add-font-size-control` is unrelated UI work that happens to sit in the same
+queue. Everything else below is either already done or deliberately deferred.
+
+## Commands
+
+| Command | TUI behaviour | pixip |
+|---|---|---|
+| `/settings` | settings selector | TUI-only |
+| `/model [provider/model]` | picker, or set directly | `05-builtin-commands` |
+| `/thinking [level]` | picker, or set directly | `05-builtin-commands` |
+| `/scoped-models` | configure interactive cycling | TUI-only |
+| `/login`, `/logout` | OAuth/API-key flows | TUI-only (run `pi login` once in a terminal) |
+| `/llama` | llama.cpp router management | TUI-only |
+| `/new` | fresh session in the same child | `05-builtin-commands` |
+| `/resume` | session picker | `05-builtin-commands` (returns to the session list) |
+| `/name [name]` | show/set session name | `05-builtin-commands` |
+| `/session` | session id/file/stats | `05-builtin-commands` (meta block) |
+| `/tree` | navigate the session tree in place | `08-session-commands`: read-only sheet + fork; **in-place leaf navigation is TUI-only** (RPC `get_tree` has no navigate command) |
+| `/fork` | pick a user message, fork a new session | `08-session-commands` (tap a message or use the tree sheet) |
+| `/clone` | duplicate the current branch | `08-session-commands` |
+| `/compact [instructions]` | compact context | `05-builtin-commands` (plus a transcript resnapshot) |
+| `/import <path>` | import a JSONL | `08-session-commands` (copies into the data dir) |
+| `/copy` | copy last assistant message | `05-builtin-commands` (clipboard, sheet fallback) |
+| `/export [path]` | export HTML/JSONL | `08-session-commands` (download) |
+| `/share` | upload and return a viewer link | TUI-only |
+| `/trust` | save a project trust decision | TUI-only |
+| `/mcp` | MCP server management | TUI-only |
+| `/reload` | reload Pi resources | TUI-only (pixip's daemon soft refresh reloads its own assets/config/index, not Pi's resources) |
+| `/hotkeys` | keybinding help | TUI-only (web keyboard is different) |
+| `/changelog` | changelog viewer | TUI-only |
+| `/quit` | quit Pi | `05-builtin-commands` (soft quit: detach + session list) |
+| `/debug` | debug view | TUI-only |
+| `/extension` | extension commands, e.g. `/fit` | `00-prefix-commands` (passthrough to Pi) |
+| `/template` | prompt templates | `00-prefix-commands` (passthrough to Pi) |
+| `/skill:name` | skills | `00-prefix-commands` (passthrough to Pi) |
+| unknown `/thing` | sent as a prompt | `00-prefix-commands` (same passthrough) |
+
+## Composer and runtime
+
+| Behaviour | pixip |
+|---|---|
+| `!cmd`, `!!cmd` (bash, excluded from context) | `00-prefix-commands` |
+| Command menu on `/` | `06-command-menu` |
+| Steering/follow-up queue visible, clear + restore | `07-queue-display` |
+| Abort a running bash | deferred (gap; TUI-only for now) |
+| Input history (up/down) | deferred |
+| `@file` completion | deferred |
+| Image paste/attachments | deferred |
+| Esc to abort/clear | abort via the stop button; queue clear in `07` |
+| Long `notify` text readable (extension commands) | `00-prefix-commands` (dismissible sheet, not a 3.2 s toast) |
+| Working / compacting status | done (footer + toasts) |
+| Markdown rendering | done (`00-render-markdown`) |
+| Diff/syntax colouring and TUI theme values | `85-theme-tokens` |
+| TUI status line | done (`16-tui-status-line`) |
+| Full transcript (not just windows) | `10-expand-full-transcript` |
+| Desktop multi-session surface | `25-desktop-surface` |
+| Responsive layout contract | `20-responsive-layout` |
+| Worktree create/teardown (AoE parity) | `60-worktrees-for-aoe-parity` |
+| Auth posture / VPN bind | `80-vpn-bind-and-auth-posture` |
+
+## pixip-only behaviour (no TUI equivalent)
+
+- stable pixip logical session ids (`PIXIP_SESSION_ID`) across Pi session ids
+  (`03-session-index-empty`);
+- durable entry-cursor reconnect, so a phone that drops mid-turn misses nothing
+  (`04-snapshot-live-cursor`);
+- index-only sessions keep their name and listing after detach (`03`);
+- daemon lifecycle + soft refresh (`01-daemon-refresh`, planned);
+- per-project command policy (below).
+
+## Command policy
+
+Commands can be whitelisted or blacklisted, at command-name granularity, in three
+restrict-only layers (a more specific layer can only narrow):
+
+1. `<data-dir>/pixip.json`;
+2. `<session-cwd>/.pixip.json`;
+3. CLI: `--allow-command <name>` (repeatable), `--deny-command <name>`, `--no-bash`.
+
+```json
+{
+  "commands": {
+    "allow": ["compact", "name", "model"],
+    "deny": ["login"],
+    "bash": true
+  }
+}
+```
+
+`deny` wins over `allow`; an empty `allow` list means "no allow restriction";
+`bash: false` disables `!`/`!!`. Names are bare (`compact`, not `/compact`). Denied
+and TUI-only commands render a local notice and are never sent to the model. The
+effective policy is resolved per session from its cwd and sent to the client.
+
+Decided in `00-prefix-commands`; the implementation and tests live there.
+
+## Extension commands (e.g. `/fit`)
+
+pixip has no FIT-specific code or dependency. `/fit` is a Pi extension command
+registered by the `FIT_pi` package, so it rides the generic extension-command path:
+the composer forwards the literal slash text to Pi's `prompt`, Pi executes it, and
+its dialogs/notify come back over `extension_ui_request`. Three generic
+guarantees make that usable (implemented in `00-prefix-commands`):
+
+- slash input while busy uses `prompt` + `streamingBehavior: "steer"`, because RPC
+  `steer` does not execute extension commands;
+- `prompt` is not subject to the hub's 20 s command timeout, because extension
+  handlers block on user dialogs (`/fit edit`, `/fit work`);
+- long/multi-line `notify` text (e.g. `/fit help`) opens a dismissible sheet
+  instead of a timed toast.
+
+The command policy can allow/deny `fit` by name like any other command; it is not
+in the built-in or TUI-only catalog.
+
+## Checking a slice
+
+Definition of done is unchanged: `npm run check` green, plus `tools/shot.mjs` at
+390 and 1280 for client work (the current CI box has no Chromium, so the owner
+runs the screenshots). Update the affected rows here and in `README.md` when a
+slice closes; add new tickets as rows rather than editing statuses in prose.

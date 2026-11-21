@@ -72,20 +72,24 @@ do in the TUI.
   usage with the TUI's thresholds, and `model • thinkingLevel`;
 - extension dialogs (`select`/`confirm`/`input`/`editor`) rendered as a sheet and
   answered from the phone; `notify` as a toast;
-- reconnect with backoff + snapshot replay;
+- reconnect with backoff, durable entry-cursor resume and a stable pixip logical
+  session id per session, so a dropped phone misses no entries;
+- sessions that were never prompted still list after detach (session index);
 - test isolation via `--data-dir`.
+
+TUI command parity is the current focus (developing pixip inside pixip); see
+[`docs/parity.md`](docs/parity.md) for the command-by-command coverage map and the
+tickets that own each gap.
 
 ## Not yet
 
-- persisted session *names* for stopped sessions (they live in the JSONL, the hub
-  only reads the header today);
-- TUI visual parity: markdown rendering, diff/syntax colouring and the TUI's own
-  theme colours (see the parity ticket — theme values are `okhsl`, which browsers
-  do not support without conversion);
-- an index for sessions that have no messages yet (Pi writes the JSONL on first
-  message, so an empty session disappears after detach);
-- fork/clone/switch-session commands, worktree creation, model picker, compaction
-  controls, image input;
+- TUI visual parity: diff/syntax colouring and the TUI's own theme colours (theme
+  values are `okhsl`, which browsers do not support without conversion — see
+  `85-theme-tokens`);
+- the TUI command surface: slash built-ins, the command menu, queue display and
+  branch/session commands (tracked in `docs/parity.md`);
+- daemon lifecycle and self-refresh (`01-daemon-refresh`);
+- worktree creation, image input, input history and `@file` completion;
 - virtualised transcript for very long sessions;
 - auth of any kind (bind loopback, or a private VPN interface — same posture as
   `aoe serve --host 100.42.42.1 --auth none`).
