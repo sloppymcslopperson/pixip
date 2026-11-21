@@ -19,6 +19,18 @@ import {
 	footerStatsLeft,
 	footerStatsRight,
 } from "./footer.js";
+import {
+	DEFAULT_PERCENT,
+	STORAGE_KEY,
+	STEPS,
+	clampPercent,
+	decreaseLabel,
+	increaseLabel,
+	nextPercent,
+	parseStored,
+	previousPercent,
+	scaleFactor,
+} from "./transcriptScale.js";
 
 const $ = (selector) => document.querySelector(selector);
 const ui = {
@@ -29,6 +41,8 @@ const ui = {
 	dot: $("#dot"),
 	reload: $("#reload"),
 	stop: $("#stop"),
+	scaleDown: $("#scale-down"),
+	scaleUp: $("#scale-up"),
 	list: $("#list"),
 	session: $("#session"),
 	log: $("#log"),
@@ -61,6 +75,7 @@ const state = {
 	entries: [], // what the client currently knows, oldest first
 	more: false, // older entries exist before entries[0]
 	loadingEarlier: false,
+	scale: DEFAULT_PERCENT, // transcript text size, percent (device-local)
 };
 
 // ------------------------------------------------------------------ transport
@@ -1125,6 +1140,97 @@ function resize() {
 	ui.input.style.height = "auto";
 	ui.input.style.height = `${Math.min(ui.input.scrollHeight, window.innerHeight * 0.4)}px`;
 }
+
+// ------------------------------------------------------------- transcript size
+
+function readScale() {
+	try {
+		return parseStored(localStorage.getItem(STORAGE_KEY));
+	} catch {
+		// Storage can throw in private modes / blocked-cookie contexts.
+		return DEFAULT_PERCENT;
+	}
+}
+
+function saveScale(percent) {
+	try {
+		localStorage.setItem(STORAGE_KEY, String(percent));
+	} catch {}
+}
+
+/**
+ * Apply a transcript size, keeping the reading position: a pinned view stays
+ * pinned, otherwise the distance from the bottom is held. Only `#log`'s font
+ * size changes, so the composer does not move.
+ */
+function setScale(percent, { persist = true } = {}) {
+	const next = clampPercent(percent);
+	if (next !== state.scale) {
+		const distance = state.stick ? ui.log.clientHeight : ui.log.scrollHeight - ui.log.scrollTop;
+		state.scale = next;
+		document.documentElement.style.setProperty("--transcript-scale", String(scaleFactor(next)));
+		ui.log.scrollTop = Math.max(0, ui.log.scrollHeight - distance);
+	}
+	if (persist) saveScale(next);
+	updateScaleButtons();
+}
+
+function updateScaleButtons() {
+	ui.scaleDown.disabled = state.scale === STEPS[0];
+	ui.scaleUp.disabled = state.scale === STEPS[STEPS.length - 1];
+	ui.scaleDown.setAttribute("aria-label", decreaseLabel(state.scale));
+	ui.scaleUp.setAttribute("aria-label", increaseLabel(state.scale));
+}
+
+/** Tap steps; a long-press resets to 100 % without also firing the click. */
+function bindScaleButton(button, step) {
+	let timer = 0;
+	let longPressed = false;
+	const cancel = () => {
+		clearTimeout(timer);
+		timer = 0;
+	};
+	button.addEventListener("pointerdown", () => {
+		cancel();
+		longPressed = false;
+		timer = setTimeout(() => {
+			longPressed = true;
+			timer = 0;
+			setScale(DEFAULT_PERCENT);
+		}, 550);
+	});
+	for (const type of ["pointerup", "pointercancel", "pointerleave"]) {
+		button.addEventListener(type, cancel);
+	}
+	button.addEventListener("contextmenu", (event) => event.preventDefault());
+	button.addEventListener("click", () => {
+		if (longPressed) {
+			longPressed = false;
+			return;
+		}
+		setScale(step === "up" ? nextPercent(state.scale) : previousPercent(state.scale));
+	});
+}
+
+bindScaleButton(ui.scaleDown, "down");
+bindScaleButton(ui.scaleUp, "up");
+setScale(readScale(), { persist: false });
+
+// Desktop shortcuts. `Ctrl/Cmd` is intentional rather than plain `-`/`+` so
+// typing in the composer is never affected; browser zoom still compounds.
+window.addEventListener("keydown", (event) => {
+	if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+	if (event.key === "-" || event.key === "_") {
+		event.preventDefault();
+		setScale(previousPercent(state.scale));
+	} else if (event.key === "+" || event.key === "=") {
+		event.preventDefault();
+		setScale(nextPercent(state.scale));
+	} else if (event.key === "0") {
+		event.preventDefault();
+		setScale(DEFAULT_PERCENT);
+	}
+});
 
 ui.back.addEventListener("click", () => {
 	location.hash = "";

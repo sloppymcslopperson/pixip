@@ -21,10 +21,10 @@ to the model).
 | 5 | `07-queue-display` | visible steering/follow-up queue with clear/restore |
 | 6 | `08-session-commands` | `/tree`, `/fork`, `/clone`, `/import`, `/export` |
 
-After the leg, the first ticket pixip works on itself is
+After the leg, the first ticket pixip worked on itself is
 `03-add-font-size-control` (transcript text sizing): a small, self-contained UI
-slice used as the test of the dogfooding setup. Everything else below is either
-already done or deliberately deferred.
+slice used as the test of the dogfooding setup. It is done; everything else below
+is either already done or deliberately deferred.
 
 ## Commands
 
@@ -73,7 +73,7 @@ already done or deliberately deferred.
 | Image paste/attachments | deferred |
 | Esc to abort/clear | abort via the stop button; queue clear in `07` |
 | Long `notify` text readable (extension commands) | done (`00-prefix-commands`: dismissible sheet, not a 3.2 s toast) |
-| Transcript text size (50–150 %, header `A−`/`A+`) | `03-add-font-size-control` |
+| Transcript text size (50–150 %, header `A−`/`A+`) | done (`03-add-font-size-control`: seven steps, device-local, transcript-only, long-press reset) |
 | Working / compacting status | done (footer + toasts) |
 | Markdown rendering | done (`00-render-markdown`) |
 | Diff/syntax colouring and TUI theme values | `85-theme-tokens` |

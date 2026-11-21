@@ -76,6 +76,9 @@ do in the TUI.
   / `set_model`, `get_available_thinking_levels` / `set_thinking_level`);
 - the TUI status line: pwd + branch + session name, token totals, cost, context
   usage with the TUI's thresholds, and `model • thinkingLevel`;
+- transcript text size: `A−`/`A+` in the header, seven steps from 50 % to 150 %,
+  device-local (`localStorage`), scaling only the transcript so the composer and
+  the rest of the chrome stay fixed (long-press resets, `Ctrl/Cmd` `-`/`+`/`0`);
 - extension dialogs (`select`/`confirm`/`input`/`editor`) rendered as a sheet and
   answered from the phone; `notify` as a toast;
 - reconnect with backoff, durable entry-cursor resume and a stable pixip logical
