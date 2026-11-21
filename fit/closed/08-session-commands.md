@@ -1,6 +1,7 @@
 ---
 grilled: true
 leg: tui-parity-1
+commit: "44a3ab61014da3f4936b31537b4012bc32977cd8"
 ---
 
 Bring Pi's branch and session commands to the web UI: a read-only tree sheet with a tap-to-fork action on user messages, plus `/fork`, `/clone`, `/import` and `/export`. These commands change the child's session id, so the hub must re-key the live session and the client must follow it.
@@ -45,3 +46,11 @@ Slice 6 of the TUI-parity leg and the last one needed to develop pixip inside pi
 ### Queue renumbering (2026-11-21)
 
 `05-builtin-commands` is now `02-builtin-commands` (the re-key helper this ticket reuses). The next ticket after the 3-ticket batch is `03-add-font-size-control`; this slice stays at priority 08.
+
+### Verified (2026-11-21)
+
+- `npm run check` green (156 tests). Pure: `flattenTree` (nesting, labels, current branch, orphan roots) and `exportFileName` (slug + short id, no path separators).
+- Integration: `/tree` passes `get_tree` through; `/fork` re-keys to the new id, appends index `piIds` and answers with `{text, cancelled}`; `/clone` follows the same path; `/import` copies the JSONL into `<data-dir>/sessions/` byte-for-byte (header id/cwd intact, source unchanged), indexes it and switches; `/export` writes under `<data-dir>/exports/` and both HTTP downloads return `Content-Disposition: attachment` (HTML + unmodified JSONL).
+- The `/new` re-key body is now one private `rekeyFromState()` used by new/fork/clone/import; every re-key sends `opened` with `rekey`, and the client resnapshots without reconnecting.
+- Leaf navigation is documented as TUI-only in `docs/parity.md`; the catalog now treats tree/fork/clone/import/export as built-ins.
+- Screenshot gap: no Chromium on this box, so `tools/shot.mjs` at 390/1280 (tree sheet, fork affordance, export sheet) is still the owner's step.
