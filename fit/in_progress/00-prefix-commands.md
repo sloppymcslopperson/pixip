@@ -84,3 +84,12 @@ No pixip-side dependency: `/fit` is a Pi extension command (`pi.registerCommand(
 - `extension_ui_request` methods pixip does not implement (e.g. `setStatus`) stay ignored, as today; dialogs (`select`/`confirm`/`input`/`editor`) are answered from the phone through the existing sheet.
 - Policy stays uniform: extension commands are allowed by default; `allow`/`deny` may name `fit` like any other command; nothing in the built-in/TUI-only catalog special-cases it.
 - Tests: the fake Pi emulates an extension command (long `notify`, a `select` dialog, a prompt response delayed past a test-configured short timeout); assert the prompt text arrived verbatim, one dialog and one readable notify, and no error frame. Real-Pi smoke already done for `/fit help` (2026-11-21: notify + successful prompt, idle); repeat for `/fit list` and a dialog-driven `/fit edit` once the timeout work lands.
+
+### Queue renumbering (2026-11-21)
+
+The owner wants the font-size ticket to be the first ticket pixip works on itself, after the 3-ticket AoE batch. Two ids in the prose above changed; use these:
+
+- `05-builtin-commands` -> `02-builtin-commands` (keeps the batch at `00`, `01`, `02`);
+- `10-add-font-size-control` -> `03-add-font-size-control` (next in the queue, first self-hosted ticket).
+
+Queue after the batch: `03-add-font-size-control`, `06-command-menu`, `07-queue-display`, `08-session-commands`. `docs/parity.md` reflects this.

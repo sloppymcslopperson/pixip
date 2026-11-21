@@ -16,34 +16,36 @@ to the model).
 |---|---|---|
 | 1 | `00-prefix-commands` | `/`, `!`, `!!` classification, bash, command policy, prompt/steer dispatch |
 | 2 | `01-daemon-refresh` | run pixip as a background daemon; soft reload and `--when-idle` restart so the agent can update pixip mid-session |
-| 3 | `05-builtin-commands` | `/compact`, `/name`, `/session`, `/copy`, `/model`, `/thinking`, `/new`, `/resume`, `/quit` |
+| 3 | `02-builtin-commands` | `/compact`, `/name`, `/session`, `/copy`, `/model`, `/thinking`, `/new`, `/resume`, `/quit` |
 | 4 | `06-command-menu` | `/` suggestion menu and the status line below the composer |
 | 5 | `07-queue-display` | visible steering/follow-up queue with clear/restore |
 | 6 | `08-session-commands` | `/tree`, `/fork`, `/clone`, `/import`, `/export` |
 
-`10-add-font-size-control` is unrelated UI work that happens to sit in the same
-queue. Everything else below is either already done or deliberately deferred.
+After the leg, the first ticket pixip works on itself is
+`03-add-font-size-control` (transcript text sizing): a small, self-contained UI
+slice used as the test of the dogfooding setup. Everything else below is either
+already done or deliberately deferred.
 
 ## Commands
 
 | Command | TUI behaviour | pixip |
 |---|---|---|
 | `/settings` | settings selector | TUI-only |
-| `/model [provider/model]` | picker, or set directly | `05-builtin-commands` |
-| `/thinking [level]` | picker, or set directly | `05-builtin-commands` |
+| `/model [provider/model]` | picker, or set directly | `02-builtin-commands` |
+| `/thinking [level]` | picker, or set directly | `02-builtin-commands` |
 | `/scoped-models` | configure interactive cycling | TUI-only |
 | `/login`, `/logout` | OAuth/API-key flows | TUI-only (run `pi login` once in a terminal) |
 | `/llama` | llama.cpp router management | TUI-only |
-| `/new` | fresh session in the same child | `05-builtin-commands` |
-| `/resume` | session picker | `05-builtin-commands` (returns to the session list) |
-| `/name [name]` | show/set session name | `05-builtin-commands` |
-| `/session` | session id/file/stats | `05-builtin-commands` (meta block) |
+| `/new` | fresh session in the same child | `02-builtin-commands` |
+| `/resume` | session picker | `02-builtin-commands` (returns to the session list) |
+| `/name [name]` | show/set session name | `02-builtin-commands` |
+| `/session` | session id/file/stats | `02-builtin-commands` (meta block) |
 | `/tree` | navigate the session tree in place | `08-session-commands`: read-only sheet + fork; **in-place leaf navigation is TUI-only** (RPC `get_tree` has no navigate command) |
 | `/fork` | pick a user message, fork a new session | `08-session-commands` (tap a message or use the tree sheet) |
 | `/clone` | duplicate the current branch | `08-session-commands` |
-| `/compact [instructions]` | compact context | `05-builtin-commands` (plus a transcript resnapshot) |
+| `/compact [instructions]` | compact context | `02-builtin-commands` (plus a transcript resnapshot) |
 | `/import <path>` | import a JSONL | `08-session-commands` (copies into the data dir) |
-| `/copy` | copy last assistant message | `05-builtin-commands` (clipboard, sheet fallback) |
+| `/copy` | copy last assistant message | `02-builtin-commands` (clipboard, sheet fallback) |
 | `/export [path]` | export HTML/JSONL | `08-session-commands` (download) |
 | `/share` | upload and return a viewer link | TUI-only |
 | `/trust` | save a project trust decision | TUI-only |
@@ -51,7 +53,7 @@ queue. Everything else below is either already done or deliberately deferred.
 | `/reload` | reload Pi resources | TUI-only (pixip's daemon soft refresh reloads its own assets/config/index, not Pi's resources) |
 | `/hotkeys` | keybinding help | TUI-only (web keyboard is different) |
 | `/changelog` | changelog viewer | TUI-only |
-| `/quit` | quit Pi | `05-builtin-commands` (soft quit: detach + session list) |
+| `/quit` | quit Pi | `02-builtin-commands` (soft quit: detach + session list) |
 | `/debug` | debug view | TUI-only |
 | `/extension` | extension commands, e.g. `/fit` | `00-prefix-commands` (passthrough to Pi) |
 | `/template` | prompt templates | `00-prefix-commands` (passthrough to Pi) |
@@ -71,6 +73,7 @@ queue. Everything else below is either already done or deliberately deferred.
 | Image paste/attachments | deferred |
 | Esc to abort/clear | abort via the stop button; queue clear in `07` |
 | Long `notify` text readable (extension commands) | `00-prefix-commands` (dismissible sheet, not a 3.2 s toast) |
+| Transcript text size (50–150 %, header `A−`/`A+`) | `03-add-font-size-control` |
 | Working / compacting status | done (footer + toasts) |
 | Markdown rendering | done (`00-render-markdown`) |
 | Diff/syntax colouring and TUI theme values | `85-theme-tokens` |

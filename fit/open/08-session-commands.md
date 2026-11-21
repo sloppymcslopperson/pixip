@@ -41,3 +41,7 @@ Slice 6 of the TUI-parity leg and the last one needed to develop pixip inside pi
 - `get_tree` returns an array of roots with nested children; orphaned entries can appear as roots — render them, do not drop them.
 - Fork returns only `{text, cancelled}`; the new id comes from a follow-up `get_state`, so the re-key sequence must be tested against a moving id.
 - Screenshots (390/1280) are the owner's step; note the gap when closing.
+
+### Queue renumbering (2026-11-21)
+
+`05-builtin-commands` is now `02-builtin-commands` (the re-key helper this ticket reuses). The next ticket after the 3-ticket batch is `03-add-font-size-control`; this slice stays at priority 08.
