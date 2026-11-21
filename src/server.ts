@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readdir, readFile } from "node:fs/promises";
-import { extname, join, normalize } from "node:path";
+import { basename, extname, join, normalize } from "node:path";
 
 import { WebSocketServer, type WebSocket } from "ws";
 
@@ -8,17 +8,22 @@ import { Hub } from "./hub.ts";
 import {
 	frameBash,
 	frameBashError,
+	frameClone,
 	frameCommands,
 	frameCopy,
 	frameError,
+	frameExport,
+	frameFork,
 	frameHello,
 	frameHistory,
+	frameImport,
 	frameModels,
 	frameOpened,
 	framePolicy,
 	frameQueue,
 	frameSnapshot,
 	frameThinking,
+	frameTree,
 	WIRE_VERSION,
 } from "./wire.ts";
 import type { SessionInfo } from "./wire.ts";
@@ -211,6 +216,34 @@ async function handleHttp(
 		const stopMatch = /^\/api\/sessions\/([^/]+)\/stop$/.exec(url.pathname);
 		if (req.method === "POST" && stopMatch?.[1]) {
 			send(200, JSON.stringify(await hub.stop(decodeURIComponent(stopMatch[1]))));
+			return;
+		}
+
+		// `/export` downloads (08): both formats are served as attachments. The
+		// HTML is (re)written under `<data-dir>/exports`; the JSONL is the session
+		// file itself, unmodified.
+		const exportMatch = /^\/api\/sessions\/([^/]+)\/export\.(html|jsonl)$/.exec(url.pathname);
+		if (req.method === "GET" && exportMatch?.[1] && exportMatch[2]) {
+			const id = decodeURIComponent(exportMatch[1]);
+			const format = exportMatch[2];
+			const path = format === "html" ? await hub.exportedHtml(id) : await hub.sessionFile(id);
+			if (!path) {
+				send(404, JSON.stringify({ error: "not found" }));
+				return;
+			}
+			let body: Buffer;
+			try {
+				body = await readFile(path);
+			} catch {
+				send(404, JSON.stringify({ error: "not found" }));
+				return;
+			}
+			res.writeHead(200, {
+				"content-type": format === "html" ? "text/html; charset=utf-8" : "application/x-ndjson",
+				"content-disposition": `attachment; filename="${basename(path)}"`,
+				"cache-control": "no-store",
+			});
+			res.end(body);
 			return;
 		}
 
@@ -471,6 +504,33 @@ async function handleCommand(
 			case "copy":
 				send(frameCopy(await hub.lastAssistantText(sessionId)));
 				break;
+			case "tree": {
+				const result = await hub.tree(sessionId);
+				send(frameTree(result.tree, result.leafId));
+				break;
+			}
+			case "fork": {
+				const result = await hub.fork(sessionId, String(message["entryId"] ?? ""));
+				send(frameFork(result.text, result.cancelled));
+				break;
+			}
+			case "clone": {
+				const result = await hub.clone(sessionId);
+				send(frameClone(result.cancelled));
+				break;
+			}
+			case "import": {
+				const result = await hub.importSession(sessionId, String(message["path"] ?? ""));
+				send(frameImport(result.cancelled));
+				break;
+			}
+			case "export": {
+				await hub.exportHtml(sessionId);
+				const base = `/api/sessions/${encodeURIComponent(sessionId)}`;
+				const jsonl = (await hub.sessionFile(sessionId)) ? `${base}/export.jsonl` : null;
+				send(frameExport(`${base}/export.html`, jsonl));
+				break;
+			}
 			case "resnapshot": {
 				// A normal full snapshot, flagged so the client drops windows it
 				// loaded before a compaction or a `/new`.

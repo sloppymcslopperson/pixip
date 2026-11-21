@@ -19,7 +19,7 @@ to the model).
 | 3 | `02-builtin-commands` | done: `/compact`, `/name`, `/session`, `/copy`, `/model`, `/thinking`, `/new`, `/resume`, `/quit` |
 | 4 | `06-command-menu` | done: `/` suggestion menu and the status line below the composer |
 | 5 | `07-queue-display` | done: visible steering/follow-up queue with clear/restore |
-| 6 | `08-session-commands` | `/tree`, `/fork`, `/clone`, `/import`, `/export` |
+| 6 | `08-session-commands` | done: `/tree`, `/fork`, `/clone`, `/import`, `/export`; in-place leaf navigation stays TUI-only |
 
 After the leg, the first ticket pixip worked on itself is
 `03-add-font-size-control` (transcript text sizing): a small, self-contained UI
@@ -40,13 +40,13 @@ is either already done or deliberately deferred.
 | `/resume` | session picker | done (`02-builtin-commands`: returns to the session list) |
 | `/name [name]` | show/set session name | done (`02-builtin-commands`) |
 | `/session` | session id/file/stats | done (`02-builtin-commands`: meta sheet) |
-| `/tree` | navigate the session tree in place | `08-session-commands`: read-only sheet + fork; **in-place leaf navigation is TUI-only** (RPC `get_tree` has no navigate command) |
-| `/fork` | pick a user message, fork a new session | `08-session-commands` (tap a message or use the tree sheet) |
-| `/clone` | duplicate the current branch | `08-session-commands` |
+| `/tree` | navigate the session tree in place | done (`08-session-commands`: read-only sheet with labels, current branch, per-user-message fork/copy; **in-place leaf navigation is TUI-only** because RPC `get_tree` has no navigate command) |
+| `/fork` | pick a user message, fork a new session | done (`08-session-commands`: tap the fork affordance on a user block, or `/fork <entryId>` / the tree sheet; re-key + resnapshot) |
+| `/clone` | duplicate the current branch | done (`08-session-commands`: re-key + resnapshot, cancellation is a toast) |
 | `/compact [instructions]` | compact context | done (`02-builtin-commands`: plus a transcript resnapshot) |
-| `/import <path>` | import a JSONL | `08-session-commands` (copies into the data dir) |
+| `/import <path>` | import a JSONL | done (`08-session-commands`: copies into `<data-dir>/sessions/`, indexes it, switches to it) |
 | `/copy` | copy last assistant message | done (`02-builtin-commands`: clipboard, sheet fallback) |
-| `/export [path]` | export HTML/JSONL | `08-session-commands` (download) |
+| `/export [path]` | export HTML/JSONL | done (`08-session-commands`: `export_html` under `<data-dir>/exports/` plus the JSONL, both as HTTP attachments) |
 | `/share` | upload and return a viewer link | TUI-only |
 | `/trust` | save a project trust decision | TUI-only |
 | `/mcp` | MCP server management | TUI-only |

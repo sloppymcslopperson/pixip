@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -246,6 +246,165 @@ describe("built-in commands over the socket", () => {
 			queueEvents().some((event) => (event.steering ?? []).length === 0 && (event.followUp ?? []).length === 0),
 		);
 		assert.equal((await records(paths)).filter((record) => record["type"] === "clear_queue").length, 1);
+
+		inbox.close();
+		await server.close();
+		await hub.shutdown();
+	});
+
+	it("forks from a user message and re-keys the live session", async () => {
+		const paths = await fixtureRoot();
+		const { hub, server, url } = await boot(paths, {
+			FAKE_PI_SESSION_ID: OLD_ID,
+			FAKE_PI_FORK_SESSION_ID: NEW_ID,
+			FAKE_PI_FORK_TEXT: "fix the parser bug",
+		});
+		const inbox = await connect(url);
+		await waitFor(() => framesOf(inbox, "snapshot").length > 0);
+
+		inbox.ws.send(JSON.stringify({ t: "fork", entryId: "e1" }));
+		await waitFor(() => framesOf(inbox, "opened").some((frame) => frame["rekey"] === true));
+		assert.equal((framesOf(inbox, "opened").at(-1)?.["session"] as { id?: string })?.id, NEW_ID);
+		await waitFor(() => framesOf(inbox, "fork").length > 0);
+		const fork = framesOf(inbox, "fork").at(-1);
+		assert.equal(fork?.["cancelled"], false);
+		assert.equal(fork?.["text"], "fix the parser bug");
+
+		// The socket's active id followed the re-key; the client can resnapshot.
+		const snapshots = framesOf(inbox, "snapshot").length;
+		inbox.ws.send(JSON.stringify({ t: "resnapshot" }));
+		await waitFor(() => framesOf(inbox, "snapshot").length > snapshots);
+
+		const record = (JSON.parse(await readFile(paths.indexPath, "utf8")) as Array<Record<string, unknown>>).find(
+			(entry) => entry["logicalId"],
+		);
+		assert.equal(record?.["piId"], NEW_ID);
+		assert.deepEqual(record?.["piIds"], [OLD_ID, NEW_ID]);
+		const logged = (await records(paths)).find((entry) => entry["type"] === "fork");
+		assert.equal(logged?.["entryId"], "e1");
+
+		inbox.close();
+		await server.close();
+		await hub.shutdown();
+	});
+
+	it("clones the active branch and follows the new id", async () => {
+		const paths = await fixtureRoot();
+		const { hub, server, url } = await boot(paths, {
+			FAKE_PI_SESSION_ID: OLD_ID,
+			FAKE_PI_CLONE_SESSION_ID: NEW_ID,
+		});
+		const inbox = await connect(url);
+		await waitFor(() => framesOf(inbox, "snapshot").length > 0);
+
+		inbox.ws.send(JSON.stringify({ t: "clone" }));
+		await waitFor(() => framesOf(inbox, "opened").some((frame) => frame["rekey"] === true));
+		assert.equal((framesOf(inbox, "opened").at(-1)?.["session"] as { id?: string })?.id, NEW_ID);
+		await waitFor(() => framesOf(inbox, "clone").length > 0);
+		assert.equal(framesOf(inbox, "clone")[0]?.["cancelled"], false);
+
+		inbox.close();
+		await server.close();
+		await hub.shutdown();
+	});
+
+	it("answers /tree with the read-only tree and current leaf", async () => {
+		const paths = await fixtureRoot();
+		const TREE = {
+			tree: [
+				{
+					entry: { type: "message", id: "u1", parentId: null, message: { role: "user", content: [{ type: "text", text: "first" }] } },
+					label: "main",
+					children: [
+						{ entry: { type: "message", id: "a1", parentId: "u1", message: { role: "assistant", content: [] } }, children: [] },
+					],
+				},
+			],
+			leafId: "a1",
+		};
+		const { hub, server, url } = await boot(paths, { FAKE_PI_SESSION_ID: OLD_ID, FAKE_PI_TREE: JSON.stringify(TREE) });
+		const inbox = await connect(url);
+		await waitFor(() => framesOf(inbox, "snapshot").length > 0);
+
+		inbox.ws.send(JSON.stringify({ t: "tree" }));
+		await waitFor(() => framesOf(inbox, "tree").length > 0);
+		const frame = framesOf(inbox, "tree")[0];
+		assert.deepEqual(frame?.["tree"], TREE.tree);
+		assert.equal(frame?.["leafId"], "a1");
+		assert.equal((await records(paths)).some((entry) => entry["type"] === "get_tree"), true);
+
+		inbox.close();
+		await server.close();
+		await hub.shutdown();
+	});
+
+	it("copies an imported JSONL into the data dir, indexes it and opens it", async () => {
+		const paths = await fixtureRoot();
+		const IMPORTED_ID = "03c3fd5f-cccc-7664-b952-f6673a2c7a8e";
+		const header = JSON.stringify({
+			type: "session",
+			version: 3,
+			id: IMPORTED_ID,
+			cwd: "/tmp/imported-project",
+			timestamp: "2026-11-21T00:00:00.000Z",
+		});
+		const body = [header, JSON.stringify({ type: "message", id: "m1", parentId: null, message: { role: "user", content: "hello" } })].join("\n") + "\n";
+		const source = join(paths.dir, "foreign.jsonl");
+		await writeFile(source, body);
+
+		const { hub, server, url } = await boot(paths, { FAKE_PI_SESSION_ID: OLD_ID });
+		const inbox = await connect(url);
+		await waitFor(() => framesOf(inbox, "snapshot").length > 0);
+
+		inbox.ws.send(JSON.stringify({ t: "import", path: source }));
+		await waitFor(() => framesOf(inbox, "opened").some((frame) => (frame["session"] as { id?: string })?.id === IMPORTED_ID));
+		await waitFor(() => framesOf(inbox, "import").length > 0);
+		assert.equal(framesOf(inbox, "import")[0]?.["cancelled"], false);
+
+		const copied = join(paths.sessionsDir, `2026-11-21T00-00-00-000Z_${IMPORTED_ID}.jsonl`);
+		assert.equal(await readFile(copied, "utf8"), body);
+		assert.equal(await readFile(source, "utf8"), body);
+
+		const index = JSON.parse(await readFile(paths.indexPath, "utf8")) as Array<Record<string, unknown>>;
+		assert.equal(index.some((record) => record["piId"] === IMPORTED_ID), true);
+		const listed = await hub.list();
+		assert.equal(listed.some((session) => session.id === IMPORTED_ID), true);
+		const switched = (await records(paths)).find((entry) => entry["type"] === "switch_session");
+		assert.equal(switched?.["sessionPath"], copied);
+
+		inbox.close();
+		await server.close();
+		await hub.shutdown();
+	});
+
+	it("exports HTML and JSONL as attachments", async () => {
+		const paths = await fixtureRoot();
+		const { hub, server, url } = await boot(paths, { FAKE_PI_SESSION_ID: OLD_ID });
+		const inbox = await connect(url);
+		await waitFor(() => framesOf(inbox, "snapshot").length > 0);
+
+		// The fake reports a session file path but only writes one when asked; the
+		// JSONL download is that file, so create it the way Pi would.
+		const sessionFile = join(paths.sessionsDir, `2026-11-21T00-00-00-000Z_${OLD_ID}.jsonl`);
+		const jsonl = '{"type":"session","id":"' + OLD_ID + '"}\n';
+		await writeFile(sessionFile, jsonl);
+
+		inbox.ws.send(JSON.stringify({ t: "export" }));
+		await waitFor(() => framesOf(inbox, "export").length > 0);
+		const frame = framesOf(inbox, "export")[0];
+		const base = server.url.replace(/\/$/, "");
+
+		const htmlResponse = await fetch(`${base}${String(frame?.["html"])}`);
+		assert.equal(htmlResponse.status, 200);
+		assert.match(htmlResponse.headers.get("content-disposition") ?? "", /^attachment; filename=".*\.html"$/);
+		assert.match(await htmlResponse.text(), /exported/);
+
+		const jsonlResponse = await fetch(`${base}${String(frame?.["jsonl"])}`);
+		assert.equal(jsonlResponse.status, 200);
+		assert.match(jsonlResponse.headers.get("content-disposition") ?? "", /^attachment; filename=".*\.jsonl"$/);
+		assert.equal(await jsonlResponse.text(), jsonl);
+		const exported = (await records(paths)).find((entry) => entry["type"] === "export_html");
+		assert.match(String(exported?.["outputPath"]), /\/exports\/.*\.html$/);
 
 		inbox.close();
 		await server.close();

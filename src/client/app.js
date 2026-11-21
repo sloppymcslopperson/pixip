@@ -13,6 +13,7 @@ import {
 } from "./render.js";
 import { classifyInput, commandQuery, filterCommands, isAllowed, menuCatalog, menuInsertText } from "./commands.js";
 import { queueCount, queueFromEvent, queueTexts, restoreText } from "./queue.js";
+import { flattenTree } from "./tree.js";
 import { formatSession } from "./sessionInfo.js";
 import {
 	contextLevel,
@@ -342,6 +343,22 @@ function handleFrame(frame) {
 			break;
 		case "queue":
 			restoreClearedQueue(frame);
+			break;
+		case "tree":
+			openTreeSheet(Array.isArray(frame.tree) ? frame.tree : [], typeof frame.leafId === "string" ? frame.leafId : null);
+			break;
+		case "fork":
+			if (frame.cancelled) toast("fork cancelled");
+			else toast(frame.text ? `forked: ${String(frame.text).slice(0, 80)}` : "forked");
+			break;
+		case "clone":
+			toast(frame.cancelled ? "clone cancelled" : "cloned");
+			break;
+		case "import":
+			toast(frame.cancelled ? "import cancelled" : "imported");
+			break;
+		case "export":
+			openExportSheet(String(frame.html ?? ""), typeof frame.jsonl === "string" ? frame.jsonl : null);
 			break;
 		case "bash":
 			finishBash(frame);
@@ -852,6 +869,136 @@ function closeSheet() {
 	ui.sheet.textContent = "";
 }
 
+// ------------------------------------------------------- tree sheet (08)
+
+const TREE_ROLE = {
+	user: "you",
+	assistant: "pi",
+	toolResult: "tool",
+	bashExecution: "bash",
+	compaction: "compaction",
+	branch_summary: "branch summary",
+};
+
+/**
+ * Read-only session tree from RPC `get_tree`. Indentation follows the nesting,
+ * the current branch is marked, and user entries get the two actions the TUI
+ * offers: fork from here, copy the prompt. Leaf navigation is deliberately
+ * absent (RPC exposes no navigate command).
+ */
+function openTreeSheet(tree, leafId) {
+	const rows = flattenTree(tree, leafId);
+	const target = ui.sheet;
+	target.hidden = false;
+	target.textContent = "";
+	const heading = document.createElement("div");
+	heading.className = "sheet-title";
+	heading.textContent = `tree${rows.length ? ` · ${rows.length} entries` : ""}`;
+	target.append(heading);
+
+	const list = document.createElement("div");
+	list.className = "tree";
+	if (rows.length === 0) {
+		const empty = document.createElement("div");
+		empty.className = "sheet-text";
+		empty.textContent = "no entries yet";
+		list.append(empty);
+	}
+	for (const row of rows) {
+		const item = document.createElement("div");
+		item.className = `tree-row${row.current ? " current" : ""}${row.leaf ? " leaf" : ""}`;
+		item.style.paddingLeft = `${8 + row.depth * 14}px`;
+
+		const head = document.createElement("div");
+		head.className = "tree-head";
+		const role = document.createElement("span");
+		role.className = `tree-role ${row.user ? "user" : ""}`;
+		role.textContent = TREE_ROLE[row.role] ?? row.role;
+		head.append(role);
+		if (row.label) {
+			const label = document.createElement("span");
+			label.className = "tree-label";
+			label.textContent = row.label;
+			head.append(label);
+		}
+		if (row.leaf) {
+			const current = document.createElement("span");
+			current.className = "tree-current";
+			current.textContent = "current";
+			head.append(current);
+		}
+		item.append(head);
+
+		if (row.text) {
+			const text = document.createElement("div");
+			text.className = "tree-text";
+			text.textContent = row.text;
+			item.append(text);
+		}
+		if (row.user && row.id) {
+			const actions = document.createElement("div");
+			actions.className = "tree-actions";
+			const fork = document.createElement("button");
+			fork.type = "button";
+			fork.className = "tree-action";
+			fork.textContent = "fork from here";
+			fork.addEventListener("click", () => {
+				closeSheet();
+				send({ t: "fork", entryId: row.id });
+			});
+			const copy = document.createElement("button");
+			copy.type = "button";
+			copy.className = "tree-action";
+			copy.textContent = "copy prompt";
+			copy.addEventListener("click", () => {
+				closeSheet();
+				void copyText(row.text);
+			});
+			actions.append(fork, copy);
+			item.append(actions);
+		}
+		list.append(item);
+	}
+	target.append(list);
+
+	const actions = document.createElement("div");
+	actions.className = "sheet-actions";
+	const close = document.createElement("button");
+	close.textContent = "close";
+	close.addEventListener("click", closeSheet);
+	actions.append(close);
+	target.append(actions);
+}
+
+/** `/export`: the HTML and (when the session file exists) the JSONL as downloads. */
+function openExportSheet(html, jsonl) {
+	const target = ui.sheet;
+	target.hidden = false;
+	target.textContent = "";
+	const heading = document.createElement("div");
+	heading.className = "sheet-title";
+	heading.textContent = "export";
+	const note = document.createElement("div");
+	note.className = "sheet-text";
+	note.textContent = "downloads only · nothing is sent to the model";
+	const actions = document.createElement("div");
+	actions.className = "sheet-actions";
+	for (const [label, url] of [["download HTML", html], ["download JSONL", jsonl]]) {
+		if (!url) continue;
+		const link = document.createElement("a");
+		link.className = "sheet-download";
+		link.href = url;
+		link.setAttribute("download", "");
+		link.textContent = label;
+		actions.append(link);
+	}
+	const close = document.createElement("button");
+	close.textContent = "close";
+	close.addEventListener("click", closeSheet);
+	actions.append(close);
+	target.append(heading, note, actions);
+}
+
 // --------------------------------------------------------------- ui dialogs
 
 function handleUiRequest(request) {
@@ -944,6 +1091,31 @@ const builtinHandlers = {
 	},
 	quit() {
 		quitSession();
+	},
+	tree() {
+		send({ t: "tree" });
+	},
+	fork(args) {
+		// With an id the fork runs directly; bare `/fork` opens the tree sheet to
+		// pick a user message (the TUI picker).
+		if (args) {
+			send({ t: "fork", entryId: args });
+			return;
+		}
+		send({ t: "tree" });
+	},
+	clone() {
+		send({ t: "clone" });
+	},
+	import(args) {
+		if (!args) {
+			toast("usage: /import <path>");
+			return;
+		}
+		send({ t: "import", path: args });
+	},
+	export() {
+		send({ t: "export" });
 	},
 };
 
@@ -1528,6 +1700,15 @@ function scheduleScroll() {
 ui.log.addEventListener("scroll", () => {
 	const distance = ui.log.scrollHeight - ui.log.scrollTop - ui.log.clientHeight;
 	state.stick = distance < 80;
+});
+
+/** The small "fork" affordance on user blocks (08) is delegated: the transcript
+ *  is repainted in chunks, so per-button listeners would be lost. */
+ui.log.addEventListener("click", (event) => {
+	const button = event.target.closest("[data-fork]");
+	if (!button) return;
+	const entryId = button.dataset.fork;
+	if (entryId) send({ t: "fork", entryId });
 });
 
 let toastTimer;

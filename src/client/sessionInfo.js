@@ -53,3 +53,19 @@ export function formatSession(info, footer) {
 		line("context", contextLine(footer)),
 	].join("\n");
 }
+
+/**
+ * Download filename for `/export` (08): a slug of the session name plus a short
+ * id, never the raw id or any path separator. Deterministic for the same info.
+ */
+export function exportFileName(info, ext = "html") {
+	const slug = String(info?.name ?? "")
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "")
+		.slice(0, 40);
+	const short = String(info?.id ?? "session")
+		.replace(/[^A-Za-z0-9]/g, "")
+		.slice(0, 8) || "session";
+	return `${slug || "session"}-${short}.${ext}`;
+}

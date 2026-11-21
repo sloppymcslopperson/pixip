@@ -23,6 +23,11 @@ export const BUILTIN_COMMANDS = [
 	{ name: "new", args: "", source: "builtin", summary: "start a fresh session in this child" },
 	{ name: "resume", args: "", source: "builtin", summary: "back to the session list" },
 	{ name: "quit", args: "", source: "builtin", summary: "detach and return to the list" },
+	{ name: "tree", args: "", source: "builtin", summary: "read the session tree and fork from a message" },
+	{ name: "fork", args: "[entryId]", source: "builtin", summary: "fork from a user message" },
+	{ name: "clone", args: "", source: "builtin", summary: "duplicate the current branch" },
+	{ name: "import", args: "<path>", source: "builtin", summary: "import a JSONL session file" },
+	{ name: "export", args: "", source: "builtin", summary: "download this session as HTML or JSONL" },
 ];
 
 /**
@@ -36,11 +41,6 @@ export const TUI_ONLY_COMMANDS = [
 	{ name: "login", args: "[provider]", source: "tui", summary: "OAuth/API-key login" },
 	{ name: "logout", args: "", source: "tui", summary: "OAuth logout" },
 	{ name: "llama", args: "", source: "tui", summary: "llama.cpp router management" },
-	{ name: "tree", args: "", source: "tui", ticket: "08-session-commands", summary: "navigate the session tree" },
-	{ name: "fork", args: "", source: "tui", ticket: "08-session-commands", summary: "fork at a user message" },
-	{ name: "clone", args: "", source: "tui", ticket: "08-session-commands", summary: "duplicate the current branch" },
-	{ name: "import", args: "<path>", source: "tui", ticket: "08-session-commands", summary: "import a JSONL session" },
-	{ name: "export", args: "[path]", source: "tui", ticket: "08-session-commands", summary: "export HTML/JSONL" },
 	{ name: "share", args: "", source: "tui", summary: "upload and share a viewer link" },
 	{ name: "trust", args: "", source: "tui", summary: "save a project trust decision" },
 	{ name: "mcp", args: "", source: "tui", summary: "MCP server management" },

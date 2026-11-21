@@ -89,6 +89,11 @@ Hub → client:
 | `policy` | `policy` (`allow`, `deny`, `bash`) | effective per-session command policy |
 | `commands` | `commands` (`name`, `description?`, `source`) | live `get_commands` entries for the `/` menu; sent once per attach, cached by the client |
 | `queue` | `steering`, `followUp` | answer to `clear_queue`: the texts Pi removed, restored into the composer unsent |
+| `tree` | `tree`, `leafId` | answer to `/tree`: Pi's read-only session tree |
+| `fork` | `text`, `cancelled` | answer to `/fork`; the new session itself arrives as `opened` with `rekey` |
+| `clone` | `cancelled` | answer to `/clone`; same re-key path |
+| `import` | `cancelled` | answer to `/import`; the switched-to session arrives as `opened` |
+| `export` | `html`, `jsonl` | download URLs served by the export REST route (`jsonl` is `null` when Pi has no file yet) |
 | `bash` | `id`, `command`, `excludeFromContext`, `output`, `exitCode`, `cancelled`, `truncated`, `fullOutputPath?`, `error?` | terminal result for `!`/`!!`; chunks arrive as `event` |
 | `error` | `message` | protocol/command failure |
 
@@ -100,6 +105,11 @@ Client → hub:
 | `prompt` | `text`, `streamingBehavior?` | `prompt` (`"steer"` while busy: extension commands must still execute) |
 | `steer` | `text` | `steer` (plain text only); the chips follow Pi's verbatim `queue_update` events |
 | `clear_queue` | – | `clear_queue`; answered with a `queue` frame carrying the restored texts |
+| `tree` | – | `get_tree`, answered with a `tree` frame |
+| `fork` | `entryId` | `fork`; the hub re-reads `get_state`, re-keys and the socket sends `opened` with `rekey` |
+| `clone` | – | `clone`; same re-key path |
+| `import` | `path` | copy a JSONL into `<data-dir>/sessions/`, `switch_session`, re-key |
+| `export` | – | `export_html` under `<data-dir>/exports/`, answered with download URLs |
 | `bash` | `id`, `command`, `excludeFromContext` | `bash`; `id` is repeated on streamed updates and the final frame |
 | `compact` | `instructions?` | `compact` (`customInstructions`) |
 | `set_session_name` | `name` | `set_session_name` |
@@ -112,8 +122,10 @@ Client → hub:
 | `stop` | – | detach process, keep JSONL |
 | `ui` | `id`, `value` \| `confirmed` \| `cancelled` | `extension_ui_response` |
 
-REST is only for discovery and process verbs: `GET /api/sessions`,
-`POST /api/sessions`, `POST /api/sessions/:id/stop`, `GET /api/info`, `GET /health`
+REST is only for discovery, process verbs and downloads: `GET /api/sessions`,
+`POST /api/sessions`, `POST /api/sessions/:id/stop`,
+`GET /api/sessions/:id/export.html` and `GET /api/sessions/:id/export.jsonl`
+(both `Content-Disposition: attachment`), `GET /api/info`, `GET /health`
 (`pid`, `startedAt`, `reloads`) and `POST /api/refresh` (loopback-only soft
 refresh). Streaming never uses HTTP requests.
 
@@ -190,6 +202,19 @@ The classifier in `src/client/commands.js` marks the RPC-drivable TUI built-ins;
   place (so the event closure survives), moves it to the new Pi id, appends the
   id to the index `piIds`, and sends `opened` with `rekey` to every tab, which
   then asks for a replacement snapshot;
+- `/tree` → RPC `get_tree`, rendered as a read-only sheet (nesting indentation,
+  branch labels, current-branch mark, fork/copy actions on user messages); no
+  navigate command exists, so in-place leaf switching stays TUI-only;
+- `/fork [entryId]` → RPC `fork`, also reachable from the small `fork`
+  affordance on a snapshot user block; `/clone` → RPC `clone`. Both reuse the
+  `/new` re-key path (re-read `get_state`, move the live map entry, append
+  `piIds`, `opened` + resnapshot); cancellation is a toast;
+- `/import <path>` → copy the JSONL into `<data-dir>/sessions/` (header id/cwd
+  untouched, source never modified), index it as its own logical session, then
+  `switch_session` and re-key;
+- `/export` → `export_html` writes under `<data-dir>/exports/`; the `export`
+  frame carries download URLs for the HTML and the session's own JSONL, both
+  served as attachments;
 - `/resume` → the session list; `/quit` → `stop` (detach) then the list.
 
 Every handler is only reachable through the `00` classifier, so the per-session

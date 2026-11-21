@@ -124,8 +124,6 @@ backoff and its durable cursor, and sessions reattach from their JSONL.
 - TUI visual parity: diff/syntax colouring and the TUI's own theme colours (theme
   values are `okhsl`, which browsers do not support without conversion — see
   `85-theme-tokens`);
-- the `/` command menu, queue display and branch/session commands (tracked in
-  `docs/parity.md`);
 - worktree creation, image input, input history and `@file` completion;
 - virtualised transcript for very long sessions;
 - auth of any kind (bind loopback, or a private VPN interface — same posture as

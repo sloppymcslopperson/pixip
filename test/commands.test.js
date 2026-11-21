@@ -54,7 +54,9 @@ describe("classifyInput", () => {
 		assert.equal(classifyInput("/thinking high").kind, "builtin");
 		assert.equal(classifyInput("/settings").kind, "tui");
 		assert.equal(classifyInput("/login anthropic").kind, "tui");
-		assert.equal(classifyInput("/tree").command?.ticket, "08-session-commands");
+		assert.equal(classifyInput("/tree").kind, "builtin");
+		assert.equal(classifyInput("/fork abc123").kind, "builtin");
+		assert.equal(classifyInput("/import /tmp/x.jsonl").kind, "builtin");
 	});
 
 	it("passes extension commands, skills, templates and unknown slashes through", () => {
@@ -98,7 +100,7 @@ describe("catalog", () => {
 	it("has one entry per command, with the 02 built-ins", () => {
 		assert.deepEqual(
 			BUILTIN_COMMANDS.map((command) => command.name),
-			["compact", "name", "session", "copy", "model", "thinking", "new", "resume", "quit"],
+			["compact", "name", "session", "copy", "model", "thinking", "new", "resume", "quit", "tree", "fork", "clone", "import", "export"],
 		);
 		assert.ok(TUI_ONLY_COMMANDS.length >= 10);
 		assert.equal(COMMANDS.length, BUILTIN_COMMANDS.length + TUI_ONLY_COMMANDS.length);
@@ -192,7 +194,8 @@ describe("menuCatalog", () => {
 		assert.equal(names.filter((name) => name === "fit").length, 1);
 		assert.equal(commands.find((command) => command.name === "fit")?.summary, "FIT board");
 		assert.equal(commands.find((command) => command.name === "fix-tests")?.source, "prompt");
-		assert.equal(commands.find((command) => command.name === "tree")?.tuiOnly, true);
+		assert.equal(commands.find((command) => command.name === "settings")?.tuiOnly, true);
+		assert.equal(commands.find((command) => command.name === "tree")?.tuiOnly, false);
 		assert.equal(commands.find((command) => command.name === "compact")?.tuiOnly, false);
 	});
 

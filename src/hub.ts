@@ -1,12 +1,13 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { RpcChild } from "./rpc.ts";
 import { resolveSessionPolicy, type CommandLayer } from "./commands.ts";
 import { resolveModelArgument, resolveThinkingArgument } from "./client/commands.js";
+import { exportFileName } from "./client/sessionInfo.js";
 import { frameError, frameEvent, frameFooter, frameModels, framePolicy, frameSessions, frameSnapshot, frameStatus } from "./wire.ts";
 import type { BashResult, CommandPolicy, DynamicCommand, FooterData, ModelSummary, SessionInfo, SessionState } from "./wire.ts";
 
@@ -122,6 +123,8 @@ export class Hub {
 	private readonly rekeyListeners = new Set<(from: string, info: SessionInfo) => void>();
 	/** Serializes index writes; every mutation is read-modify-write inside it. */
 	private indexWrite: Promise<void> = Promise.resolve();
+	/** Last HTML export per Pi session id, so a download need not export twice. */
+	private readonly exported = new Map<string, string>();
 
 	constructor(options: HubOptions) {
 		this.options = options;
@@ -587,6 +590,133 @@ export class Hub {
 		return typeof data?.text === "string" ? data.text : null;
 	}
 
+	/** Read-only session tree for `/tree` (RPC `get_tree`). */
+	async tree(id: string): Promise<{ tree: unknown[]; leafId: string | null }> {
+		const live = this.require(id);
+		const data = (await live.proc.command({ type: "get_tree" })) as { tree?: unknown; leafId?: unknown } | null;
+		return {
+			tree: Array.isArray(data?.tree) ? data.tree : [],
+			leafId: typeof data?.leafId === "string" ? data.leafId : null,
+		};
+	}
+
+	/**
+	 * `/fork <entryId>`: fork from a user message. Pi allocates the new session id,
+	 * so the live entry is re-keyed exactly like `/new`; a cancelled fork is not an
+	 * error.
+	 */
+	async fork(id: string, entryId: string): Promise<{ text: string | null; cancelled: boolean }> {
+		const live = this.require(id);
+		if (!entryId) throw new Error("fork needs a user-message entry id");
+		const data = (await live.proc.command(
+			{ type: "fork", entryId },
+			{ timeoutMs: this.options.promptTimeoutMs ?? 0 },
+		) as { text?: unknown; cancelled?: unknown } | null);
+		if (data?.cancelled) return { text: null, cancelled: true };
+		await this.rekeyFromState(live);
+		return { text: typeof data?.text === "string" ? data.text : null, cancelled: false };
+	}
+
+	/** `/clone`: duplicate the active branch; same re-key path as `/fork`. */
+	async clone(id: string): Promise<{ cancelled: boolean }> {
+		const live = this.require(id);
+		const data = (await live.proc.command(
+			{ type: "clone" },
+			{ timeoutMs: this.options.promptTimeoutMs ?? 0 },
+		) as { cancelled?: unknown } | null);
+		if (data?.cancelled) return { cancelled: true };
+		await this.rekeyFromState(live);
+		return { cancelled: false };
+	}
+
+	/**
+	 * `/import <path>`: copy a JSONL into `<data-dir>/sessions/` (header id and cwd
+	 * untouched, source never modified), index it as its own logical session and
+	 * switch the live child to it.
+	 */
+	async importSession(id: string, sourcePath: string): Promise<{ info: SessionInfo; cancelled: boolean }> {
+		const live = this.require(id);
+		if (!sourcePath.trim()) throw new Error("import needs a session file path");
+		const source = resolve(live.info.cwd, sourcePath);
+		const text = await readFile(source, "utf8");
+		const first = text.split("\n").find((line) => line.trim());
+		let header: { type?: unknown; id?: unknown; cwd?: unknown; timestamp?: unknown };
+		try {
+			header = JSON.parse(first ?? "{}") as typeof header;
+		} catch {
+			throw new Error(`${sourcePath}: not a JSONL session file`);
+		}
+		if (header.type !== "session" || typeof header.id !== "string") {
+			throw new Error(`${sourcePath}: not a Pi session file`);
+		}
+		// The id becomes part of the copied filename: reject path separators and
+		// traversal so a foreign file cannot write outside the sessions dir.
+		if (!/^[A-Za-z0-9._-]+$/.test(header.id) || header.id.includes("..")) {
+			throw new Error(`${sourcePath}: invalid session id`);
+		}
+		if (this.live.has(header.id)) throw new Error(`session ${header.id} is already attached`);
+
+		await mkdir(this.options.sessionsDir, { recursive: true });
+		const stamp = (typeof header.timestamp === "string" ? header.timestamp : new Date().toISOString()).replace(/[:.]/g, "-");
+		const target = join(this.options.sessionsDir, `${stamp}_${header.id}.jsonl`);
+		if (resolve(target) !== source) await writeFile(target, text);
+
+		const existing = await this.findRecord(header.id);
+		const logicalId = existing?.logicalId ?? randomUUID();
+		const imported: SessionInfo = {
+			id: header.id,
+			logicalId,
+			cwd: typeof header.cwd === "string" ? header.cwd : live.info.cwd,
+			name: nameFromLines(text.split("\n").slice(0, NAME_HEAD_LINES)),
+			state: "idle",
+			sessionFile: target,
+			lastActivity: Date.now(),
+		};
+		await this.upsertIndex(imported, logicalId);
+
+		// The live session now *is* the imported one: follow its identity and cwd.
+		live.info.logicalId = logicalId;
+		live.info.cwd = imported.cwd;
+		const result = (await live.proc.command(
+			{ type: "switch_session", sessionPath: target },
+			{ timeoutMs: this.options.promptTimeoutMs ?? 0 },
+		) as { cancelled?: boolean } | null) ?? {};
+		if (result.cancelled) return { info: live.info, cancelled: true };
+
+		const info = await this.rekeyFromState(live);
+		if (!info.name && imported.name) {
+			info.name = imported.name;
+			this.emitStatus(live);
+		}
+		return { info, cancelled: false };
+	}
+
+	private exportsDir(): string {
+		return join(this.options.dataDir ?? dirname(this.options.sessionsDir), "exports");
+	}
+
+	/** `/export`: HTML under `<data-dir>/exports`, served by the HTTP route. */
+	async exportHtml(id: string): Promise<string> {
+		const live = this.require(id);
+		const dir = this.exportsDir();
+		await mkdir(dir, { recursive: true });
+		const requested = join(dir, exportFileName(live.info, "html"));
+		const data = (await live.proc.command({ type: "export_html", outputPath: requested })) as { path?: unknown } | null;
+		const written = typeof data?.path === "string" ? data.path : requested;
+		this.exported.set(live.info.id, written);
+		return written;
+	}
+
+	/** Last exported HTML for this session, exporting on demand (fresh daemon). */
+	async exportedHtml(id: string): Promise<string> {
+		return this.exported.get(id) ?? (await this.exportHtml(id));
+	}
+
+	/** Whatever file Pi currently has this session open on (for JSONL export). */
+	async sessionFile(id: string): Promise<string | undefined> {
+		return await this.sessionPath(id);
+	}
+
 	/**
 	 * `/new`: a fresh session in the same child (TUI behaviour). Pi allocates the
 	 * new id, so the live entry, the socket's active id and the index `piIds` are
@@ -599,8 +729,16 @@ export class Hub {
 			{ timeoutMs: this.options.promptTimeoutMs ?? 0 },
 		) as { cancelled?: boolean } | null) ?? {};
 		if (result.cancelled) throw new Error("new session was cancelled by an extension");
+		return await this.rekeyFromState(live);
+	}
 
-		// `get_state` reports the new id; the response to `new_session` does not.
+	/**
+	 * Follow the same live entry to whatever Pi id `get_state` reports now. The
+	 * one re-key path for `/new`, `/fork`, `/clone` and `/import`: mutate the
+	 * info in place (the child's `onRecord` closure holds the reference), move the
+	 * map entry, append the id to the index and tell every socket to follow.
+	 */
+	private async rekeyFromState(live: LiveSession): Promise<SessionInfo> {
 		const state = (await live.proc.command({ type: "get_state" })) as {
 			sessionId?: string;
 			sessionFile?: string;
@@ -612,8 +750,6 @@ export class Hub {
 		};
 		if (!state.sessionId) throw new Error("pi did not report a session id");
 
-		// Mutate the same object: the child's onRecord closure holds this reference,
-		// so replacing it would drop every later event.
 		const info = live.info;
 		const previous = info.id;
 		info.id = state.sessionId;

@@ -107,6 +107,31 @@ export function frameHistory(entries: unknown[], more: boolean): string {
 	return JSON.stringify({ t: "history", entries, more });
 }
 
+/** Answer to `/tree`: Pi's read-only session tree and the current leaf id. */
+export function frameTree(tree: unknown[], leafId: string | null): string {
+	return JSON.stringify({ t: "tree", tree, leafId });
+}
+
+/** Answer to `/fork`: the forked-from text, or a cancellation. */
+export function frameFork(text: string | null, cancelled: boolean): string {
+	return JSON.stringify({ t: "fork", text, cancelled });
+}
+
+/** Answer to `/clone`. */
+export function frameClone(cancelled: boolean): string {
+	return JSON.stringify({ t: "clone", cancelled });
+}
+
+/** Answer to `/import`; the new session itself arrives as an `opened` frame. */
+export function frameImport(cancelled: boolean): string {
+	return JSON.stringify({ t: "import", cancelled });
+}
+
+/** Answer to `/export`: download URLs for the HTML and (when a file exists) JSONL. */
+export function frameExport(html: string, jsonl: string | null): string {
+	return JSON.stringify({ t: "export", html, jsonl });
+}
+
 export function frameStatus(session: SessionInfo): string {
 	return JSON.stringify({ t: "status", session });
 }

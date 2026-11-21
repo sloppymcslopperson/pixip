@@ -4,7 +4,8 @@
 // is driven by FAKE_PI_* environment variables; nothing here touches the real
 // agent or the real session directory.
 import { randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 
 const argv = process.argv.slice(2);
@@ -134,6 +135,55 @@ function handle(line) {
 		case "get_commands":
 			logRecord({ type: "get_commands" });
 			return ok(command.id, "get_commands", { commands: JSON.parse(env.FAKE_PI_COMMANDS ?? "[]") });
+		case "get_tree":
+			logRecord({ type: "get_tree" });
+			return ok(command.id, "get_tree", JSON.parse(env.FAKE_PI_TREE ?? '{"tree":[],"leafId":null}'));
+		case "fork": {
+			logRecord({ type: "fork", entryId: command.entryId });
+			if (env.FAKE_PI_FORK_CANCELLED === "1") return ok(command.id, "fork", { cancelled: true });
+			sessionId = env.FAKE_PI_FORK_SESSION_ID ?? randomUUID();
+			sessionFile = `${sessionDir}/2026-11-21T00-00-00-000Z_${sessionId}.jsonl`;
+			return ok(command.id, "fork", { text: env.FAKE_PI_FORK_TEXT ?? "the original prompt", cancelled: false });
+		}
+		case "clone":
+			logRecord({ type: "clone" });
+			if (env.FAKE_PI_CLONE_CANCELLED === "1") return ok(command.id, "clone", { cancelled: true });
+			sessionId = env.FAKE_PI_CLONE_SESSION_ID ?? randomUUID();
+			sessionFile = `${sessionDir}/2026-11-21T00-00-00-000Z_${sessionId}.jsonl`;
+			return ok(command.id, "clone", { cancelled: false });
+		case "switch_session": {
+			logRecord({ type: "switch_session", sessionPath: command.sessionPath });
+			if (env.FAKE_PI_SWITCH_CANCELLED === "1") return ok(command.id, "switch_session", { cancelled: true });
+			const path = String(command.sessionPath);
+			const lines = readFileSync(path, "utf8").split("\n").filter((line) => line.trim());
+			let header = {};
+			try {
+				header = JSON.parse(lines[0] ?? "{}");
+			} catch {
+				// fall through with no header, like a corrupt file
+			}
+			if (typeof header.id === "string") sessionId = header.id;
+			sessionFile = path;
+			entries.length = 0;
+			for (const line of lines.slice(1)) {
+				try {
+					entries.push(JSON.parse(line));
+				} catch {
+					// skip a corrupt record
+				}
+			}
+			leafId = entries.at(-1)?.id ?? null;
+			messageCount = entries.filter((entry) => entry?.type === "message").length;
+			sessionName = entries.filter((entry) => entry?.type === "session_info").at(-1)?.name;
+			return ok(command.id, "switch_session", { cancelled: false });
+		}
+		case "export_html": {
+			const path = command.outputPath ?? `${sessionDir}/export.html`;
+			mkdirSync(dirname(path), { recursive: true });
+			writeFileSync(path, env.FAKE_PI_EXPORT_CONTENT ?? "<!doctype html><title>exported</title>\n");
+			logRecord({ type: "export_html", outputPath: path });
+			return ok(command.id, "export_html", { path });
+		}
 		case "set_session_name":
 			logRecord({ type: "set_session_name", name: command.name });
 			sessionName = command.name;

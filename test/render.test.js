@@ -144,6 +144,16 @@ describe("markdown", () => {
 		assert.match(assistant, /<strong>bold<\/strong>/);
 	});
 
+	it("offers a fork affordance only when the user entry has an id", () => {
+		const message = { role: "user", content: [{ type: "text", text: "fork me" }] };
+		assert.equal(renderMessage(message).includes("data-fork"), false);
+		const withId = renderMessage(message, 'e"1');
+		assert.match(withId, /data-fork="e&quot;1"/);
+		assert.match(withId, /class="fork-action"/);
+		// Assistant messages never get the affordance.
+		assert.equal(renderMessage({ role: "assistant", content: [{ type: "text", text: "hi" }] }, "a1").includes("data-fork"), false);
+	});
+
 	it("keeps thinking blocks as escaped ansi text", () => {
 		const html = renderAssistantBody([{ type: "thinking", thinking: "**raw** <i>" }], false);
 		assert.match(html, /<details class="think">/);

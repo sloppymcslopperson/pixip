@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { formatSession } from "../src/client/sessionInfo.js";
+import { exportFileName, formatSession } from "../src/client/sessionInfo.js";
 
 const info = {
 	id: "pi-id",
@@ -58,5 +58,18 @@ describe("formatSession", () => {
 			context: { percent: null, window: 200_000 },
 		});
 		assert.match(text, /^context\s+200000 tokens$/m);
+	});
+});
+
+describe("exportFileName", () => {
+	it("slugifies the name and keeps a short id, without path separators", () => {
+		const name = exportFileName({ id: "01a1fb3f-aaaa-7664-b952-f6673a2c7a8c", name: "Dogfood / pixip!" }, "html");
+		assert.equal(name, "dogfood-pixip-01a1fb3f.html");
+		assert.equal(name.includes("/"), false);
+	});
+
+	it("falls back to session + id for an unnamed session and takes the extension", () => {
+		assert.equal(exportFileName({ id: "01a1fb3f-bbbb" }, "jsonl"), "session-01a1fb3f.jsonl");
+		assert.equal(exportFileName({ id: "../../etc/passwd" }, "html"), "session-etcpassw.html");
 	});
 });

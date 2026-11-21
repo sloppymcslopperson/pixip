@@ -126,7 +126,22 @@ main { flex: 1; min-height: 0; }
 /* Streaming deltas are raw markdown in one text node: keep their newlines. */
 .block .text.live-text { white-space: pre-wrap; }
 .block.user { border-left-color: var(--user); }
+.block.user .who { display: flex; align-items: baseline; gap: 8px; }
 .block.user .who { color: var(--user); }
+/* Small fork affordance on snapshot user blocks (08); live-painted blocks gain
+   it on the next snapshot, when their entry id is known. */
+.fork-action {
+	margin-left: auto;
+	background: none;
+	border: 1px solid var(--line);
+	border-radius: 6px;
+	padding: 0 5px;
+	font-size: 0.85em;
+	letter-spacing: 0;
+	text-transform: none;
+	color: var(--fg-faint);
+}
+.fork-action:hover { color: var(--accent); border-color: var(--accent); }
 .block.assistant { border-left-color: var(--accent); }
 .block.assistant .who { color: var(--accent); }
 .block.meta { border-left-color: var(--line); color: var(--fg-dim); font-size: 0.87em; }
@@ -557,6 +572,67 @@ details.tool.empty > summary { color: var(--fg-faint); }
 	border: 1px solid var(--line);
 	background: var(--bg-soft);
 }
+#sheet .sheet-actions a.sheet-download {
+	display: block;
+	text-align: left;
+	text-decoration: none;
+	padding: 12px;
+	border-radius: 10px;
+	border: 1px solid var(--line);
+	background: var(--bg-soft);
+	color: var(--fg);
+}
+#sheet .sheet-actions a.sheet-download:hover { border-color: var(--accent); }
+
+/* ---- session tree sheet (08) ---- */
+#sheet .tree {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin-bottom: 10px;
+	max-height: 55dvh;
+	overflow-y: auto;
+}
+.tree-row {
+	background: var(--bg-soft);
+	border-left: 2px solid var(--line);
+	border-radius: 6px;
+	padding: 5px 8px 6px;
+}
+.tree-row.current { border-left-color: var(--accent); }
+.tree-row.leaf { background: var(--bg-raised); }
+.tree-head {
+	display: flex;
+	gap: 6px;
+	align-items: baseline;
+	font-size: 10px;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--fg-faint);
+}
+.tree-role { color: var(--fg-dim); }
+.tree-role.user { color: var(--user); }
+.tree-label { color: var(--warn); text-transform: none; letter-spacing: 0; }
+.tree-current { margin-left: auto; color: var(--accent); }
+.tree-text {
+	margin-top: 2px;
+	font-size: 12px;
+	color: var(--fg-dim);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	max-height: 4.5em;
+	overflow: hidden;
+}
+.tree-actions { display: flex; gap: 6px; margin-top: 5px; }
+.tree-action {
+	background: none;
+	border: 1px solid var(--line);
+	border-radius: 6px;
+	padding: 2px 8px;
+	font-size: 11px;
+	color: var(--fg-dim);
+}
+.tree-action:hover { color: var(--accent); border-color: var(--accent); }
 #sheet textarea, #sheet input {
 	width: 100%;
 	padding: 10px;

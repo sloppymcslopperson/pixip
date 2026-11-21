@@ -154,7 +154,7 @@ export function renderEntry(entry) {
 		return `<section class="block meta"><div class="meta-head">${label}</div><div class="meta-body">${summary}</div></section>`;
 	}
 	if (entry.type !== "message") return "";
-	return renderMessage(entry.message);
+	return renderMessage(entry.message, entry.id);
 }
 
 /** Snapshot path: a message -> html. */
@@ -163,11 +163,16 @@ export function toolCallsOf(content) {
 	return content.filter((block) => block && block.type === "toolCall");
 }
 
-export function renderMessage(message) {
+export function renderMessage(message, entryId) {
 	if (!message || typeof message !== "object") return "";
 	if (message.role === "user") {
 		const text = escapeHtml(textOf(message.content) || "[image]");
-		return `<section class="block user"><div class="who">you</div><div class="text">${text}</div></section>`;
+		// Snapshot entries carry their id; live `message_start` records do not, so
+		// the affordance appears once the message is part of the loaded window.
+		const fork = typeof entryId === "string" && entryId
+			? ` <button type="button" class="fork-action" data-fork="${escapeHtml(entryId)}" aria-label="Fork from this message" title="Fork from this message">fork</button>`
+			: "";
+		return `<section class="block user"><div class="who">you${fork}</div><div class="text">${text}</div></section>`;
 	}
 	if (message.role === "assistant") {
 		return renderAssistant(message.content ?? []);
