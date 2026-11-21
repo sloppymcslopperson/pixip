@@ -73,9 +73,11 @@ button, input, textarea { font: inherit; color: inherit; }
 
 /* Transcript size: kept in px (outside #log), so 50 % never shrinks the tap
    target. `stop` stays the last action and gets its own colour and a wide gap. */
-#scale { display: flex; gap: 2px; flex: none; }
+#scale { display: flex; gap: 2px; flex: none; align-items: center; }
 .scale-btn { min-width: 30px; min-height: 26px; padding: 4px 6px; font-size: 13px; }
 .scale-btn:disabled { opacity: 0.35; }
+/* Current level sits between the buttons, tabular so the header does not jitter. */
+.scale-value { min-width: 3.4ch; text-align: center; font-size: 10.5px; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
 #stop { margin-left: 16px; color: var(--err); border-color: color-mix(in srgb, var(--err) 45%, var(--line)); }
 
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--fg-faint); flex: none; }

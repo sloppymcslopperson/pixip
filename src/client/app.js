@@ -43,6 +43,7 @@ const ui = {
 	stop: $("#stop"),
 	scaleDown: $("#scale-down"),
 	scaleUp: $("#scale-up"),
+	scaleValue: $("#scale-value"),
 	list: $("#list"),
 	session: $("#session"),
 	log: $("#log"),
@@ -1180,6 +1181,8 @@ function updateScaleButtons() {
 	ui.scaleUp.disabled = state.scale === STEPS[STEPS.length - 1];
 	ui.scaleDown.setAttribute("aria-label", decreaseLabel(state.scale));
 	ui.scaleUp.setAttribute("aria-label", increaseLabel(state.scale));
+	ui.scaleValue.textContent = `${state.scale}%`;
+	ui.scaleValue.title = `Transcript text size: ${state.scale}%`;
 }
 
 /** Tap steps; a long-press resets to 100 % without also firing the click. */
