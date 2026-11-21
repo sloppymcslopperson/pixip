@@ -18,6 +18,8 @@ export interface RpcChildOptions {
 	command: string;
 	args: string[];
 	cwd: string;
+	/** Extra environment for the child; `process.env` is inherited first. */
+	env?: Record<string, string | undefined>;
 	onRecord: (raw: string, record: unknown) => void;
 	onStderr?: (chunk: string) => void;
 	onExit?: (code: number | null, signal: NodeJS.Signals | null) => void;
@@ -85,7 +87,7 @@ export class RpcChild {
 		this.child = spawn(options.command, options.args, {
 			cwd: options.cwd,
 			stdio: ["pipe", "pipe", "pipe"],
-			env: process.env,
+			env: { ...process.env, ...options.env },
 		});
 		this.child.stdout.on("data", (chunk: Buffer) => {
 			for (const line of this.lines.push(chunk)) this.handleLine(line);

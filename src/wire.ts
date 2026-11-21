@@ -35,6 +35,8 @@ export type SessionState = "starting" | "idle" | "busy" | "stopped" | "error";
 
 export interface SessionInfo {
 	id: string;
+	/** Stable pixip id for the logical session; survives Pi allocating a new id. */
+	logicalId?: string;
 	cwd: string;
 	name?: string;
 	state: SessionState;

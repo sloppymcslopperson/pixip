@@ -99,6 +99,7 @@ async function main(): Promise<void> {
 	const hub = new Hub({
 		piBin: options.piBin,
 		sessionsDir,
+		indexPath: join(options.dataDir, "sessions.json"),
 		idleMs: options.idleMs,
 		extraPiArgs: [],
 		log,

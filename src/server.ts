@@ -133,12 +133,15 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 		const unwatch = hub.watch((frame) => send(frame));
 		ws.on("close", unwatch);
 		ws.on("message", (data) => {
-			void handleCommand(String(data), null, hub, send, log);
+			void handleCommand(String(data), () => null, hub, send, log);
 		});
 		return;
 	}
 
 	let subscriptions: Array<() => void> = [];
+	// The socket starts on the URL's id; an index-only session reattaches under a
+	// fresh Pi id, and every later command must follow that id instead.
+	let activeId: string | null = sessionId;
 	ws.on("close", () => {
 		for (const unsubscribe of subscriptions) unsubscribe();
 		subscriptions = [];
@@ -146,7 +149,7 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 	// Bind before the attach await: "load earlier" may arrive while the child
 	// is still booting, and a listener added later would drop that frame.
 	ws.on("message", (data) => {
-		void handleCommand(String(data), sessionId, hub, send, log);
+		void handleCommand(String(data), () => activeId, hub, send, log);
 	});
 
 	try {
@@ -156,13 +159,17 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 		if (provisional) {
 			send(frameSnapshot(provisional.info, provisional.entries, provisional.leafId, provisional.more));
 		}
-		await hub.attach(sessionId);
-		const snapshot = await hub.snapshot(sessionId);
+		const info = await hub.attach(sessionId);
+		activeId = info.id;
+		// The index-only path lands on a new Pi id: tell the client before the
+		// snapshot so its URL and session key keep pointing at this transcript.
+		if (info.id !== sessionId) send(JSON.stringify({ t: "opened", session: info }));
+		const snapshot = await hub.snapshot(info.id);
 		send(frameSnapshot(snapshot.info, snapshot.entries, snapshot.leafId, snapshot.more));
-		subscriptions.push(hub.subscribe(sessionId, send));
+		subscriptions.push(hub.subscribe(info.id, send));
 		subscriptions.push(hub.watch((frame) => send(frame)));
 		void hub
-			.footer(sessionId)
+			.footer(info.id)
 			.then((footer) => {
 				send(JSON.stringify({ t: "footer", footer }));
 			})
@@ -176,7 +183,7 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 
 async function handleCommand(
 	raw: string,
-	sessionId: string | null,
+	activeId: () => string | null,
 	hub: Hub,
 	send: (frame: string) => void,
 	log: (message: string) => void,
@@ -190,6 +197,7 @@ async function handleCommand(
 	}
 
 	const type = message["t"];
+	const sessionId = activeId();
 	try {
 		switch (type) {
 			case "create": {

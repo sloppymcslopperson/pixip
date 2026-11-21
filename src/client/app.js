@@ -229,9 +229,19 @@ function handleFrame(frame) {
 				applyInfo();
 			}
 			break;
-		case "opened":
-			location.hash = `s=${encodeURIComponent(frame.session.id)}`;
+		case "opened": {
+			const id = frame.session?.id;
+			if (typeof id !== "string") break;
+			if (state.sessionId && state.ws) {
+				// An index-only session reattached under a new Pi id: keep this socket
+				// and transcript, and move the URL to the new id without reconnecting.
+				state.sessionId = id;
+				history.replaceState(null, "", `#s=${encodeURIComponent(id)}`);
+			} else {
+				location.hash = `s=${encodeURIComponent(id)}`;
+			}
 			break;
+		}
 		case "event":
 			handleEvent(frame.ev);
 			break;

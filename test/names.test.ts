@@ -15,7 +15,14 @@ async function fixture(lines: string[], id = ID): Promise<{ dir: string; path: s
 	const path = join(dir, `2026-11-21T00-00-00-000Z_${id}.jsonl`);
 	const header = JSON.stringify({ type: "session", version: 3, id, cwd: "/tmp/project", timestamp: "2026-11-21T00:00:00.000Z" });
 	await writeFile(path, [header, ...lines].join("\n") + "\n");
-	const hub = new Hub({ piBin: "true", sessionsDir: dir, idleMs: 0, extraPiArgs: [], log: () => {} });
+	const hub = new Hub({
+		piBin: "true",
+		sessionsDir: dir,
+		indexPath: join(dir, "sessions.json"),
+		idleMs: 0,
+		extraPiArgs: [],
+		log: () => {},
+	});
 	return { dir, path, hub };
 }
 

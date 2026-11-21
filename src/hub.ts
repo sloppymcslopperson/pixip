@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
-import { open, readdir, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { mkdir, open, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
 import { RpcChild } from "./rpc.ts";
@@ -24,9 +25,35 @@ const run = promisify(execFile);
 interface HubOptions {
 	piBin: string;
 	sessionsDir: string;
+	/** Plain JSON array mapping pixip logical ids to the Pi sessions they ran as. */
+	indexPath: string;
 	idleMs: number;
 	extraPiArgs: string[];
+	/** Extra environment for every child; `process.env` is inherited first. */
+	env?: Record<string, string | undefined>;
 	log: (message: string) => void;
+}
+
+/**
+ * One logical session, as recorded in `<data-dir>/sessions.json`.
+ *
+ * Pi allocates a new session id whenever a child is spawned (even when it is
+ * reattached at an existing path), so the logical id is the stable handle: it
+ * is passed to the child as `PIXIP_SESSION_ID` and tracks every Pi id the
+ * session has run as. JSONL stays the source of truth for state, name and
+ * activity; this record only keeps empty sessions visible and preserves the
+ * mapping across restarts.
+ */
+export interface SessionIndexRecord {
+	logicalId: string;
+	/** Most recent Pi session id. */
+	piId: string;
+	/** Every Pi session id this logical session has run as, oldest first. */
+	piIds: string[];
+	cwd: string;
+	name?: string;
+	sessionFile?: string;
+	createdAt: string;
 }
 
 interface SessionHeader {
@@ -68,6 +95,9 @@ export class Hub {
 	private readonly live = new Map<string, LiveSession>();
 	private readonly files = new Map<string, { mtimeMs: number; header: SessionHeader }>();
 	private readonly watchers = new Set<Subscriber>();
+	private index?: SessionIndexRecord[];
+	/** Serializes index writes; every mutation is read-modify-write inside it. */
+	private indexWrite: Promise<void> = Promise.resolve();
 
 	constructor(options: HubOptions) {
 		this.options = options;
@@ -76,6 +106,9 @@ export class Hub {
 	// ---------------------------------------------------------------- listing
 
 	async list(): Promise<SessionInfo[]> {
+		const records = await this.readIndex();
+		const recordFor = (piId: string) =>
+			records.find((record) => record.piId === piId || record.piIds.includes(piId));
 		const seen = new Set<string>();
 		const infos: SessionInfo[] = [];
 		// Live sessions first: a just-created session has no JSONL until its first
@@ -87,13 +120,30 @@ export class Hub {
 		}
 		for (const { header, path } of await this.scan()) {
 			if (seen.has(header.id)) continue;
+			seen.add(header.id);
+			// JSONL wins for state, name and activity; the index only adds the
+			// logical id that ties a reattached Pi session to the same session.
 			infos.push({
 				id: header.id,
+				logicalId: recordFor(header.id)?.logicalId,
 				cwd: header.cwd,
 				name: header.name,
 				state: "stopped",
 				sessionFile: path,
 				lastActivity: Date.parse(header.timestamp) || 0,
+			});
+		}
+		for (const record of records) {
+			// Any Pi id of this logical session already listed (live or JSONL) wins.
+			if (seen.has(record.piId) || record.piIds.some((id) => seen.has(id))) continue;
+			infos.push({
+				id: record.piId,
+				logicalId: record.logicalId,
+				cwd: record.cwd,
+				name: record.name,
+				state: "stopped",
+				sessionFile: record.sessionFile,
+				lastActivity: Date.parse(record.createdAt) || 0,
 			});
 		}
 		infos.sort((a, b) => b.lastActivity - a.lastActivity);
@@ -110,6 +160,7 @@ export class Hub {
 	async create(cwd: string, name?: string): Promise<SessionInfo> {
 		return await this.spawn({
 			cwd,
+			logicalId: randomUUID(),
 			args: ["--mode", "rpc", "--session-dir", this.options.sessionsDir, ...(name ? ["--name", name] : [])],
 		});
 	}
@@ -118,8 +169,25 @@ export class Hub {
 		const existing = this.live.get(id);
 		if (existing) return existing.info;
 		const found = (await this.scan()).find((entry) => entry.header.id === id);
-		if (!found) throw new Error(`unknown session ${id}`);
-		return await this.spawn({ cwd: found.header.cwd, args: ["--mode", "rpc", "--session", found.path] });
+		if (found) {
+			const record = await this.findRecord(id);
+			return await this.spawn({
+				cwd: found.header.cwd,
+				logicalId: record?.logicalId,
+				createdAt: record?.createdAt,
+				args: ["--mode", "rpc", "--session", found.path],
+			});
+		}
+
+		// No JSONL: an index-only session. Pi always allocates a fresh id at the
+		// recorded path, so the caller follows the new id (`opened` on the socket).
+		const record = await this.findRecord(id);
+		if (!record) throw new Error(`unknown session ${id}`);
+		const name = record.name ? ["--name", record.name] : [];
+		const args = record.sessionFile
+			? ["--mode", "rpc", "--session-dir", this.options.sessionsDir, "--session", record.sessionFile, ...name]
+			: ["--mode", "rpc", "--session-dir", this.options.sessionsDir, ...name];
+		return await this.spawn({ cwd: record.cwd, logicalId: record.logicalId, createdAt: record.createdAt, args });
 	}
 
 	async stop(id: string): Promise<SessionInfo> {
@@ -170,7 +238,22 @@ export class Hub {
 	): Promise<{ info: SessionInfo; entries: unknown[]; leafId: string | null; more: boolean } | null> {
 		if (this.live.has(id)) return null;
 		const found = (await this.scan()).find((entry) => entry.header.id === id);
-		if (!found) throw new Error(`unknown session ${id}`);
+		if (!found) {
+			// Index-only session: nothing to read yet, so paint the uniform empty
+			// starting window instead of failing the connect.
+			const record = await this.findRecord(id);
+			if (!record) throw new Error(`unknown session ${id}`);
+			const info: SessionInfo = {
+				id: record.piId,
+				logicalId: record.logicalId,
+				cwd: record.cwd,
+				name: record.name,
+				state: "starting",
+				sessionFile: record.sessionFile,
+				lastActivity: Date.parse(record.createdAt) || 0,
+			};
+			return { info, entries: [], leafId: null, more: false };
+		}
 
 		let entries: unknown[] = [];
 		let more = false;
@@ -186,6 +269,7 @@ export class Hub {
 
 		const info: SessionInfo = {
 			id: found.header.id,
+			logicalId: (await this.findRecord(found.header.id))?.logicalId,
 			cwd: found.header.cwd,
 			name: found.header.name,
 			state: "starting",
@@ -309,8 +393,14 @@ export class Hub {
 
 	// ----------------------------------------------------------------- spawn
 
-	private async spawn(input: { cwd: string; args: string[] }): Promise<SessionInfo> {
+	private async spawn(input: {
+		cwd: string;
+		args: string[];
+		logicalId?: string;
+		createdAt?: string;
+	}): Promise<SessionInfo> {
 		const started = Date.now();
+		const logicalId = input.logicalId ?? randomUUID();
 		let resolveState!: (info: SessionInfo) => void;
 		let rejectState!: (error: Error) => void;
 		const ready = new Promise<SessionInfo>((resolve, reject) => {
@@ -320,6 +410,7 @@ export class Hub {
 
 		const info: SessionInfo = {
 			id: "",
+			logicalId,
 			cwd: input.cwd,
 			state: "starting",
 			lastActivity: started,
@@ -329,6 +420,7 @@ export class Hub {
 			command: this.options.piBin,
 			args: [...input.args, ...this.options.extraPiArgs],
 			cwd: input.cwd,
+			env: { ...this.options.env, PIXIP_SESSION_ID: logicalId },
 			onRecord: (raw, record) => this.onRecord(info, raw, record),
 			onStderr: (chunk) => this.options.log(`[pi ${input.cwd}] ${chunk.trimEnd()}`),
 			onExit: (code, signal) => {
@@ -373,6 +465,12 @@ export class Hub {
 		if (previous) await previous.proc.close();
 		this.live.set(info.id, live);
 
+		// Persist the logical -> Pi id mapping. A broken index must never take a
+		// session down, so a failed write is only logged.
+		await this.upsertIndex(info, logicalId, input.createdAt).catch((error: unknown) => {
+			this.options.log(`session index write failed: ${(error as Error).message}`);
+		});
+
 		this.options.log(`attached ${info.id} (${info.cwd}) in ${Date.now() - started}ms`);
 		this.emitStatus(live);
 		if (info.state === "idle") this.scheduleIdle(live);
@@ -404,6 +502,7 @@ export class Hub {
 			case "session_info_changed":
 				target.info.name = typed.name;
 				this.emitStatus(target);
+				void this.persistName(target);
 				break;
 			case "message_end": {
 				const message = typed.message as { role?: string } | undefined;
@@ -504,6 +603,80 @@ export class Hub {
 		} catch {
 			return undefined;
 		}
+	}
+
+	// ------------------------------------------------------------ session index
+
+	private async readIndex(): Promise<SessionIndexRecord[]> {
+		if (this.index) return this.index;
+		let records: SessionIndexRecord[] = [];
+		try {
+			const parsed = JSON.parse(await readFile(this.options.indexPath, "utf8")) as unknown;
+			if (Array.isArray(parsed)) {
+				for (const raw of parsed) records.push(...normalizeRecord(raw, this.options.sessionsDir));
+			}
+		} catch (error) {
+			// A missing index is the normal empty case; a corrupt one is logged and
+			// ignored, because JSONL sessions must keep listing regardless.
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+				this.options.log(`session index unreadable (${(error as Error).message}); starting empty`);
+			}
+		}
+		this.index = records;
+		return records;
+	}
+
+	private async findRecord(id: string): Promise<SessionIndexRecord | undefined> {
+		const records = await this.readIndex();
+		return records.find((record) => record.logicalId === id || record.piId === id || record.piIds.includes(id));
+	}
+
+	private async upsertIndex(info: SessionInfo, logicalId: string, createdAt?: string): Promise<void> {
+		if (!info.id) return;
+		await this.mutateIndex((records) => {
+			const existing = records.find((record) => record.logicalId === logicalId);
+			const piIds = existing ? [...existing.piIds] : [];
+			if (!piIds.includes(info.id)) piIds.push(info.id);
+			const next: SessionIndexRecord = {
+				logicalId,
+				piId: info.id,
+				piIds,
+				cwd: info.cwd,
+				name: info.name ?? existing?.name,
+				sessionFile: info.sessionFile ?? existing?.sessionFile,
+				createdAt: existing?.createdAt ?? createdAt ?? new Date().toISOString(),
+			};
+			const index = records.findIndex((record) => record.logicalId === logicalId);
+			return index >= 0 ? records.map((record, at) => (at === index ? next : record)) : [...records, next];
+		});
+	}
+
+	/** Read-modify-write serialized behind `indexWrite`; atomic on disk. */
+	private mutateIndex(mutate: (records: SessionIndexRecord[]) => SessionIndexRecord[]): Promise<void> {
+		const run = async () => {
+			const next = mutate(await this.readIndex());
+			this.index = next;
+			const path = this.options.indexPath;
+			await mkdir(dirname(path), { recursive: true });
+			const temp = `${path}.${process.pid}.tmp`;
+			await writeFile(temp, `${JSON.stringify(next, null, 2)}\n`);
+			await rename(temp, path);
+		};
+		this.indexWrite = this.indexWrite.then(run, run);
+		return this.indexWrite;
+	}
+
+	/**
+	 * A rename of a never-prompted session exists only in memory, so persist it
+	 * to the index. Once the JSONL exists, the file stays the source of truth.
+	 */
+	private async persistName(live: LiveSession): Promise<void> {
+		const { info } = live;
+		if (!info.logicalId) return;
+		if (info.sessionFile && (await pathExists(info.sessionFile))) return;
+		await this.upsertIndex(info, info.logicalId).catch((error: unknown) => {
+			this.options.log(`session index write failed: ${(error as Error).message}`);
+		});
 	}
 
 	// --------------------------------------------------------------- plumbing
@@ -625,6 +798,36 @@ export class Hub {
 }
 
 // ------------------------------------------------------------ jsonl windows
+
+function normalizeRecord(raw: unknown, fallbackCwd: string): SessionIndexRecord[] {
+	if (!raw || typeof raw !== "object") return [];
+	const record = raw as Partial<SessionIndexRecord>;
+	if (typeof record.logicalId !== "string" || typeof record.piId !== "string") return [];
+	const piIds = Array.isArray(record.piIds)
+		? record.piIds.filter((id): id is string => typeof id === "string")
+		: [];
+	return [
+		{
+			logicalId: record.logicalId,
+			piId: record.piId,
+			piIds: piIds.includes(record.piId) ? piIds : [...piIds, record.piId],
+			cwd: typeof record.cwd === "string" ? record.cwd : fallbackCwd,
+			name: typeof record.name === "string" ? record.name : undefined,
+			sessionFile: typeof record.sessionFile === "string" ? record.sessionFile : undefined,
+			createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
+		},
+	];
+}
+
+async function pathExists(path: string): Promise<boolean> {
+	try {
+		await stat(path);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 
 /** First `maxBytes` of a file, decoded once (never a whole-session read). */
 async function readHead(path: string, maxBytes: number): Promise<{ text: string }> {

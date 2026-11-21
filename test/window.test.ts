@@ -29,7 +29,14 @@ function message(index: number, text = `entry ${index}`): string {
 }
 
 function hubFor(dir: string): Hub {
-	return new Hub({ piBin: "true", sessionsDir: dir, idleMs: 0, extraPiArgs: [], log: () => {} });
+	return new Hub({
+		piBin: "true",
+		sessionsDir: dir,
+		indexPath: join(dir, "sessions.json"),
+		idleMs: 0,
+		extraPiArgs: [],
+		log: () => {},
+	});
 }
 
 after(async () => {
