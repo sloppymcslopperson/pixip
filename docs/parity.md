@@ -132,7 +132,9 @@ its dialogs/notify come back over `extension_ui_request`. Three generic
 guarantees make that usable (implemented in `00-prefix-commands`):
 
 - slash input while busy uses `prompt` + `streamingBehavior: "steer"`, because RPC
-  `steer` does not execute extension commands;
+  `steer` does not execute extension commands; plain text uses the same command
+  for the same reason, plus RPC `steer` would queue forever if it arrived while
+  Pi was idle (it never starts a turn);
 - `prompt` is not subject to the hub's 20 s command timeout, because extension
   handlers block on user dialogs (`/fit edit`, `/fit work`);
 - long/multi-line `notify` text (e.g. `/fit help`) opens a dismissible sheet

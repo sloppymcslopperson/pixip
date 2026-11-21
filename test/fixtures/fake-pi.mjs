@@ -238,6 +238,16 @@ function handle(line) {
 				text: command.message,
 				streamingBehavior: command.streamingBehavior ?? null,
 			});
+			// `prompt` with a streaming behavior models a busy run: the text joins
+			// the pending queue (real Pi would also start a turn when idle, which the
+			// fixture cannot model; tests assert the command and the queue, not a run).
+			if (command.streamingBehavior === "steer" && typeof command.message === "string") {
+				steering.push(command.message);
+				emitQueue();
+			} else if (command.streamingBehavior === "followUp" && typeof command.message === "string") {
+				followUp.push(command.message);
+				emitQueue();
+			}
 			// A slow handler stands in for an extension command blocked on a dialog.
 			const promptDelay = Number(env.FAKE_PI_PROMPT_DELAY_MS ?? 0);
 			const prompt = () => ok(command.id, "prompt", { disposition: "started" });

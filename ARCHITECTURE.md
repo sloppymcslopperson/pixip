@@ -103,7 +103,7 @@ Client → hub:
 |---|---|---|
 | `create` | `cwd`, `name?` | spawn a new session |
 | `prompt` | `text`, `streamingBehavior?` | `prompt` (`"steer"` while busy: extension commands must still execute) |
-| `steer` | `text` | `steer` (plain text only); the chips follow Pi's verbatim `queue_update` events |
+| `steer` | `text` | `prompt` with `streamingBehavior: "steer"` (RPC `steer` only queues, so an idle steer would never run); the chips follow Pi's verbatim `queue_update` events |
 | `clear_queue` | – | `clear_queue`; answered with a `queue` frame carrying the restored texts |
 | `tree` | – | `get_tree`, answered with a `tree` frame |
 | `fork` | `entryId` | `fork`; the hub re-reads `get_state`, re-keys and the socket sends `opened` with `rekey` |
@@ -235,9 +235,11 @@ The composer classifies a submitted line in one pure module
   verbatim as `event`) and the hub's final `bash` frame carries output, exit
   code, cancellation, truncation and the full-output path. `!`/`!!` with no
   command is a no-op, and only one bash runs per session at a time;
-- plain text keeps `prompt` when idle and `steer` while busy. Slash input while
-  busy uses `prompt` with `streamingBehavior: "steer"`, because RPC `steer`
-  queues text and never executes an extension command.
+- plain text is `prompt` when idle and `prompt` with `streamingBehavior: "steer"`
+  while busy. Both the slash and the plain-text path deliberately avoid RPC
+  `steer`: it only queues, so an idle steer would never start a turn (and RPC
+  `steer` also never executes an extension command). `streamingBehavior` is
+  additive — Pi ignores it when idle and starts a normal turn.
 
 `prompt` and `bash` are exempt from the 20 s RPC response timeout (extension
 handlers block on user dialogs; a build can run for minutes), and a late or

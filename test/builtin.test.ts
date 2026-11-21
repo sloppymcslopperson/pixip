@@ -252,6 +252,26 @@ describe("built-in commands over the socket", () => {
 		await hub.shutdown();
 	});
 
+	it("sends a steer as prompt+steer and leaves an idle session idle", async () => {
+		const paths = await fixtureRoot();
+		const { hub, server, url } = await boot(paths, { FAKE_PI_SESSION_ID: OLD_ID });
+		const id = decodeURIComponent(url.split("session=")[1] ?? "");
+
+		// RPC `steer` only queues, so a steer arriving while Pi is idle would never
+		// run and the hub would latch "busy" with no agent_settled to clear it.
+		await hub.steer(id, "change direction");
+
+		const sent = (await records(paths)).filter((record) => record["type"] === "prompt" || record["type"] === "steer");
+		assert.equal(sent.length, 1);
+		assert.equal(sent[0]?.["type"], "prompt");
+		assert.equal(sent[0]?.["streamingBehavior"], "steer");
+		assert.equal(sent[0]?.["text"], "change direction");
+		assert.equal((await hub.list()).find((session) => session.id === id)?.state, "idle");
+
+		await server.close();
+		await hub.shutdown();
+	});
+
 	it("forks from a user message and re-keys the live session", async () => {
 		const paths = await fixtureRoot();
 		const { hub, server, url } = await boot(paths, {

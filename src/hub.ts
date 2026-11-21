@@ -362,13 +362,17 @@ export class Hub {
 		return found?.path;
 	}
 
+	/**
+	 * `streamingBehavior` is additive, not a mode switch: when Pi is idle it still
+	 * starts a normal turn, when busy it steers/follows the run. Always using
+	 * `prompt` (never RPC `steer`) also keeps extension commands executeable and
+	 * means a message sent in the settle race starts a turn instead of sitting in
+	 * Pi's steering queue until some later prompt happens to drain it.
+	 */
 	async prompt(id: string, text: string, streamingBehavior?: "steer" | "followUp"): Promise<void> {
 		const live = this.require(id);
 		this.touch(live);
 		try {
-			// Slash input while busy must go through `prompt` with a steering
-			// behavior: RPC `steer` expands templates/skills but never runs an
-			// extension command (`/fit`), so it would queue the literal text.
 			await live.proc.command(
 				{ type: "prompt", message: text, ...(streamingBehavior ? { streamingBehavior } : {}) },
 				{ timeoutMs: this.options.promptTimeoutMs ?? 0 },
@@ -378,13 +382,21 @@ export class Hub {
 			// (extension handlers legitimately outlive any timeout), so log it and
 			// let the event stream be the source of truth.
 			this.options.log(`prompt ${id}: ${(error as Error).message}`);
+		} finally {
+			// No run started (e.g. an extension command answered locally): restore
+			// the idle-detach timer that `touch` cleared.
+			if (live.info.state === "idle") this.scheduleIdle(live);
 		}
 	}
 
+	/**
+	 * Plain-text steer. It is `prompt` + `streamingBehavior: "steer"`, not RPC
+	 * `steer`: that command only queues, so a steer that arrives while Pi is idle
+	 * would never run, and the hub would stay "busy" forever because no
+	 * `agent_start`/`agent_settled` ever follows.
+	 */
 	async steer(id: string, text: string): Promise<void> {
-		const live = this.require(id);
-		this.touch(live);
-		await live.proc.command({ type: "steer", message: text });
+		await this.prompt(id, text, "steer");
 	}
 
 	/**
@@ -1156,13 +1168,15 @@ export class Hub {
 		}
 	}
 
+	/**
+	 * Activity bookkeeping only. The run state belongs to Pi's lifecycle events:
+	 * inventing "busy" here latched sessions busy for commands that never start a
+	 * run (RPC `steer` while idle, extension commands handled locally), and no
+	 * `agent_settled` ever arrived to clear it.
+	 */
 	private touch(live: LiveSession): void {
 		live.info.lastActivity = Date.now();
 		this.clearIdle(live);
-		if (live.info.state !== "busy") {
-			live.info.state = "busy";
-			this.emitStatus(live);
-		}
 	}
 
 	private scheduleIdle(live: LiveSession): void {
