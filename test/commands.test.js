@@ -6,8 +6,12 @@ import {
 	COMMANDS,
 	TUI_ONLY_COMMANDS,
 	classifyInput,
+	commandQuery,
+	filterCommands,
 	findCommand,
 	isAllowed,
+	menuCatalog,
+	menuInsertText,
 	resolveModelArgument,
 	resolvePolicy,
 	resolveThinkingArgument,
@@ -159,6 +163,87 @@ describe("visibleCommands", () => {
 		assert.equal(names.includes("settings"), false);
 		assert.equal(names.includes("compact"), false);
 		assert.equal(names.includes("model"), true);
+	});
+});
+
+describe("commandQuery", () => {
+	it("is the bare name while the composer line is in command position", () => {
+		assert.equal(commandQuery("/"), "");
+		assert.equal(commandQuery("/com"), "com");
+		assert.equal(commandQuery("/Fit"), "Fit");
+	});
+
+	it("closes once there is whitespace or the line is not a command", () => {
+		for (const line of ["", "hi", "hi /", " /compact", "/compact ", "/compact args", "/fit x"]) {
+			assert.equal(commandQuery(line), null, JSON.stringify(line));
+		}
+	});
+});
+
+describe("menuCatalog", () => {
+	it("adds live commands once and marks the static TUI-only ones", () => {
+		const commands = menuCatalog(null, [
+			{ name: "fit", description: "FIT board", source: "extension" },
+			{ name: "fix-tests", description: "Fix tests", source: "prompt" },
+			{ name: "/fit", description: "duplicate", source: "extension" },
+			{ name: "", description: "empty", source: "skill" },
+		]);
+		const names = commands.map((command) => command.name);
+		assert.equal(names.filter((name) => name === "fit").length, 1);
+		assert.equal(commands.find((command) => command.name === "fit")?.summary, "FIT board");
+		assert.equal(commands.find((command) => command.name === "fix-tests")?.source, "prompt");
+		assert.equal(commands.find((command) => command.name === "tree")?.tuiOnly, true);
+		assert.equal(commands.find((command) => command.name === "compact")?.tuiOnly, false);
+	});
+
+	it("filters denied static and live commands", () => {
+		const commands = menuCatalog({ allow: [], deny: ["settings", "fit"], bash: true }, [
+			{ name: "fit", description: "FIT board", source: "extension" },
+			{ name: "fix-tests", description: "Fix tests", source: "prompt" },
+		]);
+		const names = commands.map((command) => command.name);
+		assert.equal(names.includes("settings"), false);
+		assert.equal(names.includes("fit"), false);
+		assert.equal(names.includes("fix-tests"), true);
+	});
+});
+
+describe("filterCommands", () => {
+	const commands = [
+		{ name: "compact", summary: "compact the context" },
+		{ name: "copy", summary: "copy the last assistant message" },
+		{ name: "session", summary: "session id, file and usage" },
+		{ name: "new", summary: "start a fresh session in this child" },
+		{ name: "clone", summary: "duplicate the current branch" },
+	];
+
+	it("matches names case-insensitively", () => {
+		assert.deepEqual(filterCommands(commands, "CO").map((command) => command.name), ["compact", "copy"]);
+	});
+
+	it("puts name prefixes before other name matches, then description matches", () => {
+		const ranked = [
+			{ name: "resync", summary: "force a sync" },
+			{ name: "sync", summary: "sync notes" },
+			{ name: "copy", summary: "sync notes" },
+		];
+		assert.deepEqual(filterCommands(ranked, "sync").map((command) => command.name), ["sync", "resync", "copy"]);
+	});
+
+	it("is alphabetical for an empty query and drops non-matches", () => {
+		assert.deepEqual(
+			filterCommands(commands, "").map((command) => command.name),
+			["clone", "compact", "copy", "new", "session"],
+		);
+		assert.deepEqual(filterCommands(commands, "nothing"), []);
+	});
+});
+
+describe("menuInsertText", () => {
+	it("inserts the bare command and a space only when it takes arguments", () => {
+		assert.equal(menuInsertText({ name: "compact", args: "[instructions]" }), "/compact ");
+		assert.equal(menuInsertText({ name: "session", args: "" }), "/session");
+		assert.equal(menuInsertText(null), "");
 	});
 });
 

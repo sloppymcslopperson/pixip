@@ -8,7 +8,7 @@ import { RpcChild } from "./rpc.ts";
 import { resolveSessionPolicy, type CommandLayer } from "./commands.ts";
 import { resolveModelArgument, resolveThinkingArgument } from "./client/commands.js";
 import { frameError, frameEvent, frameFooter, frameModels, framePolicy, frameSessions, frameSnapshot, frameStatus } from "./wire.ts";
-import type { BashResult, CommandPolicy, FooterData, ModelSummary, SessionInfo, SessionState } from "./wire.ts";
+import type { BashResult, CommandPolicy, DynamicCommand, FooterData, ModelSummary, SessionInfo, SessionState } from "./wire.ts";
 
 const run = promisify(execFile);
 
@@ -488,6 +488,25 @@ export class Hub {
 		live.info.model = data.id ?? modelId;
 		this.emitStatus(live);
 		await this.sendFooter(live);
+	}
+
+	/** `get_commands`: extension commands, prompt templates and skills for this child. */
+	async commands(id: string): Promise<DynamicCommand[]> {
+		const live = this.require(id);
+		const data = (await live.proc.command({ type: "get_commands" })) as {
+			commands?: Array<{ name?: unknown; description?: unknown; source?: unknown }>;
+		};
+		const commands: DynamicCommand[] = [];
+		for (const raw of data.commands ?? []) {
+			if (typeof raw?.name !== "string" || !raw.name.trim()) continue;
+			const source = raw.source === "prompt" || raw.source === "skill" ? raw.source : "extension";
+			commands.push({
+				name: raw.name,
+				source,
+				...(typeof raw.description === "string" && raw.description ? { description: raw.description } : {}),
+			});
+		}
+		return commands;
 	}
 
 	async thinkingLevels(id: string): Promise<{ levels: string[]; current: string }> {

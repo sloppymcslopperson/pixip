@@ -87,6 +87,7 @@ Hub → client:
 | `opened` | `session`, `rekey?` | reply to `create`; `rekey` when `/new` moved the session to a new Pi id |
 | `copy` | `text` | answer to a `copy` frame: Pi's last assistant text (`null` if none) |
 | `policy` | `policy` (`allow`, `deny`, `bash`) | effective per-session command policy |
+| `commands` | `commands` (`name`, `description?`, `source`) | live `get_commands` entries for the `/` menu; sent once per attach, cached by the client |
 | `bash` | `id`, `command`, `excludeFromContext`, `output`, `exitCode`, `cancelled`, `truncated`, `fullOutputPath?`, `error?` | terminal result for `!`/`!!`; chunks arrive as `event` |
 | `error` | `message` | protocol/command failure |
 
@@ -117,7 +118,9 @@ refresh). Streaming never uses HTTP requests.
 ## Status line and session controls
 
 The footer mirrors Pi's own footer component
-(`dist/modes/interactive/components/footer.js`) rather than inventing a summary:
+(`dist/modes/interactive/components/footer.js`) rather than inventing a summary.
+It sits **below** the composer (both inside the sticky `#dock`), so the command
+menu and the queue own the space above the input:
 
 - line 1: `~/cwd (branch) • session name`;
 - line 2: `↑in ↓out R<cacheRead> W<cacheWrite> $cost` + `percent%/window (auto)`

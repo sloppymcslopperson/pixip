@@ -11,7 +11,7 @@ import {
 	toolBlock,
 	toolCallsOf,
 } from "./render.js";
-import { classifyInput, isAllowed } from "./commands.js";
+import { classifyInput, commandQuery, filterCommands, isAllowed, menuCatalog, menuInsertText } from "./commands.js";
 import { formatSession } from "./sessionInfo.js";
 import {
 	contextLevel,
@@ -47,6 +47,8 @@ const ui = {
 	list: $("#list"),
 	session: $("#session"),
 	log: $("#log"),
+	dock: $("#dock"),
+	menu: $("#menu"),
 	composer: $("#composer"),
 	input: $("#input"),
 	send: $("#send"),
@@ -69,6 +71,8 @@ const state = {
 	footer: null,
 	models: [],
 	levels: [],
+	dynamicCommands: [], // live get_commands entries for the `/` menu
+	menu: { items: [], index: 0 },
 	policy: null, // effective per-session command policy (hub-resolved)
 	bashRunning: false,
 	quitting: false,
@@ -152,6 +156,8 @@ async function showList() {
 	state.streaming = null;
 	state.pendingUser = null;
 	state.policy = null;
+	state.dynamicCommands = [];
+	closeMenu();
 	state.bashRunning = false;
 	state.quitting = false;
 	state.bash.clear();
@@ -161,6 +167,7 @@ async function showList() {
 	ui.session.hidden = true;
 	ui.composer.hidden = true;
 	ui.footer.hidden = true;
+	ui.dock.hidden = true;
 	ui.stop.hidden = true;
 	ui.back.hidden = true;
 	ui.list.hidden = false;
@@ -226,6 +233,8 @@ function openSession(id) {
 	state.streaming = null;
 	state.pendingUser = null;
 	state.policy = null;
+	state.dynamicCommands = [];
+	closeMenu();
 	state.bashRunning = false;
 	state.quitting = false;
 	state.bash.clear();
@@ -233,6 +242,7 @@ function openSession(id) {
 	ui.session.hidden = false;
 	ui.composer.hidden = false;
 	ui.footer.hidden = false;
+	ui.dock.hidden = false;
 	ui.stop.hidden = false;
 	ui.back.hidden = false;
 	ui.log.textContent = "";
@@ -318,6 +328,10 @@ function handleFrame(frame) {
 			break;
 		case "policy":
 			applyPolicy(frame.policy);
+			break;
+		case "commands":
+			state.dynamicCommands = Array.isArray(frame.commands) ? frame.commands : [];
+			if (!ui.menu.hidden) renderMenu();
 			break;
 		case "bash":
 			finishBash(frame);
@@ -913,6 +927,7 @@ const builtinHandlers = {
 
 function clearInput() {
 	ui.input.value = "";
+	closeMenu();
 	resize();
 }
 
@@ -1130,12 +1145,135 @@ ui.composer.addEventListener("submit", (event) => {
 });
 
 ui.input.addEventListener("keydown", (event) => {
+	if (!ui.menu.hidden) {
+		if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+			event.preventDefault();
+			moveMenu(event.key === "ArrowDown" ? 1 : -1);
+			return;
+		}
+		if (event.key === "Enter" || event.key === "Tab") {
+			event.preventDefault();
+			chooseMenu(state.menu.index);
+			return;
+		}
+		if (event.key === "Escape") {
+			event.preventDefault();
+			closeMenu();
+			return;
+		}
+	}
 	if (event.key === "Enter" && !event.shiftKey && !state.coarse) {
 		event.preventDefault();
 		submit();
 	}
 });
-ui.input.addEventListener("input", resize);
+ui.input.addEventListener("input", () => {
+	resize();
+	renderMenu();
+});
+ui.input.addEventListener("focus", renderMenu);
+ui.input.addEventListener("blur", () => closeMenu());
+
+// ------------------------------------------------------------- command menu
+
+/**
+ * The `/` menu (06): open only while the line is a bare command, filtered
+ * prefix-first, capped and scrollable in CSS. `↑`/`↓` move, `Enter`/`Tab`
+ * insert, `Esc` closes, a tap inserts (pointerdown keeps the input focused).
+ */
+function renderMenu() {
+	const query = commandQuery(ui.input.value);
+	if (query === null || document.activeElement !== ui.input) {
+		closeMenu();
+		return;
+	}
+	const items = filterCommands(menuCatalog(state.policy, state.dynamicCommands), query);
+	state.menu.items = items;
+	if (state.menu.index >= items.length) state.menu.index = 0;
+	if (items.length === 0) {
+		closeMenu();
+		return;
+	}
+	ui.menu.textContent = "";
+	items.forEach((item, index) => {
+		const row = document.createElement("button");
+		row.type = "button";
+		row.className = `menu-row${item.tuiOnly ? " tui" : ""}${index === state.menu.index ? " active" : ""}`;
+		row.dataset.index = String(index);
+		row.setAttribute("role", "option");
+		row.setAttribute("aria-selected", index === state.menu.index ? "true" : "false");
+		const name = document.createElement("span");
+		name.className = "menu-name";
+		name.textContent = `/${item.name}`;
+		row.append(name);
+		if (item.args) {
+			const args = document.createElement("span");
+			args.className = "menu-args";
+			args.textContent = item.args;
+			row.append(args);
+		}
+		if (item.summary) {
+			const summary = document.createElement("span");
+			summary.className = "menu-summary";
+			summary.textContent = item.summary;
+			row.append(summary);
+		}
+		if (item.tuiOnly) {
+			const hint = document.createElement("span");
+			hint.className = "menu-hint";
+			hint.textContent = "TUI-only";
+			row.append(hint);
+		}
+		ui.menu.append(row);
+	});
+	ui.menu.hidden = false;
+	scheduleScroll();
+}
+
+function closeMenu() {
+	const wasOpen = !ui.menu.hidden;
+	ui.menu.hidden = true;
+	state.menu.items = [];
+	state.menu.index = 0;
+	if (!wasOpen) return;
+	ui.menu.textContent = "";
+	scheduleScroll();
+}
+
+function moveMenu(delta) {
+	const count = state.menu.items.length;
+	if (count === 0) return;
+	state.menu.index = (state.menu.index + delta + count) % count;
+	for (const [index, row] of [...ui.menu.children].entries()) {
+		row.classList.toggle("active", index === state.menu.index);
+		row.setAttribute("aria-selected", index === state.menu.index ? "true" : "false");
+	}
+	ui.menu.children[state.menu.index]?.scrollIntoView({ block: "nearest" });
+}
+
+/** Insert the selection; a TUI-only command runs its notice immediately. */
+function chooseMenu(index) {
+	const item = state.menu.items[index];
+	if (!item) return;
+	closeMenu();
+	if (item.tuiOnly) {
+		ui.input.value = `/${item.name}`;
+		submit();
+		return;
+	}
+	ui.input.value = menuInsertText(item);
+	resize();
+	ui.input.focus();
+	ui.input.setSelectionRange(ui.input.value.length, ui.input.value.length);
+}
+
+ui.menu.addEventListener("pointerdown", (event) => {
+	const row = event.target.closest(".menu-row");
+	if (!row) return;
+	// Keep the textarea focused; the tap is the selection, not a blur.
+	event.preventDefault();
+	chooseMenu(Number(row.dataset.index));
+});
 
 function resize() {
 	ui.input.style.height = "auto";

@@ -51,6 +51,13 @@ export interface ModelSummary {
 	reasoning?: boolean;
 }
 
+/** One live command from Pi's `get_commands` (extension, prompt or skill). */
+export interface DynamicCommand {
+	name: string;
+	description?: string;
+	source: "extension" | "prompt" | "skill";
+}
+
 export type SessionState = "starting" | "idle" | "busy" | "stopped" | "error";
 
 export interface SessionInfo {
@@ -118,6 +125,14 @@ export function frameModels(models: ModelSummary[], current: string | null): str
 
 export function frameThinking(levels: string[], current: string): string {
 	return JSON.stringify({ t: "thinking", levels, current });
+}
+
+/**
+ * Live commands for the `/` menu (06). Sent once per attach and cached by the
+ * client; a soft refresh reloads the page, which reattaches and refetches.
+ */
+export function frameCommands(commands: DynamicCommand[]): string {
+	return JSON.stringify({ t: "commands", commands });
 }
 
 export function frameHello(sessions: SessionInfo[], defaultCwd?: string): string {

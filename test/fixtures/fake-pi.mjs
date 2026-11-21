@@ -126,6 +126,9 @@ function handle(line) {
 		}
 		case "get_last_assistant_text":
 			return ok(command.id, "get_last_assistant_text", { text: env.FAKE_PI_LAST_TEXT ?? null });
+		case "get_commands":
+			logRecord({ type: "get_commands" });
+			return ok(command.id, "get_commands", { commands: JSON.parse(env.FAKE_PI_COMMANDS ?? "[]") });
 		case "set_session_name":
 			logRecord({ type: "set_session_name", name: command.name });
 			sessionName = command.name;

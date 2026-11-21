@@ -160,6 +160,75 @@ export function visibleCommands(policy) {
 }
 
 /**
+ * Where a composer line sits relative to a command: the filter query when the
+ * cursor is still inside a bare `/name` (06-command-menu), `null` otherwise.
+ * A space ends command position, so arguments never reopen the menu.
+ */
+export function commandQuery(text) {
+	const value = typeof text === "string" ? text : "";
+	if (!value.startsWith("/") || /\s/.test(value)) return null;
+	return value.slice(1);
+}
+
+/**
+ * The menu's catalog: the static catalog plus the live `get_commands` entries
+ * (extension, prompt, skill), denied names removed and duplicates collapsed.
+ * Static entries win, so the menu cannot disagree with `classifyInput`.
+ */
+export function menuCatalog(policy, dynamic = []) {
+	const commands = visibleCommands(policy).map((command) => ({
+		name: command.name,
+		args: command.args ?? "",
+		source: command.source,
+		summary: command.summary ?? "",
+		tuiOnly: command.source === "tui",
+		...(command.ticket ? { ticket: command.ticket } : {}),
+	}));
+	const seen = new Set(commands.map((command) => command.name));
+	for (const raw of Array.isArray(dynamic) ? dynamic : []) {
+		const name = normalizeName(raw?.name);
+		if (!name || seen.has(name) || !isAllowed(name, policy)) continue;
+		seen.add(name);
+		commands.push({
+			name,
+			args: "",
+			source: ["extension", "prompt", "skill"].includes(raw?.source) ? raw.source : "extension",
+			summary: typeof raw?.description === "string" ? raw.description : "",
+			tuiOnly: false,
+		});
+	}
+	return commands;
+}
+
+/**
+ * Case-insensitive substring filter on name and description. Prefix matches on
+ * the name come first, then other name matches, then description matches, and
+ * each group is alphabetical: no fuzzy search, no scoring beyond that.
+ */
+export function filterCommands(commands, query) {
+	const wanted = normalizeName(query).toLowerCase();
+	const list = Array.isArray(commands) ? commands : [];
+	const group = (command) => {
+		if (!wanted) return 0;
+		const name = command.name.toLowerCase();
+		if (name.startsWith(wanted)) return 0;
+		if (name.includes(wanted)) return 1;
+		return (command.summary ?? "").toLowerCase().includes(wanted) ? 2 : -1;
+	};
+	return list
+		.map((command) => ({ command, rank: group(command) }))
+		.filter((entry) => entry.rank >= 0)
+		.sort((a, b) => a.rank - b.rank || a.command.name.localeCompare(b.command.name))
+		.map((entry) => entry.command);
+}
+
+/** Text a menu selection inserts: `/name`, plus a space when it takes arguments. */
+export function menuInsertText(command) {
+	if (!command || typeof command.name !== "string") return "";
+	return `/${command.name}${command.args ? " " : ""}`;
+}
+
+/**
  * Resolve a `/model` argument against the models Pi reported. Ordered:
  * exact `provider/id`, exact id, then a unique id/suffix. Ambiguous and unknown
  * answers carry the closest matches so the caller can toast them.

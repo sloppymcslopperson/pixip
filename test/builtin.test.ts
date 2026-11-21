@@ -198,6 +198,26 @@ describe("built-in commands over the socket", () => {
 		await hub.shutdown();
 	});
 
+	it("surfaces get_commands on the commands frame once per attach", async () => {
+		const paths = await fixtureRoot();
+		const DISCOVERED = JSON.stringify([
+			{ name: "fit", description: "FIT board", source: "extension" },
+			{ name: "skill:review", description: "Review the diff", source: "skill" },
+		]);
+		const { hub, server, url } = await boot(paths, { FAKE_PI_SESSION_ID: OLD_ID, FAKE_PI_COMMANDS: DISCOVERED });
+		const inbox = await connect(url);
+		await waitFor(() => framesOf(inbox, "commands").length > 0);
+		assert.deepEqual(framesOf(inbox, "commands")[0]?.["commands"], [
+			{ name: "fit", description: "FIT board", source: "extension" },
+			{ name: "skill:review", description: "Review the diff", source: "skill" },
+		]);
+		assert.equal((await records(paths)).filter((record) => record["type"] === "get_commands").length, 1);
+
+		inbox.close();
+		await server.close();
+		await hub.shutdown();
+	});
+
 	it("answers copy with Pi's last assistant text", async () => {
 		const paths = await fixtureRoot();
 		const { hub, server, url } = await boot(paths, { FAKE_PI_SESSION_ID: OLD_ID, FAKE_PI_LAST_TEXT: "the last answer" });

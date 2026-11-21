@@ -17,7 +17,7 @@ to the model).
 | 1 | `00-prefix-commands` | done: `/`, `!`, `!!` classification, bash, command policy, prompt/steer dispatch |
 | 2 | `01-daemon-refresh` | done: run pixip as a background daemon; soft reload and `--when-idle` restart so the agent can update pixip mid-session |
 | 3 | `02-builtin-commands` | done: `/compact`, `/name`, `/session`, `/copy`, `/model`, `/thinking`, `/new`, `/resume`, `/quit` |
-| 4 | `06-command-menu` | `/` suggestion menu and the status line below the composer |
+| 4 | `06-command-menu` | done: `/` suggestion menu and the status line below the composer |
 | 5 | `07-queue-display` | visible steering/follow-up queue with clear/restore |
 | 6 | `08-session-commands` | `/tree`, `/fork`, `/clone`, `/import`, `/export` |
 
@@ -65,7 +65,7 @@ is either already done or deliberately deferred.
 | Behaviour | pixip |
 |---|---|
 | `!cmd`, `!!cmd` (bash, excluded from context) | done (`00-prefix-commands`: streamed card, `!!` badge) |
-| Command menu on `/` | `06-command-menu` |
+| Command menu on `/` | done (`06-command-menu`: filtered static + `get_commands` rows, prefix-first, TUI-only dimmed, footer below the composer) |
 | Steering/follow-up queue visible, clear + restore | `07-queue-display` |
 | Abort a running bash | deferred (gap; TUI-only for now) |
 | Input history (up/down) | deferred |

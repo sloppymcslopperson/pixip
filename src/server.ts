@@ -8,6 +8,7 @@ import { Hub } from "./hub.ts";
 import {
 	frameBash,
 	frameBashError,
+	frameCommands,
 	frameCopy,
 	frameError,
 	frameHello,
@@ -335,6 +336,15 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 			})
 			.catch(() => {
 				// Detached between attach and footer: the status frame already says so.
+			});
+
+		// Discoverable commands for the `/` menu: fetched once per attach (the
+		// client caches them) and off the snapshot path.
+		void hub
+			.commands(info.id)
+			.then((commands) => send(frameCommands(commands)))
+			.catch(() => {
+				// A child that just went away simply leaves the menu on the static catalog.
 			});
 	} catch (error) {
 		send(frameError((error as Error).message));
