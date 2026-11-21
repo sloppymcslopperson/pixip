@@ -89,6 +89,7 @@ const state = {
 	restartWasBusy: false, // a turn was in flight when the restart was announced
 	restartNoticePending: false, // paint the interruption notice after the reconnect snapshot
 	pendingCreate: null, // dashboard `new` action waiting for the first session id
+	uiDialog: null, // extension_ui_request currently shown as a modal, if any
 	tools: new Map(), // toolCallId -> <details>
 	coarse: window.matchMedia("(pointer: coarse)").matches,
 	renderQueued: false,
@@ -359,9 +360,7 @@ function renderDirectorySheet() {
 	const content = document.createElement("div");
 	content.className = "dir-sheet";
 
-	const heading = document.createElement("div");
-	heading.className = "sheet-title";
-	heading.textContent = "choose directory";
+	const heading = sheetHeader("choose directory");
 
 	const crumbs = document.createElement("div");
 	crumbs.className = "dir-crumbs";
@@ -629,9 +628,7 @@ function confirmSheet(title, message, confirmLabel, action) {
 	const target = ui.sheet;
 	target.hidden = false;
 	target.textContent = "";
-	const heading = document.createElement("div");
-	heading.className = "sheet-title";
-	heading.textContent = title;
+	const heading = sheetHeader(title);
 	const body = document.createElement("div");
 	body.className = "sheet-text";
 	body.textContent = message;
@@ -639,6 +636,7 @@ function confirmSheet(title, message, confirmLabel, action) {
 	actions.className = "sheet-actions";
 	const confirm = document.createElement("button");
 	confirm.textContent = confirmLabel;
+	confirm.classList.add("danger");
 	confirm.addEventListener("click", action);
 	const cancel = document.createElement("button");
 	cancel.textContent = "cancel";
@@ -731,9 +729,7 @@ async function openSettingsSheet() {
 	const target = ui.sheet;
 	target.hidden = false;
 	target.textContent = "";
-	const heading = document.createElement("div");
-	heading.className = "sheet-title";
-	heading.textContent = "settings";
+	const heading = sheetHeader("settings");
 	const label = document.createElement("label");
 	label.className = "settings-row";
 	const checkbox = document.createElement("input");
@@ -781,9 +777,7 @@ function renderStoredSheet(kind, items) {
 	const target = ui.sheet;
 	target.hidden = false;
 	target.textContent = "";
-	const heading = document.createElement("div");
-	heading.className = "sheet-title";
-	heading.textContent = `${archived ? "archived" : "trash"} (${items.length})`;
+	const heading = sheetHeader(`${archived ? "archived" : "trash"} (${items.length})`);
 	const hint = document.createElement("div");
 	hint.className = "settings-hint";
 	hint.textContent = archived
@@ -1604,9 +1598,7 @@ function sheet(title, items) {
 	const target = ui.sheet;
 	target.hidden = false;
 	target.textContent = "";
-	const heading = document.createElement("div");
-	heading.className = "sheet-title";
-	heading.textContent = title;
+	const heading = sheetHeader(title);
 	target.append(heading);
 	const actions = document.createElement("div");
 	actions.className = "sheet-actions";
@@ -1627,6 +1619,48 @@ function sheet(title, items) {
 function closeSheet() {
 	ui.sheet.hidden = true;
 	ui.sheet.textContent = "";
+	state.uiDialog = null;
+}
+
+/** Shared x affordance for every modal/sheet. */
+function sheetCloseButton() {
+	const button = document.createElement("button");
+	button.type = "button";
+	button.className = "sheet-close";
+	button.setAttribute("aria-label", "close");
+	button.textContent = "×";
+	button.addEventListener("click", dismissSheet);
+	return button;
+}
+
+/** Title row with the x on the right; the baseline header for every sheet. */
+function sheetHeader(title) {
+	const header = document.createElement("div");
+	header.className = "sheet-header";
+	const heading = document.createElement("div");
+	heading.className = "sheet-title";
+	heading.textContent = title;
+	header.append(heading, sheetCloseButton());
+	return header;
+}
+
+/** Header row for field-first dialogs, where the title is a hint below the field. */
+function sheetCloseRow() {
+	const header = document.createElement("div");
+	header.className = "sheet-header close-only";
+	header.append(sheetCloseButton());
+	return header;
+}
+
+/** x/Escape: cancel a pending Pi dialog exactly once, otherwise close the sheet. */
+function dismissSheet() {
+	const dialog = state.uiDialog;
+	if (!dialog) {
+		closeSheet();
+		return;
+	}
+	send({ t: "ui", id: dialog.id, cancelled: true });
+	closeSheet();
 }
 
 // ------------------------------------------------------- tree sheet (08)
@@ -1651,9 +1685,7 @@ function openTreeSheet(tree, leafId) {
 	const target = ui.sheet;
 	target.hidden = false;
 	target.textContent = "";
-	const heading = document.createElement("div");
-	heading.className = "sheet-title";
-	heading.textContent = `tree${rows.length ? ` · ${rows.length} entries` : ""}`;
+	const heading = sheetHeader(`tree${rows.length ? ` · ${rows.length} entries` : ""}`);
 	target.append(heading);
 
 	const list = document.createElement("div");
@@ -1735,9 +1767,7 @@ function openExportSheet(html, jsonl) {
 	const target = ui.sheet;
 	target.hidden = false;
 	target.textContent = "";
-	const heading = document.createElement("div");
-	heading.className = "sheet-title";
-	heading.textContent = "export";
+	const heading = sheetHeader("export");
 	const note = document.createElement("div");
 	note.className = "sheet-text";
 	note.textContent = "downloads only · nothing is sent to the model";
@@ -1768,45 +1798,56 @@ function handleUiRequest(request) {
 		return;
 	}
 	if (!["select", "confirm", "input", "editor"].includes(method)) return;
+	state.uiDialog = request;
 	const sheet = ui.sheet;
 	sheet.hidden = false;
 	sheet.textContent = "";
-	const title = document.createElement("div");
-	title.className = "sheet-title";
-	title.textContent = request.title ?? request.message ?? method;
-	sheet.append(title);
 	const actions = document.createElement("div");
 	actions.className = "sheet-actions";
-	sheet.append(actions);
 
 	const finish = (fields) => {
+		if (state.uiDialog?.id !== request.id) return;
 		send({ t: "ui", id: request.id, ...fields });
-		sheet.hidden = true;
-		sheet.textContent = "";
+		closeSheet();
 	};
 
-	const addButton = (label, fields) => {
+	const addButton = (label, fields, className = "") => {
 		const button = document.createElement("button");
 		button.textContent = label;
-		button.addEventListener("click", () => finish(fields));
+		if (className) button.classList.add(className);
+		const resolveFields = typeof fields === "function" ? fields : () => fields;
+		button.addEventListener("click", () => finish(resolveFields()));
 		actions.append(button);
 	};
 
 	if (method === "select") {
+		sheet.append(sheetHeader(request.title ?? request.message ?? method));
 		for (const option of request.options ?? []) addButton(String(option), { value: option });
 	} else if (method === "confirm") {
-		addButton(request.yesLabel ?? "yes", { confirmed: true });
+		sheet.append(sheetHeader(request.title ?? request.message ?? method));
+		addButton(request.yesLabel ?? "yes", { confirmed: true }, "primary");
 		addButton(request.noLabel ?? "no", { confirmed: false });
 	} else {
+		sheet.append(sheetCloseRow());
 		const field = document.createElement(method === "editor" ? "textarea" : "input");
 		if (method === "editor") field.rows = 6;
-		field.value = request.value ?? request.initialValue ?? "";
+		field.value = request.value ?? request.initialValue ?? request.prefill ?? "";
 		sheet.append(field);
+		const hint = document.createElement("div");
+		hint.className = "sheet-hint";
+		hint.textContent = request.title ?? request.message ?? method;
+		sheet.append(hint);
 		field.focus();
-		addButton("send", { value: field.value });
-		actions.lastElementChild?.addEventListener("click", () => finish({ value: field.value }));
+		addButton("send", () => ({ value: field.value }), "primary");
+		field.addEventListener("keydown", (event) => {
+			if (event.key === "Enter" && !event.shiftKey) {
+				event.preventDefault();
+				finish({ value: field.value });
+			}
+		});
 	}
 	addButton("cancel", { cancelled: true });
+	sheet.append(actions);
 }
 
 // ------------------------------------------------------------------ composer
@@ -1986,9 +2027,7 @@ function copySheet(text) {
 	const target = ui.sheet;
 	target.hidden = false;
 	target.textContent = "";
-	const heading = document.createElement("div");
-	heading.className = "sheet-title";
-	heading.textContent = "copy";
+	const heading = sheetHeader("copy");
 	const body = document.createElement("pre");
 	body.className = "sheet-text";
 	body.textContent = text;
@@ -2376,6 +2415,14 @@ bindScaleButton(ui.scaleDown, "down");
 bindScaleButton(ui.scaleUp, "up");
 setScale(readScale(), { persist: false });
 
+// Escape is the keyboard half of the modal x: cancel Pi's dialog once, or
+// close a local sheet. Backdrop clicks deliberately do nothing.
+window.addEventListener("keydown", (event) => {
+	if (event.key !== "Escape" || ui.sheet.hidden) return;
+	event.preventDefault();
+	dismissSheet();
+});
+
 // Desktop shortcuts. `Ctrl/Cmd` is intentional rather than plain `-`/`+` so
 // typing in the composer is never affected; browser zoom still compounds.
 window.addEventListener("keydown", (event) => {
@@ -2522,9 +2569,7 @@ function textSheet(title, text) {
 	const target = ui.sheet;
 	target.hidden = false;
 	target.textContent = "";
-	const heading = document.createElement("div");
-	heading.className = "sheet-title";
-	heading.textContent = title;
+	const heading = sheetHeader(title);
 	const body = document.createElement("pre");
 	body.className = "sheet-text";
 	body.textContent = text;
