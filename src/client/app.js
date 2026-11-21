@@ -26,6 +26,7 @@ const ui = {
 	title: $("#title"),
 	sub: $("#sub"),
 	dot: $("#dot"),
+	reload: $("#reload"),
 	stop: $("#stop"),
 	list: $("#list"),
 	session: $("#session"),
@@ -993,6 +994,27 @@ ui.back.addEventListener("click", () => {
 ui.stop.addEventListener("click", () => {
 	send({ t: "stop" });
 });
+
+/**
+ * Soft refresh, then a full page reload. The hub re-reads assets, policy and the
+ * session index without touching live children; the page reload reconnects with
+ * the durable cursor. A hard restart is a CLI action (`pixip restart`), not a
+ * button: it ends the in-flight turn.
+ */
+async function softRefresh() {
+	ui.reload.disabled = true;
+	try {
+		const response = await fetch("/api/refresh", { method: "POST" });
+		const body = await response.json().catch(() => ({}));
+		if (!response.ok) throw new Error(body.error ?? `refresh failed (${response.status})`);
+		location.reload();
+	} catch (error) {
+		ui.reload.disabled = false;
+		toast(`reload failed: ${error.message}`);
+	}
+}
+
+ui.reload.addEventListener("click", () => void softRefresh());
 
 window.addEventListener("hashchange", route);
 

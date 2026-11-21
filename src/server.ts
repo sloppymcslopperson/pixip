@@ -31,7 +31,29 @@ export interface ServerOptions {
 
 export interface RunningServer {
 	url: string;
+	/** Soft refresh: re-read assets and the hub's caches; never touches children. */
+	refresh: () => Promise<RefreshReport>;
 	close: () => Promise<void>;
+}
+
+export interface RefreshReport {
+	reloaded: string[];
+	reloads: number;
+}
+
+interface ServerState {
+	/** Mutable asset map: a soft refresh swaps the whole thing. */
+	assets: Map<string, Buffer>;
+	startedAt: number;
+	reloads: number;
+	refresh: () => Promise<RefreshReport>;
+}
+
+const LOOPBACK = /^(127\.|::1$|::ffff:127\.)/;
+
+/** The refresh endpoint changes server state, so only local peers may call it. */
+export function isLoopback(req: IncomingMessage): boolean {
+	return LOOPBACK.test(req.socket.remoteAddress ?? "");
 }
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -76,12 +98,27 @@ async function requestSnapshot(
 }
 
 export async function startServer(options: ServerOptions): Promise<RunningServer> {
-	const assets = await loadAssets(options.clientDir);
+	const state: ServerState = {
+		assets: await loadAssets(options.clientDir),
+		startedAt: Date.now(),
+		reloads: 0,
+		refresh: async () => {
+			// Hub caches first (policy is re-resolved for live sessions); only then
+			// swap assets, so a bad config leaves the running daemon as it was.
+			const result = await options.hub.reload();
+			state.assets = await loadAssets(options.clientDir);
+			state.reloads += 1;
+			options.log(
+				`soft refresh: assets, config (${result.policy} session(s)), index (${result.sessions} session(s)), commands`,
+			);
+			return { reloaded: ["assets", "config", "index", "commands"], reloads: state.reloads };
+		},
+	};
 	const { hub, log } = options;
 	const wss = new WebSocketServer({ noServer: true });
 
 	const server = createServer((req, res) => {
-		void handleHttp(req, res, hub, assets, log, options);
+		void handleHttp(req, res, hub, state, log, options);
 	});
 
 	server.on("upgrade", (req, socket, head) => {
@@ -104,6 +141,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
 	const port = typeof address === "object" && address ? address.port : options.port;
 	return {
 		url: `http://${options.host}:${port}/`,
+		refresh: state.refresh,
 		close: async () => {
 			for (const client of wss.clients) client.close();
 			wss.close();
@@ -116,7 +154,7 @@ async function handleHttp(
 	req: IncomingMessage,
 	res: ServerResponse,
 	hub: Hub,
-	assets: Map<string, Buffer>,
+	state: ServerState,
 	log: (message: string) => void,
 	options: ServerOptions,
 ): Promise<void> {
@@ -128,7 +166,26 @@ async function handleHttp(
 
 	try {
 		if (req.method === "GET" && url.pathname === "/health") {
-			send(200, JSON.stringify({ ok: true, wire: WIRE_VERSION }));
+			send(
+				200,
+				JSON.stringify({
+					ok: true,
+					wire: WIRE_VERSION,
+					pid: process.pid,
+					startedAt: state.startedAt,
+					reloads: state.reloads,
+				}),
+			);
+			return;
+		}
+		if (req.method === "POST" && url.pathname === "/api/refresh") {
+			if (!isLoopback(req)) {
+				log(`refresh refused from non-loopback peer ${req.socket.remoteAddress ?? "?"}`);
+				send(403, JSON.stringify({ error: "refresh is loopback-only" }));
+				return;
+			}
+			const report = await state.refresh();
+			send(200, JSON.stringify({ ok: true, ...report }));
 			return;
 		}
 		if (req.method === "GET" && url.pathname === "/api/info") {
@@ -155,7 +212,7 @@ async function handleHttp(
 
 		const assetPath = url.pathname === "/" ? "/index.html" : url.pathname;
 		const normalized = normalize(assetPath).replace(/^(\.\.[/\\])+/, "");
-		const asset = options.dev ? await readAsset(options.clientDir, normalized) : assets.get(normalized);
+		const asset = options.dev ? await readAsset(options.clientDir, normalized) : state.assets.get(normalized);
 		if (!asset) {
 			send(404, JSON.stringify({ error: "not found" }));
 			return;

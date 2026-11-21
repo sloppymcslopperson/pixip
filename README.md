@@ -79,11 +79,40 @@ do in the TUI.
 - reconnect with backoff, durable entry-cursor resume and a stable pixip logical
   session id per session, so a dropped phone misses no entries;
 - sessions that were never prompted still list after detach (session index);
+- daemon lifecycle: `pixip start|stop|status|logs|refresh|restart` with pid,
+  state and log under `--data-dir`; soft refresh re-reads assets, command policy
+  and the session index without touching live children, and a `reload` action in
+  the header does the same from the phone;
+- `restart --when-idle` as the safe self-update, with sessions surviving in their
+  JSONL;
 - test isolation via `--data-dir`.
 
 TUI command parity is the current focus (developing pixip inside pixip); see
 [`docs/parity.md`](docs/parity.md) for the command-by-command coverage map and the
 tickets that own each gap.
+
+## Running as a daemon
+
+Bare `pixip` still serves in the foreground; the CLI manages a detached process:
+
+```bash
+pixip start --data-dir ./tmp/dev          # prints the URL, writes pid/state/log
+pixip status [--json]                     # non-zero when not running
+pixip logs [-f] [--lines 200]             # tails <data-dir>/pixip.log
+pixip refresh                             # soft: assets, policy, session index
+pixip restart [--force] [--when-idle]     # replace the process, JSONL survives
+pixip stop
+```
+
+`--data-dir` owns everything (`pixip.pid`, `pixip.state.json`, `pixip.log`,
+`sessions/`), so parallel instances on another `--port`/`--data-dir` never
+collide. One process owns a data dir at a time: the bare foreground command
+refuses to start when a daemon already owns it. Soft refresh (`pixip refresh`, `SIGHUP`, or the header's `reload`) keeps
+children and sockets, and its endpoint is loopback-only because the UI has no
+auth. Hard restart refuses while a session is busy unless `--force`;
+`--when-idle` waits up to `--timeout` seconds (default 300, exit 2) and is the
+safe way to pick up hub changes from inside pixip. The phone reconnects with
+backoff and its durable cursor, and sessions reattach from their JSONL.
 
 ## Not yet
 
@@ -92,7 +121,6 @@ tickets that own each gap.
   `85-theme-tokens`);
 - built-in slash handlers (`02-builtin-commands` is next), the command menu,
   queue display and branch/session commands (tracked in `docs/parity.md`);
-- daemon lifecycle and self-refresh (`01-daemon-refresh`);
 - worktree creation, image input, input history and `@file` completion;
 - virtualised transcript for very long sessions;
 - auth of any kind (bind loopback, or a private VPN interface — same posture as
@@ -119,6 +147,7 @@ bin/pixip.ts        supervisor entry: flags, data dir, signals
 src/rpc.ts          `pi --mode rpc` peer: LF framing, id correlation, raw records
 src/hub.ts          session registry, spawn/attach/stop, idle policy, disk scan
 src/commands.ts     per-session command policy: read, validate, merge, serve
+src/daemon.ts       pid/state/log, detach, health, soft refresh, restart decision
 src/wire.ts         hub <-> browser frames (v1)
 src/server.ts       http + ws, static client
 src/client/         index.html, style.css, app.js, render.js and commands.js

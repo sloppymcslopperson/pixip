@@ -15,7 +15,7 @@ to the model).
 | Order | Ticket | What it unlocks |
 |---|---|---|
 | 1 | `00-prefix-commands` | done: `/`, `!`, `!!` classification, bash, command policy, prompt/steer dispatch |
-| 2 | `01-daemon-refresh` | run pixip as a background daemon; soft reload and `--when-idle` restart so the agent can update pixip mid-session |
+| 2 | `01-daemon-refresh` | done: run pixip as a background daemon; soft reload and `--when-idle` restart so the agent can update pixip mid-session |
 | 3 | `02-builtin-commands` | `/compact`, `/name`, `/session`, `/copy`, `/model`, `/thinking`, `/new`, `/resume`, `/quit` |
 | 4 | `06-command-menu` | `/` suggestion menu and the status line below the composer |
 | 5 | `07-queue-display` | visible steering/follow-up queue with clear/restore |
@@ -50,7 +50,7 @@ already done or deliberately deferred.
 | `/share` | upload and return a viewer link | TUI-only |
 | `/trust` | save a project trust decision | TUI-only |
 | `/mcp` | MCP server management | TUI-only |
-| `/reload` | reload Pi resources | TUI-only (pixip's daemon soft refresh reloads its own assets/config/index, not Pi's resources) |
+| `/reload` | reload Pi resources | TUI-only (the header `reload`/`pixip refresh` soft-refreshes pixip's assets/config/index, not Pi's resources) |
 | `/hotkeys` | keybinding help | TUI-only (web keyboard is different) |
 | `/changelog` | changelog viewer | TUI-only |
 | `/quit` | quit Pi | `02-builtin-commands` (soft quit: detach + session list) |
@@ -91,7 +91,7 @@ already done or deliberately deferred.
 - durable entry-cursor reconnect, so a phone that drops mid-turn misses nothing
   (`04-snapshot-live-cursor`);
 - index-only sessions keep their name and listing after detach (`03`);
-- daemon lifecycle + soft refresh (`01-daemon-refresh`, planned);
+- daemon lifecycle + soft refresh (`01-daemon-refresh`, done);
 - per-project command policy (below).
 
 ## Command policy

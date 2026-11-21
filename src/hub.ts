@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 
 import { RpcChild } from "./rpc.ts";
 import { resolveSessionPolicy, type CommandLayer } from "./commands.ts";
-import { frameError, frameEvent, frameFooter, frameModels, frameSessions, frameSnapshot, frameStatus } from "./wire.ts";
+import { frameError, frameEvent, frameFooter, frameModels, framePolicy, frameSessions, frameSnapshot, frameStatus } from "./wire.ts";
 import type { BashResult, CommandPolicy, FooterData, ModelSummary, SessionInfo, SessionState } from "./wire.ts";
 
 const run = promisify(execFile);
@@ -425,6 +425,43 @@ export class Hub {
 		return this.require(id).policy ?? { allow: [], deny: [], bash: true };
 	}
 
+	/**
+	 * Soft refresh (`pixip refresh`, SIGHUP, `POST /api/refresh`): re-read the
+	 * session index, re-resolve the command policy for every live session and
+	 * re-send it, then refresh the list sockets. Children, sockets and in-flight
+	 * turns are untouched.
+	 *
+	 * Two-phase on purpose: if any session's config is malformed, the refresh fails
+	 * before a single policy is swapped, so a bad edit cannot half-apply.
+	 */
+	async reload(): Promise<{ sessions: number; policy: number }> {
+		const dataDir = this.options.dataDir ?? dirname(this.options.sessionsDir);
+		const updates: Array<{ live: LiveSession; policy: CommandPolicy }> = [];
+		for (const [id, live] of this.live) {
+			if (id === SYMBOL_PENDING) continue;
+			const policy = await resolveSessionPolicy({
+				dataDir,
+				cwd: live.info.cwd,
+				cli: this.options.cliCommands,
+				log: this.options.log,
+			});
+			updates.push({ live, policy });
+		}
+
+		// The index file and the header cache are both re-read; JSONL mtimes keep
+		// the second read cheap.
+		this.index = undefined;
+		this.files.clear();
+		const sessions = await this.list();
+
+		for (const update of updates) {
+			update.live.policy = update.policy;
+			this.broadcast(update.live, framePolicy(update.policy));
+		}
+		this.broadcastList(sessions);
+		return { sessions: sessions.length, policy: updates.length };
+	}
+
 	async abort(id: string): Promise<void> {
 		const live = this.require(id);
 		await live.proc.command({ type: "abort" });
@@ -816,6 +853,19 @@ export class Hub {
 				} catch {
 					this.watchers.delete(watcher);
 				}
+			}
+		}
+	}
+
+	/** Fresh `sessions` frame to the list sockets after a soft refresh. */
+	private broadcastList(infos: SessionInfo[]): void {
+		if (this.watchers.size === 0) return;
+		const frame = frameSessions(infos);
+		for (const watcher of this.watchers) {
+			try {
+				watcher(frame);
+			} catch {
+				this.watchers.delete(watcher);
 			}
 		}
 	}

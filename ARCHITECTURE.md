@@ -103,8 +103,9 @@ Client → hub:
 | `ui` | `id`, `value` \| `confirmed` \| `cancelled` | `extension_ui_response` |
 
 REST is only for discovery and process verbs: `GET /api/sessions`,
-`POST /api/sessions`, `POST /api/sessions/:id/stop`, `GET /api/info`, `GET /health`.
-Streaming never uses HTTP requests.
+`POST /api/sessions`, `POST /api/sessions/:id/stop`, `GET /api/info`, `GET /health`
+(`pid`, `startedAt`, `reloads`) and `POST /api/refresh` (loopback-only soft
+refresh). Streaming never uses HTTP requests.
 
 ## Status line and session controls
 
@@ -124,6 +125,38 @@ Model and thinking are plain RPC passthroughs (`get_available_models`,
 `set_model`, `get_available_thinking_levels`, `set_thinking_level`); the footer is
 the one place that shows and changes them. `thinking_level_changed` events keep it
 in sync when the change happens elsewhere.
+
+## Daemon lifecycle and refresh
+
+`bin/pixip.ts` serves in the foreground by default; `start` spawns that same
+entry detached with stdio to `<data-dir>/pixip.log` and polls `/health` until it
+answers. One daemon per data dir: `pixip.pid` holds the pid, `pixip.state.json`
+holds `{pid, host, port, url, startedAt, dataDir, args}` (args so `restart`
+reproduces the configuration). `status`, `stop` and `refresh` read those files; a
+dead pid is stale and gets cleaned rather than reported.
+
+Soft refresh (`pixip refresh`, `SIGHUP`, `POST /api/refresh`) is the default and
+must never disturb a turn:
+
+1. re-resolve the command policy for every live session — two-phase, so a
+   malformed file fails the refresh before any policy is swapped;
+2. re-read `sessions.json` and drop the header cache;
+3. swap the client asset map;
+4. push the new `policy` frames and a fresh `sessions` frame to connected
+   sockets.
+
+Children and websockets are untouched; `/health` exposes `startedAt` and a
+`reloads` counter so the CLI or the agent can verify it happened. The endpoint is
+loopback-only (the UI has no auth) and answers
+`{reloaded: ["assets", "config", "index", "commands"], reloads}`; the catalog is a
+client asset, so `commands` rides on the asset re-read.
+
+A hard restart is explicit: `pixip restart` refuses while a session is busy
+unless `--force`, or waits for every session to be idle with `--when-idle`
+(bounded by `--timeout`, default 300 s, exit 2 on timeout). The CLI stops the old
+process (SIGTERM, then SIGKILL) and spawns the same serve args. Nothing is lost
+that the JSONL does not already hold, and the client reconnects with backoff and
+its durable cursor.
 
 ## Composer commands, `!`/`!!` and policy
 
