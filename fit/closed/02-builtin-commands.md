@@ -1,6 +1,7 @@
 ---
 grilled: true
 leg: tui-parity-1
+commit: "527b3a4"
 ---
 
 pixip owns the Pi built-in slash commands that the RPC surface can drive, so `/compact`, `/name`, `/session`, `/copy`, `/model`, `/thinking`, `/new`, `/resume` and `/quit` work from the composer like they do in the TUI. Handlers consume the catalog, policy and classifier from `00-prefix-commands`; this ticket only adds the behaviour behind those names.
@@ -50,3 +51,38 @@ Slice 3 of the TUI-parity leg for dogfooding: a pixip session has to be manageab
 - `/session` renders its meta block in the existing bottom sheet (`sheet()`), not
   in the transcript: it is local UI, scrolls nowhere, and adds nothing to model
   context. Same for the no-argument `/name` readout (toast stays as decided).
+
+### Closed (2026-11-21)
+
+Implemented and verified:
+
+- `/compact [instructions]` -> RPC `compact` (no response timeout); on
+  `compaction_end` the client sends `resnapshot` and the hub answers a full
+  snapshot with `replace: true`, so windows loaded before the compaction are
+  dropped and the shrunken context is what is shown.
+- `/name` toasts the current name; `/name foo` calls `set_session_name` and the
+  header follows the status frame.
+- `/session` opens the meta sheet (id, logical id, name, file, message count,
+  model/thinking, tokens, cost, context) from data the hub already sends; no RPC.
+- `/copy` fetches Pi's `get_last_assistant_text`, writes it with
+  `navigator.clipboard`, and falls back to a sheet with the text and a copy
+  button. Deviation from the test sketch: this uses the documented RPC instead of
+  extracting from `state.entries`, because live messages never enter the client's
+  entry window and extraction would copy a stale message. The wire test covers
+  the text; pure tests cover `/session` and the resolvers.
+- `/model` / `/thinking` open the existing sheets with no argument, or resolve
+  the argument server-side (exact provider/id, exact id, unique suffix; exact
+  level, unique prefix) and toast unknown/ambiguous answers with the matches.
+- `/new` calls `new_session` in the same child: the hub mutates the live session
+  in place (the event closure keeps working), moves it to the new Pi id, appends
+  the id to the index `piIds`, and sends `opened` with `rekey` to every socket;
+  each tab then requests a replacement snapshot. `/resume` returns to the list.
+- `/quit` sends `stop` (soft quit: detach) and returns to the list once the
+  status frame says `stopped`, with a short timer as the fallback.
+- Handlers stay behind the `00` classifier, so the per-session policy and the
+  TUI-only notices still apply unchanged.
+
+Verification: browser smoke with headless Chromium at 390 and 1280 (session
+sheet, rename, model/thinking, copy fallback sheet, compaction resnapshot,
+`/new` URL re-key + cleared transcript, `/resume`, `/quit` -> stopped + list; no
+console or page errors), and `npm run check` green with 121 tests.
