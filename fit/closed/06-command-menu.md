@@ -1,6 +1,7 @@
 ---
 grilled: true
 leg: tui-parity-1
+commit: "01426d7143fcd22518bcdbf8db5c23901486dd13"
 ---
 
 Typing `/` opens a filtered command list above the composer, and the status line moves below the input so the menu owns the space above the text field. This is the interaction half of the command surface from `00`; it shows built-ins, extension commands, templates and skills, and honours the per-session policy.
@@ -39,3 +40,10 @@ Slice 4 of the TUI-parity leg: the owner cannot remember every command (and exte
 
 - Keep the composer usable with the physical keyboard on desktop and the on-screen keyboard on phones; the menu must not cover the input.
 - The footer move is a layout change only; formatting stays in `footer.js`.
+
+### Verified (2026-11-21)
+
+- `npm run check` green (137 tests): pure filter/order/command-position/policy tests in `test/commands.test.js`, and an integration test that `get_commands` reaches the client on a `commands` frame exactly once per attach.
+- Menu: opens only on a bare `/name`, prefix-first then alphabetical, static catalog + live extension/prompt/skill commands, denied rows removed, TUI-only rows dimmed with a hint and their local notice on select; `↑`/`↓`, `Enter`/`Tab`, `Esc`, tap, blur.
+- Layout: `#dock` holds menu → composer → footer, sticky and safe-area aware; the list view hides the dock.
+- Screenshot gap: this box has no Chromium, so `tools/shot.mjs` at 390/1280 (menu open, footer below the input) is still the owner's step.
