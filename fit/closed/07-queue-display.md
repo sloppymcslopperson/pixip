@@ -1,6 +1,7 @@
 ---
 grilled: true
 leg: tui-parity-1
+commit: "95b1f6d1ba30ad925b84076c54de74ba33b12298"
 ---
 
 Send-while-busy is silent today: the composer queues a steer but the transcript shows nothing. Mirror the TUI's pending queue as chips above the composer, fed by the `queue_update` event, with a clear action that restores the queued text.
@@ -37,3 +38,10 @@ Slice 5 of the TUI-parity leg: dogfooding pixip means steering a running agent o
 
 - `queue_update` carries the complete current queue on every change; replace state rather than appending.
 - Do not add follow-up sending in this slice (plain text keeps steering while busy).
+
+### Verified (2026-11-21)
+
+- `npm run check` green (144 tests): pure replace/count/restore tests in `test/queue.test.js`, plus an integration test where a steer emits `queue_update`, `clear_queue` returns both lists, and a fresh empty `queue_update` clears the chips.
+- Chips render steering before follow-up with a `N queued` label; long text truncates and expands on tap; the only action is the X, which restores texts into the composer (joined with newlines, appended to a draft, focused, not sent) with a toast.
+- The optimistic user echo is dropped when `queue_update` reports queued text, so the chips are the single source of pending state.
+- Screenshot gap: no Chromium on this box, so `tools/shot.mjs` at 390/1280 (chips visible + cleared) is still the owner's step.
