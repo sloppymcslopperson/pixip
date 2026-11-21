@@ -93,6 +93,12 @@ main { flex: 1; min-height: 0; }
 	gap: 10px;
 }
 
+/* Transcript children are flex items: without this they shrink when the log
+   overflows, collapsing tool cards to their 2px borders while the summary
+   overflows invisibly. */
+#log > * { flex: 0 0 auto; }
+#list > * { flex: 0 0 auto; }
+
 /* ---- transcript blocks ---- */
 .block { border-left: 2px solid transparent; padding-left: 10px; }
 .block .who {
