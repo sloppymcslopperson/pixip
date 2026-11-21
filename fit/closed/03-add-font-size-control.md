@@ -1,6 +1,7 @@
 ---
 grilled: true
 leg: dogfooding-test
+commit: "6dcfe1af0b67a8c0c246489960c680844173cfa9"
 ---
 
 Add a transcript text-size control: a compact `A−`/`A+` pair in the header with a 50–150 % range, persisted per device, scaling only the transcript so the composer and the rest of the chrome stay fixed. This is the first ticket pixip is meant to work on itself, as a test of the dogfooding setup.
@@ -45,3 +46,14 @@ Readability/width trade-off on phone and desktop: shrink the transcript to fit m
 - Tool cards keep px padding/borders and scale only their text; check markdown tables/code blocks at 50 % and 150 % for overflow.
 - Buttons stay 16 px themselves so 50 % does not make the control too small to tap.
 - `aria-label` includes the current percentage; visible focus ring; long-press must not trigger a click as well.
+
+### Result
+
+Implemented as grilled. `transcriptScale.js` holds the steps, clamp/parse, step
+and label helpers; `app.js` applies the CSS variable, wire buttons, long-press
+reset and `Ctrl/Cmd` shortcuts while preserving the scroll distance;
+`style.css` scales `#log` with `calc(1rem * var(--transcript-scale))` and moves
+transcript text to `em`, keeping chrome, padding and safe areas in px; the header
+gets the `A−`/`A+` group and a distinct, 16 px-separated `stop`. `npm run check`
+is green (128 tests, including 7 new pure tests). No Chromium on the work box, so
+`tools/shot.mjs` at 360/390/1280 with 50/100/150 % remains owner-run.
