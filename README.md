@@ -86,7 +86,10 @@ do in the TUI.
   device-local (`localStorage`), scaling only the transcript so the composer and
   the rest of the chrome stay fixed (long-press resets, `Ctrl/Cmd` `-`/`+`/`0`);
 - dashboard settings sheet from the header gear, with a device-local toggle for
-  keeping hot/warm and newest sessions visible in collapsed groups;
+  keeping hot/warm and newest sessions visible in collapsed groups, plus
+  `archived` and `trash` views (restore or permanently delete);
+- session archive/delete from each row's actions menu, with a short delete undo,
+  and an `archive inactive` action for every stopped session;
 - extension dialogs (`select`/`confirm`/`input`/`editor`) rendered as a sheet and
   answered from the phone; `notify` as a toast;
 - reconnect with backoff, durable entry-cursor resume and a stable pixip logical

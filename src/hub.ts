@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, open, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { copyFile, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { RpcChild } from "./rpc.ts";
@@ -45,6 +45,8 @@ interface HubOptions {
 	promptTimeoutMs?: number;
 	/** Extra environment for every child; `process.env` is inherited first. */
 	env?: Record<string, string | undefined>;
+	/** How long deleted sessions stay restorable in the trash. Default 60 s. */
+	trashGraceMs?: number;
 	/** Model for automatic session labels (`provider/id`); falls back to a cheap default. */
 	titleModel?: string;
 	/** One-shot title call timeout. Default 15 s. */
@@ -79,6 +81,22 @@ export interface SessionIndexRecord {
 	createdAt: string;
 }
 
+/**
+ * A session in the archive or trash after its JSONL files left the active store.
+ * `files` remembers where each file came from so restore can put it back.
+ */
+export interface StoredSessionRecord extends SessionIndexRecord {
+	storedAt: string;
+	files: Array<{ original: string; stored: string }>;
+}
+
+/** Archive/trash row for the settings sheets. */
+export interface StoredSessionInfo extends SessionInfo {
+	archivedAt?: string;
+	deletedAt?: string;
+	expiresAt?: number;
+}
+
 interface SessionHeader {
 	id: string;
 	cwd: string;
@@ -103,6 +121,13 @@ interface LiveSession {
 	/** The automatic title has already been attempted for this session. */
 	titleAttempted?: boolean;
 	nameSource?: NameSource;
+}
+
+/** A resolved logical session plus the JSONL files that belong to it. */
+interface SessionTarget {
+	info: SessionInfo;
+	record: SessionIndexRecord;
+	files: string[];
 }
 
 /**
@@ -139,9 +164,19 @@ export class Hub {
 	private indexWrite: Promise<void> = Promise.resolve();
 	/** Last HTML export per Pi session id, so a download need not export twice. */
 	private readonly exported = new Map<string, string>();
+	private readonly archiveRoot: string;
+	private readonly trashRoot: string;
+	private readonly trashGraceMs: number;
+	/** Startup cleanup runs once; trash operations wait for it. */
+	private readonly startupTrash: Promise<void>;
 
 	constructor(options: HubOptions) {
 		this.options = options;
+		const dataDir = options.dataDir ?? dirname(options.sessionsDir);
+		this.archiveRoot = join(dataDir, "archive");
+		this.trashRoot = join(dataDir, "trash");
+		this.trashGraceMs = options.trashGraceMs ?? 60_000;
+		this.startupTrash = this.purgeTrashOnStart();
 	}
 
 	// ---------------------------------------------------------------- listing
@@ -245,6 +280,82 @@ export class Hub {
 		this.emitStatus(live);
 		this.broadcast(live, frameStatus(live.info));
 		return live.info;
+	}
+
+	/**
+	 * Archive one session: detach an idle child, move every JSONL of the logical
+	 * session under `<data-dir>/archive`, drop the index record. Recoverable from
+	 * the settings archive sheet; busy/starting sessions are refused.
+	 */
+	async archive(id: string): Promise<SessionInfo> {
+		const { info } = await this.storeSession(id, this.archiveRoot);
+		await this.broadcastSessions();
+		return info;
+	}
+
+	/**
+	 * Delete one session into `<data-dir>/trash`, with a short undo window before
+	 * the files are purged. The same safety rules as archive apply.
+	 */
+	async deleteSession(id: string): Promise<{ info: SessionInfo; token: string; expiresAt: number }> {
+		await this.startupTrash;
+		const { info, record, dir } = await this.storeSession(id, this.trashRoot);
+		const expiresAt = Date.now() + this.trashGraceMs;
+		setTimeout(() => {
+			void rm(dir, { recursive: true, force: true }).catch((error: unknown) => {
+				this.options.log(`trash purge failed for ${dir}: ${(error as Error).message}`);
+			});
+		}, this.trashGraceMs).unref();
+		await this.broadcastSessions();
+		return { info, token: record.logicalId, expiresAt };
+	}
+
+	/** Archive every stopped session, skipping failures so one bad file cannot block the batch. */
+	async archiveInactive(): Promise<{ archived: SessionInfo[]; failed: Array<{ id: string; error: string }> }> {
+		const sessions = await this.list();
+		const archived: SessionInfo[] = [];
+		const failed: Array<{ id: string; error: string }> = [];
+		for (const session of sessions) {
+			if (session.state !== "stopped") continue;
+			try {
+				archived.push((await this.storeSession(session.id, this.archiveRoot)).info);
+			} catch (error) {
+				failed.push({ id: session.id, error: (error as Error).message });
+			}
+		}
+		await this.broadcastSessions();
+		return { archived, failed };
+	}
+
+	async listArchived(): Promise<StoredSessionInfo[]> {
+		return await this.listStored(this.archiveRoot, "archive");
+	}
+
+	async listTrash(): Promise<StoredSessionInfo[]> {
+		await this.startupTrash;
+		return await this.listStored(this.trashRoot, "trash");
+	}
+
+	async restoreArchived(id: string): Promise<SessionInfo> {
+		return await this.restoreStored(this.archiveRoot, id);
+	}
+
+	async restoreTrash(id: string): Promise<SessionInfo> {
+		await this.startupTrash;
+		return await this.restoreStored(this.trashRoot, id);
+	}
+
+	async purgeArchived(id: string): Promise<void> {
+		const found = await this.findStored(this.archiveRoot, id);
+		if (!found) throw new Error(`unknown archived session ${id}`);
+		await rm(found.dir, { recursive: true, force: true });
+	}
+
+	async purgeTrash(id: string): Promise<void> {
+		await this.startupTrash;
+		const found = await this.findStored(this.trashRoot, id);
+		if (!found) throw new Error(`unknown deleted session ${id}`);
+		await rm(found.dir, { recursive: true, force: true });
 	}
 
 	async shutdown(): Promise<void> {
@@ -1218,6 +1329,266 @@ export class Hub {
 		});
 	}
 
+	/** Archive/trash one session; shared by single, bulk and delete paths. */
+	private async storeSession(id: string, root: string): Promise<{ info: SessionInfo; record: SessionIndexRecord; dir: string }> {
+		const live = this.findLive(id);
+		if (live) {
+			const state = live.info.state;
+			if (state === "busy" || state === "starting") throw new Error(`session ${id} is ${state}; stop it first`);
+			await this.stop(live.info.id);
+		}
+		const target = await this.resolveTarget(id);
+		const dir = join(root, `${safeName(target.record.logicalId)}-${randomUUID().slice(0, 8)}`);
+		const files = await this.moveSessionFiles(target.files, dir);
+		const record: StoredSessionRecord = {
+			...target.record,
+			storedAt: new Date().toISOString(),
+			files,
+		};
+		try {
+			await writeFile(join(dir, "meta.json"), `${JSON.stringify(record, null, 2)}\n`);
+		} catch (error) {
+			await this.rollbackFiles(files, dir);
+			throw error;
+		}
+		await this.removeRecord(target.record);
+		this.files.clear();
+		for (const piId of target.record.piIds) this.exported.delete(piId);
+		return {
+			info: { ...target.info, state: "stopped", sessionFile: target.record.sessionFile },
+			record: target.record,
+			dir,
+		};
+	}
+
+	private findLive(id: string): LiveSession | undefined {
+		const direct = this.live.get(id);
+		if (direct) return direct;
+		for (const live of this.live.values()) {
+			if (live.info.logicalId === id) return live;
+		}
+		return undefined;
+	}
+
+	/** Find the logical session by Pi id or logical id, and every JSONL it owns. */
+	private async resolveTarget(id: string): Promise<SessionTarget> {
+		const infos = await this.list();
+		const info = infos.find((session) => session.id === id || session.logicalId === id);
+		const records = await this.readIndex();
+		let record = records.find((item) => item.logicalId === id || item.piId === id || item.piIds.includes(id));
+		if (!record && info) {
+			record = records.find(
+				(item) =>
+					item.logicalId === info.logicalId ||
+					item.piId === info.id ||
+					item.piIds.includes(info.id),
+			);
+		}
+		if (!record) {
+			if (!info) throw new Error(`unknown session ${id}`);
+			record = {
+				logicalId: info.logicalId ?? info.id,
+				piId: info.id,
+				piIds: [info.id],
+				cwd: info.cwd,
+				name: info.name,
+				sessionFile: info.sessionFile,
+				createdAt: new Date(info.lastActivity || Date.now()).toISOString(),
+			};
+		}
+		const piIds = [...new Set([...record.piIds, record.piId, ...(info ? [info.id] : [])])];
+		const scanned = await this.scan();
+		const paths = new Set<string>();
+		for (const entry of scanned) {
+			if (piIds.includes(entry.header.id)) paths.add(entry.path);
+		}
+		if (record.sessionFile) paths.add(record.sessionFile);
+		if (info?.sessionFile) paths.add(info.sessionFile);
+		const files: string[] = [];
+		for (const path of paths) {
+			if (await pathExists(path)) files.push(path);
+		}
+		const resolved: SessionInfo = info ?? {
+			id: record.piId,
+			logicalId: record.logicalId,
+			cwd: record.cwd,
+			name: record.name,
+			state: "stopped",
+			sessionFile: record.sessionFile,
+			lastActivity: Date.parse(record.createdAt) || 0,
+		};
+		return { info: resolved, record, files };
+	}
+
+	private async removeRecord(record: SessionIndexRecord): Promise<void> {
+		const ids = new Set([...record.piIds, record.piId]);
+		await this.mutateIndex((records) =>
+			records.filter(
+				(existing) =>
+					existing.logicalId !== record.logicalId &&
+					!ids.has(existing.piId) &&
+					!existing.piIds.some((id) => ids.has(id)),
+			),
+		);
+	}
+
+	private async putRecord(record: SessionIndexRecord): Promise<void> {
+		const ids = new Set([...record.piIds, record.piId]);
+		await this.mutateIndex((records) => [
+			...records.filter(
+				(existing) =>
+					existing.logicalId !== record.logicalId &&
+					!ids.has(existing.piId) &&
+					!existing.piIds.some((id) => ids.has(id)),
+			),
+			record,
+		]);
+	}
+
+	private async moveSessionFiles(files: string[], dir: string): Promise<Array<{ original: string; stored: string }>> {
+		await mkdir(dir, { recursive: true });
+		const moved: Array<{ original: string; stored: string }> = [];
+		try {
+			for (const original of files) {
+				const base = safeName(basename(original));
+				let stored = base;
+				for (let suffix = 1; await pathExists(join(dir, stored)); suffix += 1) {
+					stored = base.endsWith(".jsonl") ? `${base.slice(0, -".jsonl".length)}-${suffix}.jsonl` : `${base}-${suffix}`;
+				}
+				await moveFile(original, join(dir, stored));
+				moved.push({ original, stored });
+			}
+			return moved;
+		} catch (error) {
+			await this.rollbackFiles(moved, dir);
+			throw error;
+		}
+	}
+
+	private async rollbackFiles(moved: Array<{ original: string; stored: string }>, dir: string): Promise<void> {
+		for (const item of [...moved].reverse()) {
+			await moveFile(join(dir, item.stored), item.original).catch(() => {});
+		}
+		await rm(dir, { recursive: true, force: true }).catch(() => {});
+	}
+
+	private async restoreStored(root: string, id: string): Promise<SessionInfo> {
+		const found = await this.findStored(root, id);
+		if (!found) throw new Error(`unknown stored session ${id}`);
+		const { record, dir } = found;
+		const restored: SessionIndexRecord = {
+			logicalId: record.logicalId,
+			piId: record.piId,
+			piIds: [...record.piIds],
+			cwd: record.cwd,
+			name: record.name,
+			nameSource: record.nameSource,
+			sessionFile: record.sessionFile,
+			createdAt: record.createdAt,
+		};
+		const mapping = new Map<string, string>();
+		const moved: Array<{ stored: string; target: string }> = [];
+		try {
+			for (const file of record.files) {
+				const target = await uniquePath(file.original);
+				await moveFile(join(dir, file.stored), target);
+				mapping.set(file.original, target);
+				moved.push({ stored: file.stored, target });
+			}
+		} catch (error) {
+			for (const item of [...moved].reverse()) {
+				await moveFile(item.target, join(dir, item.stored)).catch(() => {});
+			}
+			throw error;
+		}
+		if (record.sessionFile) restored.sessionFile = mapping.get(record.sessionFile) ?? record.sessionFile;
+		if (!restored.sessionFile && record.files[0]) {
+			restored.sessionFile = mapping.get(record.files[0].original) ?? record.files[0].original;
+		}
+		await this.putRecord(restored);
+		await rm(dir, { recursive: true, force: true });
+		this.files.clear();
+		await this.broadcastSessions();
+		return {
+			id: restored.piId,
+			logicalId: restored.logicalId,
+			cwd: restored.cwd,
+			name: restored.name,
+			state: "stopped",
+			sessionFile: restored.sessionFile,
+			lastActivity: Date.now(),
+		};
+	}
+
+	private async listStored(root: string, kind: "archive" | "trash"): Promise<StoredSessionInfo[]> {
+		const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
+		const items: StoredSessionInfo[] = [];
+		for (const entry of entries) {
+			if (!entry.isDirectory()) continue;
+			const record = await this.readStoredRecord(join(root, entry.name));
+			if (record) items.push(storedInfo(record, kind, this.trashGraceMs));
+		}
+		items.sort((a, b) => b.lastActivity - a.lastActivity);
+		return items;
+	}
+
+	private async findStored(root: string, id: string): Promise<{ dir: string; record: StoredSessionRecord } | undefined> {
+		const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
+		for (const entry of entries) {
+			if (!entry.isDirectory()) continue;
+			const dir = join(root, entry.name);
+			const record = await this.readStoredRecord(dir);
+			if (!record) continue;
+			if (record.logicalId === id || record.piId === id || record.piIds.includes(id) || entry.name === id) {
+				return { dir, record };
+			}
+		}
+		return undefined;
+	}
+
+	private async readStoredRecord(dir: string): Promise<StoredSessionRecord | undefined> {
+		try {
+			const parsed = JSON.parse(await readFile(join(dir, "meta.json"), "utf8")) as Partial<StoredSessionRecord>;
+			if (typeof parsed.logicalId !== "string" || typeof parsed.piId !== "string" || typeof parsed.storedAt !== "string") return undefined;
+			const piIds = Array.isArray(parsed.piIds)
+				? parsed.piIds.filter((id): id is string => typeof id === "string")
+				: [];
+			const files = Array.isArray(parsed.files)
+				? parsed.files.filter(
+						(file): file is { original: string; stored: string } =>
+							typeof file?.original === "string" && typeof file?.stored === "string",
+					)
+				: [];
+			return {
+				logicalId: parsed.logicalId,
+				piId: parsed.piId,
+				piIds: piIds.includes(parsed.piId) ? piIds : [...piIds, parsed.piId],
+				cwd: typeof parsed.cwd === "string" ? parsed.cwd : this.options.sessionsDir,
+				name: typeof parsed.name === "string" ? parsed.name : undefined,
+				nameSource: parsed.nameSource === "auto" || parsed.nameSource === "manual" ? parsed.nameSource : undefined,
+				sessionFile: typeof parsed.sessionFile === "string" ? parsed.sessionFile : undefined,
+				createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : parsed.storedAt,
+				storedAt: parsed.storedAt,
+				files,
+			};
+		} catch {
+			return undefined;
+		}
+	}
+
+	private async purgeTrashOnStart(): Promise<void> {
+		const entries = await readdir(this.trashRoot, { withFileTypes: true }).catch(() => []);
+		await Promise.all(
+			entries
+				.filter((entry) => entry.isDirectory())
+				.map((entry) => rm(join(this.trashRoot, entry.name), { recursive: true, force: true }).catch(() => {})),
+		);
+	}
+
+	private async broadcastSessions(): Promise<void> {
+		this.broadcastList(await this.list());
+	}
+
 	/** Read-modify-write serialized behind `indexWrite`; atomic on disk. */
 	private mutateIndex(mutate: (records: SessionIndexRecord[]) => SessionIndexRecord[]): Promise<void> {
 		const run = async () => {
@@ -1438,6 +1809,49 @@ function normalizeRecord(raw: unknown, fallbackCwd: string): SessionIndexRecord[
 			createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
 		},
 	];
+}
+
+/** Archive/trash row shape for the settings sheets. */
+function storedInfo(record: StoredSessionRecord, kind: "archive" | "trash", graceMs: number): StoredSessionInfo {
+	const at = Date.parse(record.storedAt) || 0;
+	return {
+		id: record.piId,
+		logicalId: record.logicalId,
+		cwd: record.cwd,
+		name: record.name,
+		state: "stopped",
+		sessionFile: record.sessionFile,
+		lastActivity: at,
+		...(kind === "archive" ? { archivedAt: record.storedAt } : { deletedAt: record.storedAt, expiresAt: at + graceMs }),
+	};
+}
+
+/** A directory/file component that cannot escape its parent. */
+function safeName(value: string): string {
+	const cleaned = value.replace(/[^A-Za-z0-9._-]/g, "_").replace(/^\.+$/, "session");
+	return cleaned.slice(0, 120) || "session";
+}
+
+async function moveFile(from: string, to: string): Promise<void> {
+	await mkdir(dirname(to), { recursive: true });
+	try {
+		await rename(from, to);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "EXDEV") throw error;
+		await copyFile(from, to);
+		await unlink(from);
+	}
+}
+
+/** Restore target; a path that is occupied gets a `.restored-N` suffix. */
+async function uniquePath(path: string): Promise<string> {
+	let candidate = path;
+	const ext = path.endsWith(".jsonl") ? ".jsonl" : "";
+	const base = ext ? path.slice(0, -ext.length) : path;
+	for (let suffix = 1; await pathExists(candidate); suffix += 1) {
+		candidate = `${base}.restored-${suffix}${ext}`;
+	}
+	return candidate;
 }
 
 async function pathExists(path: string): Promise<boolean> {

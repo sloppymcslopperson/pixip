@@ -125,6 +125,10 @@ Client → hub:
 REST is only for discovery, process verbs and downloads: `GET /api/sessions`,
 `POST /api/sessions`, `GET /api/dirs?path=`, `POST /api/dirs`,
 `POST /api/sessions/:id/stop`,
+`POST /api/sessions/:id/archive`, `POST /api/sessions/archive-inactive`,
+`DELETE /api/sessions/:id`, `GET /api/archived`, `POST /api/archived/:id/restore`,
+`DELETE /api/archived/:id`, `GET /api/trash`, `POST /api/trash/:id/restore`,
+`DELETE /api/trash/:id`,
 `GET /api/sessions/:id/export.html` and `GET /api/sessions/:id/export.jsonl`
 (both `Content-Disposition: attachment`), `GET /api/info`, `GET /health`
 (`pid`, `startedAt`, `reloads`) and `POST /api/refresh` (loopback-only soft
@@ -144,6 +148,32 @@ case-insensitive alphabetical. `POST /api/dirs` creates one visible path
 segment under the current directory (`mkdir`, no `-p`) and rejects traversal,
 collisions and names starting with a dot. Paths are absolute or `~`-relative;
 relative input is resolved against home.
+
+## Archive, trash and session deletion
+
+Archive and delete are file moves, not in-memory flags: the active scan only
+looks at `<data-dir>/sessions`, so an archived session cannot reappear through a
+restart. One logical session owns every JSONL in its index `piIds`; moving it
+moves all of them plus its `sessions.json` record.
+
+- **archive** → `<data-dir>/archive/<logical-id>-<random>/`: the JSONL files and
+  a `meta.json` recording each file's original path. It stays until restored or
+  permanently deleted from the settings archive sheet.
+- **delete** → the same layout under `<data-dir>/trash`. The client confirms,
+  shows a ~10 s undo toast, and the hub purges the directory after 60 s
+  (`trashGraceMs`); startup empties any leftover trash from a previous process.
+- **restore** moves the files back to their original paths, adding
+  `.restored-N` only when a path is now occupied, then re-inserts the index
+  record. Identity, name and cwd are preserved.
+- **bulk archive** takes every stopped session across all groups and continues
+  on per-session failures. Busy/starting sessions are refused; idle ones are
+  stopped first for a single action. A live session that is archived or deleted
+  from another tab disappears from the `sessions` frame, and that tab returns to
+  the dashboard with a toast.
+
+The settings sheet reads the archive/trash metadata and offers restore and
+permanent delete. Nothing enters the transcript or the model context.
+
 ## Status line and session controls
 
 The footer mirrors Pi's own footer component

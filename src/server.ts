@@ -216,12 +216,68 @@ async function handleHttp(
 			send(200, JSON.stringify(await hub.list()));
 			return;
 		}
+		if (req.method === "GET" && url.pathname === "/api/archived") {
+			send(200, JSON.stringify(await hub.listArchived()));
+			return;
+		}
+		if (req.method === "GET" && url.pathname === "/api/trash") {
+			send(200, JSON.stringify(await hub.listTrash()));
+			return;
+		}
 		if (req.method === "POST" && url.pathname === "/api/sessions") {
 			const body = await readBody(req);
 			const parsed = JSON.parse(body || "{}") as { cwd?: string; name?: string };
 			const cwd = parsed.cwd ?? process.cwd();
 			const info = await hub.create(cwd, parsed.name);
 			send(200, JSON.stringify(info));
+			return;
+		}
+		if (req.method === "POST" && url.pathname === "/api/sessions/archive-inactive") {
+			const result = await hub.archiveInactive();
+			send(200, JSON.stringify({ ok: true, archived: result.archived.length, failed: result.failed, sessions: result.archived }));
+			return;
+		}
+		const archiveMatch = /^\/api\/sessions\/([^/]+)\/archive$/.exec(url.pathname);
+		if (req.method === "POST" && archiveMatch?.[1]) {
+			const info = await hub.archive(decodeURIComponent(archiveMatch[1]));
+			send(200, JSON.stringify({ ok: true, session: info }));
+			return;
+		}
+		const deleteMatch = /^\/api\/sessions\/([^/]+)$/.exec(url.pathname);
+		if (req.method === "DELETE" && deleteMatch?.[1]) {
+			const result = await hub.deleteSession(decodeURIComponent(deleteMatch[1]));
+			send(
+				200,
+				JSON.stringify({
+					ok: true,
+					session: result.info,
+					undo: { token: result.token, expiresAt: result.expiresAt },
+				}),
+			);
+			return;
+		}
+		const archivedMatch = /^\/api\/archived\/([^/]+)$/.exec(url.pathname);
+		if (req.method === "DELETE" && archivedMatch?.[1]) {
+			await hub.purgeArchived(decodeURIComponent(archivedMatch[1]));
+			send(200, JSON.stringify({ ok: true }));
+			return;
+		}
+		const archivedRestoreMatch = /^\/api\/archived\/([^/]+)\/restore$/.exec(url.pathname);
+		if (req.method === "POST" && archivedRestoreMatch?.[1]) {
+			const info = await hub.restoreArchived(decodeURIComponent(archivedRestoreMatch[1]));
+			send(200, JSON.stringify({ ok: true, session: info }));
+			return;
+		}
+		const trashRestoreMatch = /^\/api\/trash\/([^/]+)\/restore$/.exec(url.pathname);
+		if (req.method === "POST" && trashRestoreMatch?.[1]) {
+			const info = await hub.restoreTrash(decodeURIComponent(trashRestoreMatch[1]));
+			send(200, JSON.stringify({ ok: true, session: info }));
+			return;
+		}
+		const trashMatch = /^\/api\/trash\/([^/]+)$/.exec(url.pathname);
+		if (req.method === "DELETE" && trashMatch?.[1]) {
+			await hub.purgeTrash(decodeURIComponent(trashMatch[1]));
+			send(200, JSON.stringify({ ok: true }));
 			return;
 		}
 		const stopMatch = /^\/api\/sessions\/([^/]+)\/stop$/.exec(url.pathname);

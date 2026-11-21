@@ -257,6 +257,17 @@ function renderList(sessions, defaultCwd = state.defaultCwd, home = state.home) 
 	});
 	ui.list.append(form);
 
+	const inactive = state.sessions.filter((session) => session.state === "stopped");
+	if (inactive.length > 0) {
+		const bulk = document.createElement("button");
+		bulk.type = "button";
+		bulk.className = "bulk-archive";
+		bulk.textContent = `archive inactive (${inactive.length})`;
+		bulk.title = "Archive every stopped session on the dashboard";
+		bulk.addEventListener("click", () => void archiveInactive(inactive.length));
+		ui.list.append(bulk);
+	}
+
 	const groups = groupSessions(state.sessions);
 	if (groups.length === 0) {
 		const empty = document.createElement("div");
@@ -541,16 +552,114 @@ function renderGroup(group) {
 }
 
 function sessionRow(session) {
-	const row = document.createElement("button");
-	row.type = "button";
+	const row = document.createElement("div");
 	row.className = "row";
 	row.dataset.id = session.id;
+	const open = document.createElement("button");
+	open.type = "button";
+	open.className = "row-open";
 	const stateClass = escapeHtml(session.state);
-	row.innerHTML = `<div class="row-top"><span class="dot ${stateClass}"></span><span class="row-name">${escapeHtml(session.name ?? session.id.slice(0, 8))}</span><span class="row-state">${stateClass} · ${relativeTime(session.lastActivity)}</span></div>`;
-	row.addEventListener("click", () => {
+	open.innerHTML = `<div class="row-top"><span class="dot ${stateClass}"></span><span class="row-name">${escapeHtml(session.name ?? session.id.slice(0, 8))}</span><span class="row-state">${stateClass} · ${relativeTime(session.lastActivity)}</span></div>`;
+	open.addEventListener("click", () => {
 		location.hash = `s=${encodeURIComponent(session.id)}`;
 	});
+	const actions = document.createElement("button");
+	actions.type = "button";
+	actions.className = "row-actions";
+	actions.textContent = "⋯";
+	actions.title = "Session actions";
+	actions.setAttribute("aria-label", `Actions for ${session.name ?? session.id.slice(0, 8)}`);
+	actions.addEventListener("click", () => openSessionActions(session));
+	row.append(open, actions);
 	return row;
+}
+
+function openSessionActions(session) {
+	const label = session.name ?? session.id.slice(0, 8);
+	sheet(`session · ${label}`, [
+		["archive", () => confirmSessionAction("archive", session)],
+		["delete", () => confirmSessionAction("delete", session)],
+	]);
+}
+
+function confirmSessionAction(kind, session) {
+	const label = session.name ?? session.id.slice(0, 8);
+	const verb = kind === "archive" ? "archive" : "delete";
+	const message =
+		kind === "archive"
+			? `Hide “${label}” from the dashboard? You can restore it from settings › archived.`
+			: `Delete “${label}”? The JSONL files go to trash and stay undoable for a few seconds.`;
+	confirmSheet(verb, message, verb, () => {
+		closeSheet();
+		void (kind === "archive" ? archiveSession(session) : deleteSession(session));
+	});
+}
+
+function confirmSheet(title, message, confirmLabel, action) {
+	const target = ui.sheet;
+	target.hidden = false;
+	target.textContent = "";
+	const heading = document.createElement("div");
+	heading.className = "sheet-title";
+	heading.textContent = title;
+	const body = document.createElement("div");
+	body.className = "sheet-text";
+	body.textContent = message;
+	const actions = document.createElement("div");
+	actions.className = "sheet-actions";
+	const confirm = document.createElement("button");
+	confirm.textContent = confirmLabel;
+	confirm.addEventListener("click", action);
+	const cancel = document.createElement("button");
+	cancel.textContent = "cancel";
+	cancel.addEventListener("click", closeSheet);
+	actions.append(confirm, cancel);
+	target.append(heading, body, actions);
+}
+
+async function archiveSession(session) {
+	try {
+		await apiJson(`/api/sessions/${encodeURIComponent(session.id)}/archive`, { method: "POST" });
+		await refreshDashboard();
+		toast("archived");
+	} catch (error) {
+		toast(`archive failed: ${error.message}`);
+	}
+}
+
+async function deleteSession(session) {
+	try {
+		const result = await apiJson(`/api/sessions/${encodeURIComponent(session.id)}`, { method: "DELETE" });
+		await refreshDashboard();
+		const token = result?.undo?.token;
+		if (token) {
+			actionToast(`deleted ${session.name ?? session.id.slice(0, 8)}`, "undo", async () => {
+				try {
+					await apiJson(`/api/trash/${encodeURIComponent(token)}/restore`, { method: "POST" });
+					await refreshDashboard();
+					toast("restored");
+				} catch (error) {
+					toast(`restore failed: ${error.message}`);
+				}
+			}, 10_000);
+		} else {
+			toast("deleted");
+		}
+	} catch (error) {
+		toast(`delete failed: ${error.message}`);
+	}
+}
+
+async function archiveInactive(count) {
+	if (!window.confirm(`Archive ${count} inactive session${count === 1 ? "" : "s"}?`)) return;
+	try {
+		const result = await apiJson("/api/sessions/archive-inactive", { method: "POST" });
+		await refreshDashboard();
+		const failed = Array.isArray(result.failed) ? result.failed.length : 0;
+		toast(`archived ${result.archived ?? 0}${failed ? ` · ${failed} failed` : ""}`);
+	} catch (error) {
+		toast(`archive failed: ${error.message}`);
+	}
 }
 
 function readCollapsedGroups() {
@@ -581,7 +690,14 @@ function saveKeepActive() {
 	} catch {}
 }
 
-function openSettingsSheet() {
+async function openSettingsSheet() {
+	let archived = [];
+	let trash = [];
+	try {
+		[archived, trash] = await Promise.all([apiJson("/api/archived"), apiJson("/api/trash")]);
+	} catch {
+		// The settings toggles still work when the archive/trash lists fail.
+	}
 	const target = ui.sheet;
 	target.hidden = false;
 	target.textContent = "";
@@ -607,11 +723,109 @@ function openSettingsSheet() {
 	hint.textContent = "Hot = busy or starting · warm = idle. Off hides every row when a group is collapsed.";
 	const actions = document.createElement("div");
 	actions.className = "sheet-actions";
+	const archivedButton = document.createElement("button");
+	archivedButton.textContent = `archived (${Array.isArray(archived) ? archived.length : 0})`;
+	archivedButton.addEventListener("click", () => void showStoredSheet("archive"));
+	const trashButton = document.createElement("button");
+	trashButton.textContent = `trash (${Array.isArray(trash) ? trash.length : 0})`;
+	trashButton.addEventListener("click", () => void showStoredSheet("trash"));
 	const close = document.createElement("button");
 	close.textContent = "close";
 	close.addEventListener("click", closeSheet);
-	actions.append(close);
+	actions.append(archivedButton, trashButton, close);
 	target.append(heading, label, hint, actions);
+}
+
+async function showStoredSheet(kind) {
+	const archived = kind === "archive";
+	try {
+		const items = await apiJson(archived ? "/api/archived" : "/api/trash");
+		renderStoredSheet(kind, Array.isArray(items) ? items : []);
+	} catch (error) {
+		toast(`load failed: ${error.message}`);
+	}
+}
+
+function renderStoredSheet(kind, items) {
+	const archived = kind === "archive";
+	const target = ui.sheet;
+	target.hidden = false;
+	target.textContent = "";
+	const heading = document.createElement("div");
+	heading.className = "sheet-title";
+	heading.textContent = `${archived ? "archived" : "trash"} (${items.length})`;
+	const hint = document.createElement("div");
+	hint.className = "settings-hint";
+	hint.textContent = archived
+		? "Restore a session to the dashboard, or delete its files permanently."
+		: "Deleted sessions stay here briefly; undo from the toast or restore below.";
+	const list = document.createElement("div");
+	list.className = "stored-list";
+	if (items.length === 0) {
+		const empty = document.createElement("div");
+		empty.className = "settings-hint";
+		empty.textContent = archived ? "nothing archived" : "trash is empty";
+		list.append(empty);
+	}
+	for (const item of items) {
+		const row = document.createElement("div");
+		row.className = "stored-row";
+		const info = document.createElement("div");
+		info.className = "stored-info";
+		const name = document.createElement("div");
+		name.className = "stored-name";
+		name.textContent = item.name ?? String(item.id ?? "").slice(0, 8);
+		const meta = document.createElement("div");
+		meta.className = "stored-meta";
+		meta.textContent = `${groupLabel({ key: item.cwd, cwd: item.cwd }, state.home)} · ${relativeTime(item.lastActivity)}`;
+		info.append(name, meta);
+		const actions = document.createElement("div");
+		actions.className = "stored-actions";
+		const restore = document.createElement("button");
+		restore.textContent = "restore";
+		restore.addEventListener("click", () => void restoreStored(kind, item));
+		const remove = document.createElement("button");
+		remove.textContent = archived ? "delete" : "purge";
+		remove.addEventListener("click", () => void purgeStored(kind, item));
+		actions.append(restore, remove);
+		row.append(info, actions);
+		list.append(row);
+	}
+	const actions = document.createElement("div");
+	actions.className = "sheet-actions";
+	const back = document.createElement("button");
+	back.textContent = "settings";
+	back.addEventListener("click", () => void openSettingsSheet());
+	const close = document.createElement("button");
+	close.textContent = "close";
+	close.addEventListener("click", closeSheet);
+	actions.append(back, close);
+	target.append(heading, hint, list, actions);
+}
+
+async function restoreStored(kind, item) {
+	const id = item.logicalId ?? item.id;
+	try {
+		await apiJson(`/api/${kind === "archive" ? "archived" : "trash"}/${encodeURIComponent(id)}/restore`, { method: "POST" });
+		await refreshDashboard();
+		toast("restored");
+		await showStoredSheet(kind);
+	} catch (error) {
+		toast(`restore failed: ${error.message}`);
+	}
+}
+
+async function purgeStored(kind, item) {
+	const label = item.name ?? String(item.id ?? "").slice(0, 8);
+	if (!window.confirm(`Permanently delete “${label}”?`)) return;
+	const id = item.logicalId ?? item.id;
+	try {
+		await apiJson(`/api/${kind === "archive" ? "archived" : "trash"}/${encodeURIComponent(id)}`, { method: "DELETE" });
+		toast("deleted");
+		await showStoredSheet(kind);
+	} catch (error) {
+		toast(`delete failed: ${error.message}`);
+	}
 }
 
 function openSession(id) {
@@ -659,9 +873,23 @@ function handleFrame(frame) {
 				void listSessions().then((sessions) => renderList(sessions, state.defaultCwd, state.home));
 			}
 			break;
-		case "sessions":
-			if (!state.sessionId) renderList(frame.sessions ?? [], state.defaultCwd, state.home);
+		case "sessions": {
+			const sessions = Array.isArray(frame.sessions) ? frame.sessions : [];
+			if (!state.sessionId) {
+				renderList(sessions, state.defaultCwd, state.home);
+				break;
+			}
+			const logical = state.info?.logicalId;
+			const present = sessions.some(
+				(session) => session.id === state.sessionId || (logical && session.logicalId === logical),
+			);
+			if (!present) {
+				state.sessionId = null;
+				toast("session is no longer available");
+				location.hash = "";
+			}
 			break;
+		}
 		case "snapshot":
 			state.info = frame.session;
 			if (frame.resume === true) renderResume(frame.entries ?? []);
@@ -2108,6 +2336,29 @@ function toast(message) {
 	toastTimer = setTimeout(() => {
 		ui.toast.hidden = true;
 	}, 3200);
+}
+
+/** Toast with one action (delete undo); stays up long enough to be reachable. */
+function actionToast(message, label, action, ms = 10_000) {
+	if (!message) return;
+	ui.toast.textContent = "";
+	const text = document.createElement("span");
+	text.textContent = message;
+	const button = document.createElement("button");
+	button.type = "button";
+	button.className = "toast-action";
+	button.textContent = label;
+	button.addEventListener("click", () => {
+		clearTimeout(toastTimer);
+		ui.toast.hidden = true;
+		void action();
+	});
+	ui.toast.append(text, button);
+	ui.toast.hidden = false;
+	clearTimeout(toastTimer);
+	toastTimer = setTimeout(() => {
+		ui.toast.hidden = true;
+	}, ms);
 }
 
 /** A 3.2 s toast is useless for `/fit help`'s 2 KB notify: long or multi-line
