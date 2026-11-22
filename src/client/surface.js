@@ -16,11 +16,19 @@ let renderedId = null;
 let lastShell = null;
 let observer = null;
 
+let lastSurfaceHeight = 0;
+
 /** Keep the jump pill above the surface instead of overlaying its actions. */
 function syncOffset() {
 	const root = ui.surface;
 	if (!root) return;
-	root.parentElement?.style.setProperty("--surface-height", `${root.hidden ? 0 : root.offsetHeight}px`);
+	const height = root.hidden ? 0 : root.offsetHeight;
+	const grew = height > lastSurfaceHeight;
+	lastSurfaceHeight = height;
+	root.parentElement?.style.setProperty("--surface-height", `${height}px`);
+	// Growing the panel shrinks #log. If the transcript was pinned to the
+	// newest entry, re-pin it so the panel does not appear to scroll the log.
+	if (grew && state.stick && ui.log) ui.log.scrollTop = ui.log.scrollHeight;
 }
 
 function observeSurface() {
@@ -207,6 +215,7 @@ export function renderSurface({ force = false } = {}) {
 		root.classList.remove("collapsed", "expanded");
 		renderedId = null;
 		lastShell = null;
+		lastSurfaceHeight = 0;
 		syncOffset();
 		return;
 	}
@@ -278,6 +287,7 @@ export function resetSurface() {
 		ui.surface.hidden = true;
 		ui.surface.textContent = "";
 		ui.surface.classList.remove("collapsed", "expanded");
+		lastSurfaceHeight = 0;
 		syncOffset();
 	}
 }
@@ -286,13 +296,16 @@ export function surfaceOpen() {
 	return queue.active !== null;
 }
 
-/** Dev-only: open the A2UI fixture panel when the page has `?panel=fixture`. */
+/** Dev-only: open the A2UI fixture panel when the page has `?panel=fixture`
+ * (short fixture) or `?panel=long` (overflow fixture). */
 export async function openFixturePanel(search = location.search) {
 	const params = new URLSearchParams(search);
-	if (params.get("panel") !== "fixture") return false;
+	const panel = params.get("panel");
+	if (panel !== "fixture" && panel !== "long") return false;
 	let payload;
 	try {
-		const response = await fetch("/api/dev/panel-fixture", { cache: "no-store" });
+		const fixture = panel === "long" ? "?fixture=long" : "";
+		const response = await fetch(`/api/dev/panel-fixture${fixture}`, { cache: "no-store" });
 		if (!response.ok) return false;
 		payload = await response.json();
 	} catch {

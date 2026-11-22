@@ -1,0 +1,161 @@
+{
+	"title": "A2UI long fixture",
+	"mode": "a2ui",
+	"surfaceId": "fixture-long",
+	"messages": [
+		{
+			"version": "1.0",
+			"createSurface": {
+				"surfaceId": "fixture-long",
+				"catalogId": "https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json",
+				"dataModel": {
+					"answers": {
+						"q1": { "selected": [], "custom": "" },
+						"q2": { "selected": [], "custom": "" },
+						"q3": { "selected": [], "custom": "" },
+						"q4": { "selected": [], "custom": "" },
+						"q5": { "selected": [], "custom": "" },
+						"q6": { "selected": [], "custom": "" },
+						"q7": { "selected": [], "custom": "" },
+						"q8": { "selected": [], "custom": "" }
+					},
+					"notes": ""
+				},
+				"components": [
+					{
+						"id": "root",
+						"component": "Column",
+						"children": ["title", "intro", "q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8", "notes_field", "footer"]
+					},
+					{ "id": "title", "component": "Text", "variant": "body", "text": "Long fixture questionnaire" },
+					{
+						"id": "intro",
+						"component": "Text",
+						"variant": "body",
+						"text": "Enough questions to overflow a phone and a desktop panel, so the surface cap and internal scroll can be checked."
+					},
+					{
+						"id": "q1",
+						"component": "ChoicePicker",
+						"label": "1. Which colour should the header use?",
+						"variant": "mutuallyExclusive",
+						"options": [
+							{ "value": "red", "label": "Red" },
+							{ "value": "blue", "label": "Blue" },
+							{ "value": "green", "label": "Green" }
+						],
+						"value": { "@path": "/answers/q1/selected" }
+					},
+					{
+						"id": "q2",
+						"component": "ChoicePicker",
+						"label": "2. Which sizes should be enabled?",
+						"variant": "multipleSelection",
+						"options": [
+							{ "value": "s", "label": "Small" },
+							{ "value": "m", "label": "Medium" },
+							{ "value": "l", "label": "Large" }
+						],
+						"value": { "@path": "/answers/q2/selected" }
+					},
+					{
+						"id": "q3",
+						"component": "ChoicePicker",
+						"label": "3. Which layout should be the default?",
+						"variant": "mutuallyExclusive",
+						"options": [
+							{ "value": "phone", "label": "Phone first" },
+							{ "value": "desktop", "label": "Desktop first" }
+						],
+						"value": { "@path": "/answers/q3/selected" }
+					},
+					{
+						"id": "q4",
+						"component": "ChoicePicker",
+						"label": "4. Which surfaces may show panels?",
+						"variant": "multipleSelection",
+						"options": [
+							{ "value": "chat", "label": "Chat" },
+							{ "value": "settings", "label": "Settings" },
+							{ "value": "archive", "label": "Archive" }
+						],
+						"value": { "@path": "/answers/q4/selected" }
+					},
+					{
+						"id": "q5",
+						"component": "ChoicePicker",
+						"label": "5. How should long panels collapse?",
+						"variant": "mutuallyExclusive",
+						"options": [
+							{ "value": "header", "label": "Header only" },
+							{ "value": "half", "label": "Keep half visible" }
+						],
+						"value": { "@path": "/answers/q5/selected" }
+					},
+					{
+						"id": "q6",
+						"component": "ChoicePicker",
+						"label": "6. Should the transcript sliver stay visible?",
+						"variant": "mutuallyExclusive",
+						"options": [
+							{ "value": "yes", "label": "Yes" },
+							{ "value": "no", "label": "No" }
+						],
+						"value": { "@path": "/answers/q6/selected" }
+					},
+					{
+						"id": "q7",
+						"component": "ChoicePicker",
+						"label": "7. Which scroll container should own the panel body?",
+						"variant": "mutuallyExclusive",
+						"options": [
+							{ "value": "body", "label": "The panel body" },
+							{ "value": "page", "label": "The page" }
+						],
+						"value": { "@path": "/answers/q7/selected" }
+					},
+					{
+						"id": "q8",
+						"component": "ChoicePicker",
+						"label": "8. Should a short panel stretch to fill space?",
+						"variant": "mutuallyExclusive",
+						"options": [
+							{ "value": "no", "label": "No, stay content-sized" },
+							{ "value": "yes", "label": "Yes, always fill" }
+						],
+						"value": { "@path": "/answers/q8/selected" }
+					},
+					{
+						"id": "notes_field",
+						"component": "TextField",
+						"label": "Anything else? (free-text notes)",
+						"placeholder": "Optional notes",
+						"value": { "@path": "/notes" }
+					},
+					{ "id": "footer", "component": "Row", "children": ["cancel_btn", "submit_btn"] },
+					{ "id": "cancel_label", "component": "Text", "text": "Cancel" },
+					{
+						"id": "cancel_btn",
+						"component": "Button",
+						"variant": "borderless",
+						"child": "cancel_label",
+						"action": { "event": { "name": "cancel" } }
+					},
+					{ "id": "submit_label", "component": "Text", "text": "Submit" },
+					{
+						"id": "submit_btn",
+						"component": "Button",
+						"variant": "primary",
+						"child": "submit_label",
+						"action": {
+							"event": {
+								"name": "submit",
+								"context": { "answers": { "@path": "/answers" } }
+							}
+						}
+					}
+				]
+			}
+		}
+	]
+}

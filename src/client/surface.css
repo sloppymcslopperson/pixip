@@ -2,12 +2,16 @@
 /* Docked between the transcript and the composer. No backdrop, no fixed
    positioning: #log keeps the only transcript scroll container. */
 #surface {
+	/* Content-sized by default, but allow a long panel to take almost the whole
+	   session height before the body scrolls internally. The cap leaves only a
+	   thin sliver of transcript visible; collapse is the way back to the
+	   transcript, so a tall panel must not leave a large empty gap above it. */
 	flex: none;
 	display: flex;
 	flex-direction: column;
 	width: 100%;
 	max-width: 104ch;
-	max-height: 70%;
+	max-height: calc(100% - var(--surface-history-sliver, 2.5rem));
 	min-height: 0;
 	margin-inline: auto;
 	background: var(--bg-soft);
@@ -89,6 +93,9 @@
 	font-size: 12px;
 }
 .surface-body {
+	/* Shrink to the panel cap and scroll instead of pushing the surface past
+	   its max-height; a short body keeps its content height. */
+	flex: 0 1 auto;
 	min-height: 0;
 	overflow-y: auto;
 	overscroll-behavior: contain;

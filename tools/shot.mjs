@@ -51,6 +51,8 @@ const metrics = await page.evaluate(() => {
 			left: Math.round(box.left),
 			width: Math.round(box.width),
 			height: Math.round(box.height),
+			clientHeight: element.clientHeight,
+			scrollHeight: element.scrollHeight,
 			display: getComputedStyle(element).display,
 			hidden: element.hidden,
 		};
@@ -64,6 +66,7 @@ const metrics = await page.evaluate(() => {
 		log: rect("#log"),
 		composer: rect("#composer"),
 		surface: rect("#surface"),
+		surfaceBody: rect("#surface .surface-body"),
 	};
 });
 
