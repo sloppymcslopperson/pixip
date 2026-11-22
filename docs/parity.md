@@ -70,7 +70,7 @@ is either already done or deliberately deferred.
 | Abort a running bash | deferred (gap; TUI-only for now) |
 | Input history (up/down) | deferred |
 | `@file` completion | deferred |
-| Image paste/attachments | deferred |
+| Image paste/attachments | done (`00-web-image-upload`: `+` menu for photo/camera or arbitrary file, clipboard paste, one removable preview; images travel as Pi `ImageContent`, other files upload to `<data-dir>/uploads/<logical-session>/` and the prompt gets their absolute path) |
 | Esc to abort/clear | abort via the stop button; queue clear via the X on the chips (`07-queue-display`) |
 | Long `notify` text readable (extension commands) | done (`00-prefix-commands`: dismissible sheet, not a 3.2 s toast) |
 | Transcript text size (50–150 %, header `A−`/`A+`) | done (`03-add-font-size-control`: seven steps, device-local, transcript-only, long-press reset) |

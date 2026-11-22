@@ -335,6 +335,34 @@ Policy is per session and restrict-only: `<data-dir>/pixip.json`,
 and the hub serves the result as a `policy` frame on the session socket. Denied
 and TUI-only commands produce a local notice and are never sent to the model.
 
+## Attachments
+
+One attachment may be pending in the composer at a time: an image or an
+arbitrary file. The `+` menu opens an image picker (`accept="image/*"`, no
+`capture`, so the phone offers camera or library) or a generic file picker;
+clipboard paste uses the same paths. Picking another attachment replaces the
+pending one.
+
+Images are decoded in the browser, downscaled to at most 1600 px on the longest
+edge, and encoded as JPEG (PNG fallback). The base64 `ImageContent` rides the
+existing WebSocket `prompt`/`steer` frame, exactly as Pi's RPC expects, and the
+hub independently rejects anything not PNG/JPEG/GIF/WebP, over 8 MB decoded or
+over ~11 MB base64. Pi normalizes and persists the image in the session JSONL;
+a reload renders the recorded user-message image as a thumbnail that opens a
+larger sheet, with no re-upload.
+
+Non-image files never travel through the websocket. The client POSTs raw bytes
+to `/api/sessions/<id>/uploads?name=<filename>` (100 MB cap), and the hub writes
+`<data-dir>/uploads/<logical-session>/<uuid>-<safe-name>`. The prompt text gets
+`Attached file: <absolute path>` after the typed text (or as the whole prompt for
+an attachment-only send), so the agent can read, copy or move the file. Uploads
+survive stop and reattach, and are cleared on `/new`, archive and delete.
+
+A pending attachment blocks builtin commands and `!`/`!!` with an inline notice;
+plain prompts and passthrough extension commands carry it. While Pi is busy the
+image rides the same `prompt` + `streamingBehavior: "steer"` path, so a steer
+never silently drops it.
+
 ## First-prompt session labels
 
 A new session with no messages and no name gets a label from its first user

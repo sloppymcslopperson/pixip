@@ -71,7 +71,10 @@ do in the TUI.
   current session model; local fallback), while a manual rename always wins;
 - streamed transcript: user/assistant text, thinking collapsed, tool calls with
   ANSI output, error styling, durations;
-- composer: send while idle, steer while streaming, abort via `stop`;
+- composer: send while idle, steer while streaming, abort via `stop`; a `+`
+  menu attaches one image (camera/library, downscaled client-side) or one
+  arbitrary file (uploaded under `<data-dir>/uploads/` and handed to Pi as a
+  path), with an inline removable preview and clipboard paste;
 - `!cmd`/`!!cmd` bash cards (streamed output, exit code, `!!` excluded from the
   model context), slash-command passthrough for extension commands/templates/
   skills, and a restrict-only per-session command policy (`pixip.json`,
@@ -138,7 +141,7 @@ backoff and its durable cursor, and sessions reattach from their JSONL.
 - TUI visual parity: diff/syntax colouring and the TUI's own theme colours (theme
   values are `okhsl`, which browsers do not support without conversion — see
   `85-theme-tokens`);
-- worktree creation, image input, input history and `@file` completion;
+- worktree creation, input history and `@file` completion;
 - virtualised transcript for very long sessions;
 - auth of any kind (bind loopback, or a private VPN interface — same posture as
   `aoe serve --host 100.42.42.1 --auth none`).
