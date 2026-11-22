@@ -2,65 +2,16 @@
 // Hub methods split by concern; each function runs with the Hub instance as `this`.
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { copyFile, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import type { RpcChild } from "./rpc.ts";
 import { piRpcBackend, type PiBackend } from "./backend.ts";
-import { MAX_UPLOAD_BYTES, normalizeImageAttachments, safeUploadName } from "./attachments.ts";
-import {
-	type NameSource,
-	type SessionHeader,
-	type SessionIndexRecord,
-	type StoredSessionInfo,
-	type StoredSessionRecord,
-	type SessionTarget,
-	normalizeRecord,
-	safeName,
-	storedInfo,
-} from "./sessionIndex.ts";
-import {
-	ENTRY_TEXT_LIMIT,
-	WINDOW_BYTES,
-	WINDOW_ENTRIES,
-	moveFile,
-	nameFromLines,
-	parseEntries,
-	pathExists,
-	readFromEnd,
-	readHead,
-	transcriptEntries,
-	truncateEntries,
-	uniquePath,
-	isBlockingUiMethod,
-	SYMBOL_PENDING,
-	coverageKey,
-	coverageKeys,
-} from "./jsonl.ts";
+import { type NameSource } from "./sessionIndex.ts";
+import { isBlockingUiMethod, SYMBOL_PENDING, coverageKey } from "./jsonl.ts";
 import { resolveSessionPolicy, type CommandLayer } from "./commands.ts";
-import { resolveModelArgument, resolveThinkingArgument } from "./client/commands.js";
-import { exportFileName } from "./client/sessionInfo.js";
-import { fallbackTitle, normalizeTitle, titlePrompt } from "./titles.ts";
-import {
-	frameError,
-	frameEvent,
-	frameFooter,
-	framePolicy,
-	frameRestarting,
-	frameSessions,
-	frameSnapshot,
-	frameStatus,
-} from "./wire.ts";
-import type {
-	BashResult,
-	CommandPolicy,
-	DynamicCommand,
-	FooterData,
-	ModelSummary,
-	SessionInfo,
-	SessionState,
-} from "./wire.ts";
+import { frameError, frameEvent, frameFooter, frameRestarting, frameSessions, frameStatus } from "./wire.ts";
+import { CommandPolicy, FooterData, SessionInfo } from "./wire.ts";
 
 const run = promisify(execFile);
 
