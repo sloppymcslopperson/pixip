@@ -1,47 +1,23 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { after, before, describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 
 import WebSocket from "ws";
 
-import { Hub } from "../src/hub.ts";
+import type { Hub } from "../src/hub.ts";
 import { startServer, type RunningServer } from "../src/server.ts";
+import {
+	cleanupRoots,
+	fixtureRoot,
+	hubFor as harnessHubFor,
+	spawns as records,
+	waitFor,
+	type TestPaths,
+} from "./helpers/harness.ts";
 
-const FIXTURE = fileURLToPath(new URL("./fixtures/fake-pi.mjs", import.meta.url));
 const OLD_ID = "01a1fb3f-aaaa-7664-b952-f6673a2c7a8c";
 const NEW_ID = "02b2fc4f-bbbb-7664-b952-f6673a2c7a8d";
-const roots: string[] = [];
-
-interface Paths {
-	dir: string;
-	dataDir: string;
-	sessionsDir: string;
-	clientDir: string;
-	indexPath: string;
-	logPath: string;
-	logs: string[];
-}
-
-async function fixtureRoot(): Promise<Paths> {
-	const dir = await mkdtemp(join(tmpdir(), "pixip-builtin-"));
-	roots.push(dir);
-	const paths: Paths = {
-		dir,
-		dataDir: join(dir, "data"),
-		sessionsDir: join(dir, "data", "sessions"),
-		clientDir: join(dir, "client"),
-		indexPath: join(dir, "data", "sessions.json"),
-		logPath: join(dir, "commands.jsonl"),
-		logs: [],
-	};
-	await mkdir(paths.sessionsDir, { recursive: true });
-	await mkdir(paths.clientDir, { recursive: true });
-	return paths;
-}
-
 const MODELS = JSON.stringify([
 	{ id: "fake-model", provider: "fake", contextWindow: 100_000 },
 	{ id: "other-model", provider: "acme" },
@@ -49,24 +25,14 @@ const MODELS = JSON.stringify([
 ]);
 
 async function boot(
-	paths: Paths,
+	paths: TestPaths,
 	env: Record<string, string> = {},
 ): Promise<{ hub: Hub; server: RunningServer; url: string }> {
-	const hub = new Hub({
-		piBin: FIXTURE,
-		sessionsDir: paths.sessionsDir,
-		dataDir: paths.dataDir,
-		indexPath: paths.indexPath,
-		idleMs: 0,
-		extraPiArgs: [],
-		env: {
-			FAKE_PI_LOG: paths.logPath,
-			FAKE_PI_MODELS: MODELS,
-			FAKE_PI_THINKING_LEVELS: "off,low,medium,high",
-			...env,
-		},
-		log: (message) => paths.logs.push(message),
-	});
+	const hub = harnessHubFor(
+		paths,
+		{ log: (message) => paths.logs.push(message) },
+		{ FAKE_PI_MODELS: MODELS, FAKE_PI_THINKING_LEVELS: "off,low,medium,high", ...env },
+	);
 	const server = await startServer({
 		host: "127.0.0.1",
 		port: 0,
@@ -101,36 +67,15 @@ async function connect(url: string): Promise<Inbox> {
 	return { frames, ws, close: () => ws.close() };
 }
 
-async function waitFor(check: () => boolean, timeoutMs = 5000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		if (check()) return;
-		await new Promise((resolve) => setTimeout(resolve, 20));
-	}
-	throw new Error("timed out waiting for frames");
-}
-
-async function records(paths: Paths): Promise<Array<Record<string, unknown>>> {
-	const text = await readFile(paths.logPath, "utf8").catch(() => "");
-	return text
-		.split("\n")
-		.filter(Boolean)
-		.map((line) => JSON.parse(line) as Record<string, unknown>);
-}
-
 const framesOf = (inbox: Inbox, type: string) => inbox.frames.filter((frame) => frame["t"] === type);
 
-before(async () => {
-	await chmod(FIXTURE, 0o755);
-});
-
 after(async () => {
-	for (const dir of roots) await rm(dir, { recursive: true, force: true });
+	await cleanupRoots();
 });
 
 describe("built-in commands over the socket", () => {
 	it("compacts with instructions and answers resnapshot with a replace window", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-builtin-", { logName: "commands.jsonl" });
 		const { hub, server, url } = await boot(paths, { FAKE_PI_SESSION_ID: OLD_ID });
 		const inbox = await connect(url);
 		await waitFor(() => framesOf(inbox, "snapshot").length > 0);
@@ -155,7 +100,7 @@ describe("built-in commands over the socket", () => {
 	});
 
 	it("renames the session and lets the status frame update the header", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-builtin-", { logName: "commands.jsonl" });
 		const { hub, server, url } = await boot(paths, { FAKE_PI_SESSION_ID: OLD_ID });
 		const inbox = await connect(url);
 		await waitFor(() => framesOf(inbox, "snapshot").length > 0);
@@ -173,7 +118,7 @@ describe("built-in commands over the socket", () => {
 	});
 
 	it("re-keys a /new session, keeps the socket usable and updates the index piIds", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-builtin-", { logName: "commands.jsonl" });
 		const { hub, server, url } = await boot(paths, {
 			FAKE_PI_SESSION_ID: OLD_ID,
 			FAKE_PI_NEW_SESSION_ID_AFTER: NEW_ID,
@@ -206,7 +151,7 @@ describe("built-in commands over the socket", () => {
 	});
 
 	it("surfaces get_commands on the commands frame once per attach", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-builtin-", { logName: "commands.jsonl" });
 		const DISCOVERED = JSON.stringify([
 			{ name: "fit", description: "FIT board", source: "extension" },
 			{ name: "skill:review", description: "Review the diff", source: "skill" },
@@ -226,7 +171,7 @@ describe("built-in commands over the socket", () => {
 	});
 
 	it("mirrors the pending queue and restores it on clear_queue", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-builtin-", { logName: "commands.jsonl" });
 		const { hub, server, url } = await boot(paths, {
 			FAKE_PI_SESSION_ID: OLD_ID,
 			FAKE_PI_FOLLOW_UP: JSON.stringify(["summarize when finished"]),
@@ -260,7 +205,7 @@ describe("built-in commands over the socket", () => {
 	});
 
 	it("sends a steer as prompt+steer and leaves an idle session idle", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-builtin-", { logName: "commands.jsonl" });
 		const { hub, server, url } = await boot(paths, { FAKE_PI_SESSION_ID: OLD_ID });
 		const id = decodeURIComponent(url.split("session=")[1] ?? "");
 
@@ -280,7 +225,7 @@ describe("built-in commands over the socket", () => {
 	});
 
 	it("forks from a user message and re-keys the live session", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-builtin-", { logName: "commands.jsonl" });
 		const { hub, server, url } = await boot(paths, {
 			FAKE_PI_SESSION_ID: OLD_ID,
 			FAKE_PI_FORK_SESSION_ID: NEW_ID,
@@ -316,7 +261,7 @@ describe("built-in commands over the socket", () => {
 	});
 
 	it("clones the active branch and follows the new id", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-builtin-", { logName: "commands.jsonl" });
 		const { hub, server, url } = await boot(paths, {
 			FAKE_PI_SESSION_ID: OLD_ID,
 			FAKE_PI_CLONE_SESSION_ID: NEW_ID,
@@ -336,7 +281,7 @@ describe("built-in commands over the socket", () => {
 	});
 
 	it("answers /tree with the read-only tree and current leaf", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-builtin-", { logName: "commands.jsonl" });
 		const TREE = {
 			tree: [
 				{
@@ -377,7 +322,7 @@ describe("built-in commands over the socket", () => {
 	});
 
 	it("copies an imported JSONL into the data dir, indexes it and opens it", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-builtin-", { logName: "commands.jsonl" });
 		const IMPORTED_ID = "03c3fd5f-cccc-7664-b952-f6673a2c7a8e";
 		const header = JSON.stringify({
 			type: "session",
@@ -428,7 +373,7 @@ describe("built-in commands over the socket", () => {
 	});
 
 	it("exports HTML and JSONL as attachments", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-builtin-", { logName: "commands.jsonl" });
 		const { hub, server, url } = await boot(paths, { FAKE_PI_SESSION_ID: OLD_ID });
 		const inbox = await connect(url);
 		await waitFor(() => framesOf(inbox, "snapshot").length > 0);
@@ -462,7 +407,7 @@ describe("built-in commands over the socket", () => {
 	});
 
 	it("answers copy with Pi's last assistant text", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-builtin-", { logName: "commands.jsonl" });
 		const { hub, server, url } = await boot(paths, {
 			FAKE_PI_SESSION_ID: OLD_ID,
 			FAKE_PI_LAST_TEXT: "the last answer",
@@ -480,7 +425,7 @@ describe("built-in commands over the socket", () => {
 	});
 
 	it("resolves /model and /thinking arguments and toasts when they are unknown", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-builtin-", { logName: "commands.jsonl" });
 		const { hub, server, url } = await boot(paths, { FAKE_PI_SESSION_ID: OLD_ID });
 		const inbox = await connect(url);
 		await waitFor(() => framesOf(inbox, "snapshot").length > 0);

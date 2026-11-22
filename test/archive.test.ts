@@ -1,104 +1,35 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { after, before, describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 
-import { Hub } from "../src/hub.ts";
+import type { Hub } from "../src/hub.ts";
 import { startServer, type RunningServer } from "../src/server.ts";
+import {
+	cleanupRoots,
+	exists,
+	fixtureRoot,
+	hubFor as harnessHubFor,
+	infoEntry,
+	sessionFile,
+	waitFor,
+	type TestPaths,
+} from "./helpers/harness.ts";
 
-const FIXTURE = fileURLToPath(new URL("./fixtures/fake-pi.mjs", import.meta.url));
-const roots: string[] = [];
-
-interface Paths {
-	dir: string;
-	dataDir: string;
-	sessionsDir: string;
-	clientDir: string;
-	indexPath: string;
-	logPath: string;
+function hubFor(paths: TestPaths, env: Record<string, string> = {}, trashGraceMs?: number): Hub {
+	return harnessHubFor(paths, { trashGraceMs }, env);
 }
 
-async function fixtureRoot(): Promise<Paths> {
-	const dir = await mkdtemp(join(tmpdir(), "pixip-archive-"));
-	roots.push(dir);
-	const paths: Paths = {
-		dir,
-		dataDir: join(dir, "data"),
-		sessionsDir: join(dir, "data", "sessions"),
-		clientDir: join(dir, "client"),
-		indexPath: join(dir, "data", "sessions.json"),
-		logPath: join(dir, "spawns.jsonl"),
-	};
-	await mkdir(paths.sessionsDir, { recursive: true });
-	await mkdir(paths.clientDir, { recursive: true });
-	return paths;
-}
-
-function hubFor(paths: Paths, env: Record<string, string> = {}, trashGraceMs?: number): Hub {
-	return new Hub({
-		piBin: FIXTURE,
-		sessionsDir: paths.sessionsDir,
-		dataDir: paths.dataDir,
-		indexPath: paths.indexPath,
-		idleMs: 0,
-		trashGraceMs,
-		extraPiArgs: [],
-		env: { FAKE_PI_LOG: paths.logPath, ...env },
-		log: () => {},
-	});
-}
-
-async function writeSession(paths: Paths, id: string, name: string): Promise<string> {
-	const path = join(paths.sessionsDir, `2026-11-21T00-00-00-000Z_${id}.jsonl`);
-	const header = JSON.stringify({
-		type: "session",
-		version: 3,
-		id,
-		cwd: paths.dir,
-		timestamp: "2026-11-21T00:00:00.000Z",
-	});
-	const info = JSON.stringify({
-		type: "session_info",
-		id: "i1",
-		parentId: null,
-		timestamp: "2026-11-21T00:00:01.000Z",
-		name,
-	});
-	await writeFile(path, [header, info].join("\n") + "\n");
+async function writeSession(paths: TestPaths, id: string, name: string): Promise<string> {
+	const { path } = await sessionFile(paths, [infoEntry(name)], { id, cwd: paths.dir });
 	return path;
 }
 
-async function exists(path: string): Promise<boolean> {
-	try {
-		await stat(path);
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-async function waitFor(check: () => Promise<boolean>, timeoutMs = 1000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		if (await check().catch(() => false)) return;
-		await new Promise((resolve) => setTimeout(resolve, 10));
-	}
-	throw new Error("timed out waiting for condition");
-}
-
-before(async () => {
-	await chmod(FIXTURE, 0o755);
-});
-
 after(async () => {
-	for (const dir of roots) await rm(dir, { recursive: true, force: true });
+	await cleanupRoots();
 });
 
 describe("archive and trash", () => {
 	it("archives a stopped session out of the active store and restores it", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-archive-");
 		const hub = hubFor(paths);
 		const created = await hub.create(paths.dir, "keep me");
 		const file = await writeSession(paths, created.id, "keep me");
@@ -129,7 +60,7 @@ describe("archive and trash", () => {
 	});
 
 	it("deletes into trash, restores from the undo token and purges explicitly", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-archive-");
 		const hub = hubFor(paths);
 		const created = await hub.create(paths.dir, "delete me");
 		const file = await writeSession(paths, created.id, "delete me");
@@ -161,7 +92,7 @@ describe("archive and trash", () => {
 	});
 
 	it("auto-purges trash after the grace period", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-archive-");
 		const hub = hubFor(paths, {}, 25);
 		const created = await hub.create(paths.dir, "short lived");
 		await writeSession(paths, created.id, "short lived");
@@ -172,7 +103,7 @@ describe("archive and trash", () => {
 	});
 
 	it("archives only stopped sessions and refuses a busy one", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-archive-");
 		const hub = hubFor(paths);
 		const first = await hub.create(paths.dir, "one");
 		const second = await hub.create(paths.dir, "two");
@@ -200,7 +131,7 @@ describe("archive and trash", () => {
 		);
 		await hub.shutdown();
 
-		const busyPaths = await fixtureRoot();
+		const busyPaths = await fixtureRoot("pixip-archive-");
 		const busyHub = hubFor(busyPaths, { FAKE_PI_IS_STREAMING: "1" });
 		const busy = await busyHub.create(busyPaths.dir, "busy");
 		assert.equal(busy.state, "busy");
@@ -212,7 +143,7 @@ describe("archive and trash", () => {
 
 describe("archive REST routes", () => {
 	it("serves archive, restore, delete, trash restore and bulk archive", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-archive-");
 		const hub = hubFor(paths);
 		let server: RunningServer | undefined;
 		try {

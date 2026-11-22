@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, realpath, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
 
@@ -13,17 +12,10 @@ import {
 	sortDirEntries,
 	validateNewDirName,
 } from "../src/dirs.ts";
-
-const roots: string[] = [];
-
-async function tempRoot(prefix = "pixip-dirs-"): Promise<string> {
-	const dir = await mkdtemp(join(tmpdir(), prefix));
-	roots.push(dir);
-	return dir;
-}
+import { cleanupRoots, tempRoot } from "./helpers/harness.ts";
 
 async function homeWithProjects(): Promise<string> {
-	const home = await tempRoot();
+	const home = await tempRoot("pixip-dirs-");
 	await mkdir(join(home, "alpha"));
 	await mkdir(join(home, "alpha", ".git"));
 	await mkdir(join(home, "Beta"));
@@ -36,7 +28,7 @@ async function homeWithProjects(): Promise<string> {
 }
 
 after(async () => {
-	for (const dir of roots) await rm(dir, { recursive: true, force: true });
+	await cleanupRoots();
 });
 
 describe("dir path helpers", () => {

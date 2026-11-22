@@ -1,27 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { writeFile } from "node:fs/promises";
 import { after, describe, it } from "node:test";
 
-import { Hub, ENTRY_TEXT_LIMIT, WINDOW_ENTRIES, parseEntries, truncateEntries } from "../src/hub.ts";
+import { ENTRY_TEXT_LIMIT, WINDOW_ENTRIES, parseEntries, truncateEntries } from "../src/hub.ts";
+import { cleanupRoots, fixtureRoot, hubFor, sessionFile } from "./helpers/harness.ts";
 
-const roots: string[] = [];
-
-async function fixture(lines: string[]): Promise<{ dir: string; path: string; id: string }> {
-	const dir = await mkdtemp(join(tmpdir(), "pixip-window-"));
-	roots.push(dir);
-	const id = "01a1fb3f-aaaa-7664-b952-f6673a2c7a8c";
-	const path = join(dir, `2026-11-21T00-00-00-000Z_${id}.jsonl`);
-	const header = JSON.stringify({
-		type: "session",
-		version: 3,
-		id,
-		cwd: "/tmp/project",
-		timestamp: "2026-11-21T00:00:00.000Z",
-	});
-	await writeFile(path, [header, ...lines].join("\n") + "\n");
-	return { dir, path, id };
+async function fixture(lines: string[]) {
+	const paths = await fixtureRoot("pixip-window-", { flat: true });
+	const { id, path } = await sessionFile(paths, lines, { cwd: "/tmp/project" });
+	return { dir: paths.dir, path, id, paths };
 }
 
 function message(index: number, text = `entry ${index}`): string {
@@ -34,19 +21,8 @@ function message(index: number, text = `entry ${index}`): string {
 	});
 }
 
-function hubFor(dir: string): Hub {
-	return new Hub({
-		piBin: "true",
-		sessionsDir: dir,
-		indexPath: join(dir, "sessions.json"),
-		idleMs: 0,
-		extraPiArgs: [],
-		log: () => {},
-	});
-}
-
 after(async () => {
-	for (const dir of roots) await rm(dir, { recursive: true, force: true });
+	await cleanupRoots();
 });
 
 describe("jsonl windows", () => {
@@ -80,8 +56,8 @@ describe("jsonl windows", () => {
 	});
 
 	it("treats an empty or truncated tail as an empty transcript", async () => {
-		const { path, id } = await fixture([]);
-		const hub = hubFor(join(path, ".."));
+		const { id, path, paths } = await fixture([]);
+		const hub = hubFor(paths);
 		const snapshot = await hub.provisional(id);
 		assert.equal(snapshot?.info.state, "starting");
 		assert.deepEqual(snapshot?.entries, []);
@@ -100,8 +76,8 @@ describe("jsonl windows", () => {
 
 	it("returns the last window with more older entries", async () => {
 		const lines = Array.from({ length: 800 }, (_, index) => message(index));
-		const { path, id } = await fixture(lines);
-		const hub = hubFor(join(path, ".."));
+		const { id, paths } = await fixture(lines);
+		const hub = hubFor(paths);
 		const snapshot = await hub.provisional(id);
 		assert.equal(snapshot?.entries.length, WINDOW_ENTRIES);
 		assert.equal((snapshot?.entries[0] as { id: string }).id, "m600");
@@ -111,8 +87,8 @@ describe("jsonl windows", () => {
 
 	it("serves the window before an anchor and reports whether more remain", async () => {
 		const lines = Array.from({ length: 800 }, (_, index) => message(index));
-		const { path, id } = await fixture(lines);
-		const hub = hubFor(join(path, ".."));
+		const { id, paths } = await fixture(lines);
+		const hub = hubFor(paths);
 		const window = await hub.earlier(id, "m600");
 		assert.equal(window.entries.length, WINDOW_ENTRIES);
 		assert.equal((window.entries[0] as { id: string }).id, "m400");
@@ -130,8 +106,8 @@ describe("jsonl windows", () => {
 	it("grows the read until a full window fits behind a huge entry", async () => {
 		const huge = "y".repeat(400_000);
 		const lines = [message(0, huge), ...Array.from({ length: 300 }, (_, index) => message(index + 1))];
-		const { path, id } = await fixture(lines);
-		const hub = hubFor(join(path, ".."));
+		const { id, paths } = await fixture(lines);
+		const hub = hubFor(paths);
 		const window = await hub.earlier(id, "m1");
 		assert.equal((window.entries.at(-1) as { id: string }).id, "m0");
 		assert.equal(window.entries.length, 1);
@@ -145,8 +121,8 @@ describe("jsonl windows", () => {
 
 	it("returns nothing for an unknown anchor without throwing", async () => {
 		const lines = Array.from({ length: 10 }, (_, index) => message(index));
-		const { path, id } = await fixture(lines);
-		const hub = hubFor(join(path, ".."));
+		const { id, paths } = await fixture(lines);
+		const hub = hubFor(paths);
 		assert.deepEqual(await hub.earlier(id, "nope"), { entries: [], more: false });
 	});
 });

@@ -1,35 +1,16 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { utimes, writeFile } from "node:fs/promises";
 import { after, describe, it } from "node:test";
 
-import { Hub } from "../src/hub.ts";
+import { cleanupRoots, fixtureRoot, hubFor, sessionFile } from "./helpers/harness.ts";
 
-const roots: string[] = [];
 const ID = "01a1fb3f-aaaa-7664-b952-f6673a2c7a8c";
 
-async function fixture(lines: string[], id = ID): Promise<{ dir: string; path: string; hub: Hub }> {
-	const dir = await mkdtemp(join(tmpdir(), "pixip-names-"));
-	roots.push(dir);
-	const path = join(dir, `2026-11-21T00-00-00-000Z_${id}.jsonl`);
-	const header = JSON.stringify({
-		type: "session",
-		version: 3,
-		id,
-		cwd: "/tmp/project",
-		timestamp: "2026-11-21T00:00:00.000Z",
-	});
-	await writeFile(path, [header, ...lines].join("\n") + "\n");
-	const hub = new Hub({
-		piBin: "true",
-		sessionsDir: dir,
-		indexPath: join(dir, "sessions.json"),
-		idleMs: 0,
-		extraPiArgs: [],
-		log: () => {},
-	});
-	return { dir, path, hub };
+async function fixture(lines: string[], id = ID) {
+	const paths = await fixtureRoot("pixip-names-", { flat: true, logName: "spawns.jsonl" });
+	const { path } = await sessionFile(paths, lines, { id, cwd: "/tmp/project" });
+	const hub = hubFor(paths, { piBin: "true" });
+	return { dir: paths.dir, path, hub };
 }
 
 const info = (name: string | null, id = "i1") =>
@@ -44,7 +25,7 @@ const message = (index: number) =>
 	});
 
 after(async () => {
-	for (const dir of roots) await rm(dir, { recursive: true, force: true });
+	await cleanupRoots();
 });
 
 describe("stopped-session names", () => {

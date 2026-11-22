@@ -1,17 +1,11 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { after, before, describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 
 import WebSocket from "ws";
 
-import { Hub } from "../src/hub.ts";
+import type { Hub } from "../src/hub.ts";
 import { startServer, type RunningServer } from "../src/server.ts";
-
-const FIXTURE = fileURLToPath(new URL("./fixtures/fake-pi.mjs", import.meta.url));
-const roots: string[] = [];
+import { cleanupRoots, fixtureRoot, hubFor, waitFor, type TestPaths } from "./helpers/harness.ts";
 
 const ON_PROMPT = [
 	{ type: "extension_ui_request", id: "s1", method: "setStatus", statusKey: "alpha", statusText: "first" },
@@ -38,40 +32,8 @@ const ON_PROMPT = [
 	{ type: "extension_ui_request", id: "w4", method: "setWidget", widgetKey: "gone" },
 ];
 
-interface Paths {
-	dir: string;
-	dataDir: string;
-	sessionsDir: string;
-	clientDir: string;
-	indexPath: string;
-}
-
-async function fixtureRoot(): Promise<Paths> {
-	const dir = await mkdtemp(join(tmpdir(), "pixip-addon-"));
-	roots.push(dir);
-	const paths: Paths = {
-		dir,
-		dataDir: join(dir, "data"),
-		sessionsDir: join(dir, "data", "sessions"),
-		clientDir: join(dir, "client"),
-		indexPath: join(dir, "data", "sessions.json"),
-	};
-	await mkdir(paths.sessionsDir, { recursive: true });
-	await mkdir(paths.clientDir, { recursive: true });
-	return paths;
-}
-
-async function boot(paths: Paths): Promise<{ hub: Hub; server: RunningServer; id: string; url: string }> {
-	const hub = new Hub({
-		piBin: FIXTURE,
-		sessionsDir: paths.sessionsDir,
-		dataDir: paths.dataDir,
-		indexPath: paths.indexPath,
-		idleMs: 0,
-		extraPiArgs: [],
-		env: { FAKE_PI_ON_PROMPT: JSON.stringify(ON_PROMPT) },
-		log: () => {},
-	});
+async function boot(paths: TestPaths): Promise<{ hub: Hub; server: RunningServer; id: string; url: string }> {
+	const hub = hubFor(paths, { env: { FAKE_PI_ON_PROMPT: JSON.stringify(ON_PROMPT) } });
 	const server = await startServer({
 		host: "127.0.0.1",
 		port: 0,
@@ -110,32 +72,19 @@ async function connect(url: string, id: string): Promise<Inbox> {
 	};
 }
 
-async function waitFor(check: () => boolean, timeoutMs = 5000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		if (check()) return;
-		await new Promise((resolve) => setTimeout(resolve, 20));
-	}
-	throw new Error("timed out waiting for frames");
-}
-
 const uiRequests = (inbox: Inbox) =>
 	inbox.frames
 		.filter((frame) => frame["t"] === "event")
 		.map((frame) => frame["ev"] as Record<string, unknown> | undefined)
 		.filter((event): event is Record<string, unknown> => event?.type === "extension_ui_request");
 
-before(async () => {
-	await chmod(FIXTURE, 0o755);
-});
-
 after(async () => {
-	for (const dir of roots) await rm(dir, { recursive: true, force: true });
+	await cleanupRoots();
 });
 
 describe("addon UI cache", () => {
 	it("forwards setStatus/setWidget and replays the current keys on a second attach", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-addon-");
 		const { hub, server, id, url } = await boot(paths);
 		const first = await connect(url, id);
 		try {

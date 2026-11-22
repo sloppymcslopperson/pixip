@@ -1,44 +1,15 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { after, before, describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 
 import WebSocket from "ws";
 
-import { Hub } from "../src/hub.ts";
+import type { Hub } from "../src/hub.ts";
 import { startServer, type RunningServer } from "../src/server.ts";
+import { cleanupRoots, fixtureRoot, hubFor, waitFor, type TestPaths } from "./helpers/harness.ts";
 
-const FIXTURE = fileURLToPath(new URL("./fixtures/fake-pi.mjs", import.meta.url));
 const SESSION_ID = "01a1fb3f-aaaa-7664-b952-f6673a2c7a8c";
-const roots: string[] = [];
-
-interface Paths {
-	dir: string;
-	sessionsDir: string;
-	clientDir: string;
-	indexPath: string;
-	logPath: string;
-	logs: string[];
-}
-
-async function fixtureRoot(): Promise<Paths> {
-	const dir = await mkdtemp(join(tmpdir(), "pixip-cursor-"));
-	roots.push(dir);
-	const paths: Paths = {
-		dir,
-		sessionsDir: join(dir, "sessions"),
-		clientDir: join(dir, "client"),
-		indexPath: join(dir, "sessions.json"),
-		logPath: join(dir, "spawns.jsonl"),
-		logs: [],
-	};
-	await mkdir(paths.sessionsDir, { recursive: true });
-	await mkdir(paths.clientDir, { recursive: true });
-	return paths;
-}
-
 interface EntryMessage {
 	type: "message";
 	id: string;
@@ -61,7 +32,7 @@ function messageEnd(role: string, timestamp: number, text = "live") {
 	return { type: "message_end", message: { role, timestamp, content: [{ type: "text", text }] } };
 }
 
-async function writeSession(paths: Paths, entries: EntryMessage[]): Promise<string> {
+async function writeSession(paths: TestPaths, entries: EntryMessage[]): Promise<string> {
 	const path = join(paths.sessionsDir, `2026-11-21T00-00-00-000Z_${SESSION_ID}.jsonl`);
 	const header = JSON.stringify({
 		type: "session",
@@ -74,16 +45,8 @@ async function writeSession(paths: Paths, entries: EntryMessage[]): Promise<stri
 	return path;
 }
 
-async function boot(paths: Paths, env: Record<string, string>): Promise<{ hub: Hub; server: RunningServer }> {
-	const hub = new Hub({
-		piBin: FIXTURE,
-		sessionsDir: paths.sessionsDir,
-		indexPath: paths.indexPath,
-		idleMs: 0,
-		extraPiArgs: [],
-		env: { FAKE_PI_LOG: paths.logPath, FAKE_PI_SESSION_ID: SESSION_ID, ...env },
-		log: (message) => paths.logs.push(message),
-	});
+async function boot(paths: TestPaths, env: Record<string, string>): Promise<{ hub: Hub; server: RunningServer }> {
+	const hub = hubFor(paths, { log: (message) => paths.logs.push(message) }, { FAKE_PI_SESSION_ID: SESSION_ID, ...env });
 	const server = await startServer({
 		host: "127.0.0.1",
 		port: 0,
@@ -116,15 +79,6 @@ async function connect(url: string): Promise<Inbox> {
 	return { frames, close: () => ws.close() };
 }
 
-async function waitFor(check: () => boolean, timeoutMs = 5000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		if (check()) return;
-		await new Promise((resolve) => setTimeout(resolve, 10));
-	}
-	throw new Error("timed out waiting for frames");
-}
-
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const snapshots = (inbox: Inbox) => inbox.frames.filter((frame) => frame["t"] === "snapshot");
 const liveMessages = (inbox: Inbox) =>
@@ -133,17 +87,13 @@ const liveMessages = (inbox: Inbox) =>
 		.map((frame) => (frame["ev"] as { message?: { timestamp?: number } } | undefined)?.message?.timestamp)
 		.filter((stamp): stamp is number => typeof stamp === "number");
 
-before(async () => {
-	await chmod(FIXTURE, 0o755);
-});
-
 after(async () => {
-	for (const dir of roots) await rm(dir, { recursive: true, force: true });
+	await cleanupRoots();
 });
 
 describe("snapshot / live boundary", () => {
 	it("drops a buffered record the snapshot already covers", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-cursor-");
 		const first = entry("m1", "user", 111);
 		const covered = entry("m2", "user", 222);
 		await writeSession(paths, [first]);
@@ -173,7 +123,7 @@ describe("snapshot / live boundary", () => {
 	});
 
 	it("flushes a buffered record the snapshot does not cover, exactly once", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-cursor-");
 		const first = entry("m1", "user", 111);
 		await writeSession(paths, [first]);
 		const { hub, server } = await boot(paths, {
@@ -195,7 +145,7 @@ describe("snapshot / live boundary", () => {
 	});
 
 	it("resumes from the durable cursor and sends only the delta", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-cursor-");
 		const entries = [entry("e1", "user", 101), entry("e2", "assistant", 102), entry("e3", "user", 103)];
 		await writeSession(paths, entries);
 		const { hub, server } = await boot(paths, {
@@ -218,7 +168,7 @@ describe("snapshot / live boundary", () => {
 	});
 
 	it("falls back to a full snapshot when the cursor is unknown", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-cursor-");
 		const entries = [entry("e1", "user", 101), entry("e2", "assistant", 102)];
 		await writeSession(paths, entries);
 		const { hub, server } = await boot(paths, {

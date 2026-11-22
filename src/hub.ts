@@ -44,7 +44,7 @@ const run = promisify(execFile);
  *   direct string splice with no history kept server-side.
  */
 
-interface HubOptions {
+export interface HubOptions {
 	piBin: string;
 	sessionsDir: string;
 	/** `<data-dir>`: where `pixip.json`, the pid/log and the index live. */

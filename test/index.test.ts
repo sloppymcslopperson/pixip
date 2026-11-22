@@ -1,102 +1,28 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { after, before, describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 
-import { Hub } from "../src/hub.ts";
+import {
+	cleanupRoots,
+	fixtureRoot,
+	hubFor,
+	infoEntry,
+	records,
+	sessionFile,
+	spawns,
+	waitFor,
+} from "./helpers/harness.ts";
 
-const FIXTURE = fileURLToPath(new URL("./fixtures/fake-pi.mjs", import.meta.url));
-const roots: string[] = [];
 const PI_ID = "01a1fb3f-aaaa-7664-b952-f6673a2c7a8c";
 
-interface Paths {
-	dir: string;
-	sessionsDir: string;
-	indexPath: string;
-	log: string;
-}
-
-async function fixtureRoot(): Promise<Paths> {
-	const dir = await mkdtemp(join(tmpdir(), "pixip-index-"));
-	roots.push(dir);
-	const paths = {
-		dir,
-		sessionsDir: join(dir, "sessions"),
-		indexPath: join(dir, "sessions.json"),
-		log: join(dir, "spawns.jsonl"),
-	};
-	await mkdir(paths.sessionsDir, { recursive: true });
-	return paths;
-}
-
-function hubFor(paths: Paths, env: Record<string, string> = {}): Hub {
-	return new Hub({
-		piBin: FIXTURE,
-		sessionsDir: paths.sessionsDir,
-		indexPath: paths.indexPath,
-		idleMs: 0,
-		extraPiArgs: [],
-		env: { FAKE_PI_LOG: paths.log, ...env },
-		log: () => {},
-	});
-}
-
-async function records(paths: Paths): Promise<Array<Record<string, unknown>>> {
-	return JSON.parse(await readFile(paths.indexPath, "utf8")) as Array<Record<string, unknown>>;
-}
-
-async function spawns(paths: Paths): Promise<Array<Record<string, unknown>>> {
-	const text = await readFile(paths.log, "utf8").catch(() => "");
-	return text
-		.split("\n")
-		.filter(Boolean)
-		.map((line) => JSON.parse(line) as Record<string, unknown>);
-}
-
-async function waitFor(check: () => Promise<boolean>, timeoutMs = 2000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		if (await check().catch(() => false)) return;
-		await new Promise((resolve) => setTimeout(resolve, 10));
-	}
-	throw new Error("timed out waiting for condition");
-}
-
-async function sessionFile(paths: Paths, id: string, lines: string[]): Promise<string> {
-	const path = join(paths.sessionsDir, `2026-11-21T00-00-00-000Z_${id}.jsonl`);
-	const header = JSON.stringify({
-		type: "session",
-		version: 3,
-		id,
-		cwd: "/tmp/project",
-		timestamp: "2026-11-21T00:00:00.000Z",
-	});
-	await writeFile(path, [header, ...lines].join("\n") + "\n");
-	return path;
-}
-
-const infoEntry = (name: string) =>
-	JSON.stringify({
-		type: "session_info",
-		id: "i1",
-		parentId: null,
-		timestamp: "2026-11-21T00:00:01.000Z",
-		name,
-	});
-
-before(async () => {
-	await chmod(FIXTURE, 0o755);
-});
-
 after(async () => {
-	for (const dir of roots) await rm(dir, { recursive: true, force: true });
+	await cleanupRoots();
 });
 
 describe("session index", () => {
 	it("keeps a never-prompted session listed after detach and restart", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-index-");
 		const hub = hubFor(paths);
 		const cwd = join(paths.dir, "project");
 		await mkdir(cwd, { recursive: true });
@@ -125,8 +51,8 @@ describe("session index", () => {
 	});
 
 	it("lists JSONL-only sessions with no logical id", async () => {
-		const paths = await fixtureRoot();
-		await sessionFile(paths, PI_ID, [infoEntry("disk name")]);
+		const paths = await fixtureRoot("pixip-index-");
+		await sessionFile(paths, [infoEntry("disk name")], { id: PI_ID, cwd: "/tmp/project" });
 		const hub = hubFor(paths);
 		const listed = await hub.list();
 		assert.equal(listed.length, 1);
@@ -136,8 +62,8 @@ describe("session index", () => {
 	});
 
 	it("lets the JSONL win for state, name and activity while adding the logical id", async () => {
-		const paths = await fixtureRoot();
-		await sessionFile(paths, PI_ID, [infoEntry("disk name")]);
+		const paths = await fixtureRoot("pixip-index-");
+		await sessionFile(paths, [infoEntry("disk name")], { id: PI_ID, cwd: "/tmp/project" });
 		await writeFile(
 			paths.indexPath,
 			JSON.stringify([
@@ -162,8 +88,8 @@ describe("session index", () => {
 	});
 
 	it("survives a corrupt index and still lists JSONL sessions", async () => {
-		const paths = await fixtureRoot();
-		await sessionFile(paths, PI_ID, [infoEntry("disk name")]);
+		const paths = await fixtureRoot("pixip-index-");
+		await sessionFile(paths, [infoEntry("disk name")], { id: PI_ID, cwd: "/tmp/project" });
 		await writeFile(paths.indexPath, "{not json");
 		const hub = hubFor(paths);
 		const listed = await hub.list();
@@ -172,7 +98,7 @@ describe("session index", () => {
 	});
 
 	it("merges new spawns into the index without clobbering other records", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-index-");
 		const hub = hubFor(paths);
 		const first = await hub.create(paths.dir, "one");
 		const second = await hub.create(paths.sessionsDir, "two");
@@ -186,7 +112,7 @@ describe("session index", () => {
 	});
 
 	it("reattaches an index-only session at its recorded path under a new Pi id", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-index-");
 		const hub = hubFor(paths);
 		const created = await hub.create(paths.dir, "empty");
 		await hub.stop(created.id);
@@ -215,8 +141,8 @@ describe("session index", () => {
 	});
 
 	it("persists a rename while the session has no JSONL", async () => {
-		const paths = await fixtureRoot();
-		const hub = hubFor(paths, { FAKE_PI_RENAME_TO: "renamed" });
+		const paths = await fixtureRoot("pixip-index-");
+		const hub = hubFor(paths, {}, { FAKE_PI_RENAME_TO: "renamed" });
 		const created = await hub.create(paths.dir, "empty");
 		await hub.models(created.id);
 		await waitFor(async () => (await records(paths))[0]?.["name"] === "renamed");

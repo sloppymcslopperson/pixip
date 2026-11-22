@@ -1,55 +1,25 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { after, before, describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 
 import WebSocket from "ws";
 
 import { MAX_IMAGE_BYTES } from "../src/attachments.ts";
-import { Hub } from "../src/hub.ts";
+import type { Hub } from "../src/hub.ts";
 import { startServer, type RunningServer } from "../src/server.ts";
+import {
+	cleanupRoots,
+	exists,
+	fixtureRoot,
+	hubFor,
+	spawns as records,
+	waitFor,
+	type TestPaths,
+} from "./helpers/harness.ts";
 
-const FIXTURE = fileURLToPath(new URL("./fixtures/fake-pi.mjs", import.meta.url));
-const roots: string[] = [];
-
-interface Paths {
-	dir: string;
-	dataDir: string;
-	sessionsDir: string;
-	clientDir: string;
-	indexPath: string;
-	logPath: string;
-}
-
-async function fixtureRoot(): Promise<Paths> {
-	const dir = await mkdtemp(join(tmpdir(), "pixip-attachments-"));
-	roots.push(dir);
-	const paths = {
-		dir,
-		dataDir: join(dir, "data"),
-		sessionsDir: join(dir, "data", "sessions"),
-		clientDir: join(dir, "client"),
-		indexPath: join(dir, "data", "sessions.json"),
-		logPath: join(dir, "commands.jsonl"),
-	};
-	await mkdir(paths.sessionsDir, { recursive: true });
-	await mkdir(paths.clientDir, { recursive: true });
-	return paths;
-}
-
-async function boot(paths: Paths): Promise<{ hub: Hub; server: RunningServer }> {
-	const hub = new Hub({
-		piBin: FIXTURE,
-		sessionsDir: paths.sessionsDir,
-		dataDir: paths.dataDir,
-		indexPath: paths.indexPath,
-		idleMs: 0,
-		extraPiArgs: [],
-		env: { FAKE_PI_LOG: paths.logPath },
-		log: () => {},
-	});
+async function boot(paths: TestPaths): Promise<{ hub: Hub; server: RunningServer }> {
+	const hub = hubFor(paths);
 	const server = await startServer({
 		host: "127.0.0.1",
 		port: 0,
@@ -60,40 +30,13 @@ async function boot(paths: Paths): Promise<{ hub: Hub; server: RunningServer }> 
 	return { hub, server };
 }
 
-async function records(paths: Paths): Promise<Array<Record<string, unknown>>> {
-	const text = await readFile(paths.logPath, "utf8").catch(() => "");
-	return text
-		.split("\n")
-		.filter(Boolean)
-		.map((line) => JSON.parse(line) as Record<string, unknown>);
-}
-
-async function exists(path: string): Promise<boolean> {
-	return await stat(path)
-		.then(() => true)
-		.catch(() => false);
-}
-
-async function waitFor(check: () => boolean | Promise<boolean>, timeoutMs = 5000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		if (await check()) return;
-		await new Promise((resolve) => setTimeout(resolve, 20));
-	}
-	throw new Error("timed out waiting");
-}
-
-before(async () => {
-	await chmod(FIXTURE, 0o755);
-});
-
 after(async () => {
-	for (const dir of roots) await rm(dir, { recursive: true, force: true });
+	await cleanupRoots();
 });
 
 describe("image attachments", () => {
 	it("forwards a valid image on prompt and steer", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-attachments-", { logName: "commands.jsonl" });
 		const { hub, server } = await boot(paths);
 		const created = await hub.create(paths.dir);
 		const image = { type: "image", data: Buffer.from("not really a png").toString("base64"), mimeType: "image/png" };
@@ -126,7 +69,7 @@ describe("image attachments", () => {
 	});
 
 	it("rejects malformed images before any prompt reaches pi", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-attachments-", { logName: "commands.jsonl" });
 		const { hub, server } = await boot(paths);
 		const created = await hub.create(paths.dir);
 
@@ -162,7 +105,7 @@ describe("image attachments", () => {
 
 describe("file uploads", () => {
 	it("writes an HTTP upload under the logical session and returns its path", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-attachments-", { logName: "commands.jsonl" });
 		const { hub, server } = await boot(paths);
 		const created = await hub.create(paths.dir);
 
@@ -186,7 +129,7 @@ describe("file uploads", () => {
 	});
 
 	it("clears uploads on /new and archive but keeps them across stop", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-attachments-", { logName: "commands.jsonl" });
 		const { hub, server } = await boot(paths);
 		const first = await hub.create(paths.dir);
 		const firstUpload = await hub.uploadFile(first.id, "keep-until-new.txt", Buffer.from("one"));

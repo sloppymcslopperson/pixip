@@ -1,46 +1,21 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { after, before, describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 
 import WebSocket from "ws";
 
-import { Hub } from "../src/hub.ts";
-import { startServer, type RunningServer } from "../src/server.ts";
 import type { CommandLayer } from "../src/commands.ts";
-
-const FIXTURE = fileURLToPath(new URL("./fixtures/fake-pi.mjs", import.meta.url));
-const roots: string[] = [];
-
-interface Paths {
-	dir: string;
-	dataDir: string;
-	sessionsDir: string;
-	clientDir: string;
-	indexPath: string;
-	logPath: string;
-	logs: string[];
-}
-
-async function fixtureRoot(): Promise<Paths> {
-	const dir = await mkdtemp(join(tmpdir(), "pixip-prefix-"));
-	roots.push(dir);
-	const dataDir = join(dir, "data");
-	const paths: Paths = {
-		dir,
-		dataDir,
-		sessionsDir: join(dataDir, "sessions"),
-		clientDir: join(dir, "client"),
-		indexPath: join(dataDir, "sessions.json"),
-		logPath: join(dir, "commands.jsonl"),
-		logs: [],
-	};
-	await mkdir(paths.sessionsDir, { recursive: true });
-	await mkdir(paths.clientDir, { recursive: true });
-	return paths;
-}
+import type { Hub } from "../src/hub.ts";
+import { startServer, type RunningServer } from "../src/server.ts";
+import {
+	cleanupRoots,
+	fixtureRoot,
+	hubFor as harnessHubFor,
+	spawns as records,
+	waitFor,
+	type TestPaths,
+} from "./helpers/harness.ts";
 
 interface BootOptions {
 	env?: Record<string, string>;
@@ -50,21 +25,18 @@ interface BootOptions {
 }
 
 async function boot(
-	paths: Paths,
+	paths: TestPaths,
 	options: BootOptions = {},
 ): Promise<{ hub: Hub; server?: RunningServer; url: string }> {
-	const hub = new Hub({
-		piBin: FIXTURE,
-		sessionsDir: paths.sessionsDir,
-		dataDir: paths.dataDir,
-		indexPath: paths.indexPath,
-		idleMs: 0,
-		extraPiArgs: [],
-		cliCommands: options.cliCommands,
-		promptTimeoutMs: options.promptTimeoutMs,
-		env: { FAKE_PI_LOG: paths.logPath, ...options.env },
-		log: (message) => paths.logs.push(message),
-	});
+	const hub = harnessHubFor(
+		paths,
+		{
+			cliCommands: options.cliCommands,
+			promptTimeoutMs: options.promptTimeoutMs,
+			log: (message) => paths.logs.push(message),
+		},
+		options.env,
+	);
 	if (options.server === false) return { hub, url: "" };
 	const server = await startServer({
 		host: "127.0.0.1",
@@ -99,24 +71,6 @@ async function connect(url: string): Promise<Inbox> {
 	return { frames, ws, close: () => ws.close() };
 }
 
-async function waitFor(check: () => boolean | Promise<boolean>, timeoutMs = 5000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		if (await check()) return;
-		await new Promise((resolve) => setTimeout(resolve, 10));
-	}
-	throw new Error("timed out waiting for frames");
-}
-
-/** Every command record the fake Pi logged, oldest first. */
-async function records(paths: Paths): Promise<Array<Record<string, unknown>>> {
-	const text = await readFile(paths.logPath, "utf8").catch(() => "");
-	return text
-		.split("\n")
-		.filter(Boolean)
-		.map((line) => JSON.parse(line) as Record<string, unknown>);
-}
-
 const frameOf = (inbox: Inbox, type: string) => inbox.frames.filter((frame) => frame["t"] === type);
 const eventsOf = (inbox: Inbox, type: string) =>
 	inbox.frames
@@ -124,17 +78,13 @@ const eventsOf = (inbox: Inbox, type: string) =>
 		.map((frame) => frame["ev"] as Record<string, unknown>)
 		.filter((event) => event?.["type"] === type);
 
-before(async () => {
-	await chmod(FIXTURE, 0o755);
-});
-
 after(async () => {
-	for (const dir of roots) await rm(dir, { recursive: true, force: true });
+	await cleanupRoots();
 });
 
 describe("! and !!", () => {
 	it("streams bash updates into the card id and finishes with the result", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-prefix-", { logName: "commands.jsonl" });
 		const { hub, server } = await boot(paths, { env: { FAKE_PI_BASH_DELTA: "hello\n" } });
 		const created = await hub.create(paths.dir);
 		const inbox = await connect(`${server?.url}ws?session=${created.id}`);
@@ -173,7 +123,7 @@ describe("! and !!", () => {
 	});
 
 	it("carries the excluded flag and truncation metadata for !!", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-prefix-", { logName: "commands.jsonl" });
 		const { hub, server } = await boot(paths, {
 			env: {
 				FAKE_PI_BASH_OUTPUT: "secret output\n",
@@ -202,7 +152,7 @@ describe("! and !!", () => {
 	});
 
 	it("refuses a second bash while one is running", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-prefix-", { logName: "commands.jsonl" });
 		const { hub } = await boot(paths, { env: { FAKE_PI_BASH_DELAY_MS: "200" }, server: false });
 		const created = await hub.create(paths.dir);
 		const first = hub.bash(created.id, "b1", "sleep 1", false);
@@ -215,7 +165,7 @@ describe("! and !!", () => {
 	});
 
 	it("reports a failed bash on the matching card id, not as a generic error", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-prefix-", { logName: "commands.jsonl" });
 		const { hub, server } = await boot(paths);
 		const created = await hub.create(paths.dir);
 		const inbox = await connect(`${server?.url}ws?session=${created.id}`);
@@ -235,7 +185,7 @@ describe("! and !!", () => {
 
 describe("slash passthrough", () => {
 	it("forwards the text verbatim and steers while busy", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-prefix-", { logName: "commands.jsonl" });
 		const { hub, server } = await boot(paths);
 		const created = await hub.create(paths.dir);
 		const inbox = await connect(`${server?.url}ws?session=${created.id}`);
@@ -255,7 +205,7 @@ describe("slash passthrough", () => {
 	});
 
 	it("treats a prompt response later than the configured timeout as advisory", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-prefix-", { logName: "commands.jsonl" });
 		const { hub } = await boot(paths, {
 			env: { FAKE_PI_PROMPT_DELAY_MS: "120" },
 			promptTimeoutMs: 20,
@@ -272,13 +222,13 @@ describe("slash passthrough", () => {
 	});
 });
 
-async function hasPrompt(paths: Paths): Promise<boolean> {
+async function hasPrompt(paths: TestPaths): Promise<boolean> {
 	return (await records(paths)).some((record) => record["type"] === "prompt");
 }
 
 describe("policy frame", () => {
 	it("sends the merged per-session policy on attach", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-prefix-", { logName: "commands.jsonl" });
 		const cwd = join(paths.dir, "project");
 		await mkdir(cwd, { recursive: true });
 		await writeFile(join(paths.dataDir, "pixip.json"), JSON.stringify({ commands: { deny: ["name"], bash: false } }));
@@ -296,7 +246,7 @@ describe("policy frame", () => {
 	});
 
 	it("fails the attach with the file path when the config is malformed", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-prefix-", { logName: "commands.jsonl" });
 		await writeFile(join(paths.dataDir, "pixip.json"), "{oops");
 		const { hub } = await boot(paths, { server: false });
 		await assert.rejects(hub.create(paths.dir), /pixip\.json: invalid JSON/);

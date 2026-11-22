@@ -1,22 +1,19 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { after, describe, it } from "node:test";
 
-import { Hub } from "../src/hub.ts";
+import { cleanupRoots, fixtureRoot, hubFor as harnessHubFor, tempRoot } from "./helpers/harness.ts";
 
 const run = promisify(execFile);
-const roots: string[] = [];
 
-async function root(): Promise<string> {
-	const dir = await mkdtemp(join(tmpdir(), "pixip-branch-"));
-	roots.push(dir);
-	return dir;
+async function hubFor(records: Array<Record<string, unknown>>) {
+	const paths = await fixtureRoot("pixip-branch-", { flat: true });
+	await writeFile(paths.indexPath, `${JSON.stringify(records, null, 2)}\n`);
+	return harnessHubFor(paths);
 }
-
 async function git(cwd: string, ...args: string[]): Promise<string> {
 	const { stdout } = await run("git", ["-C", cwd, ...args], {
 		env: {
@@ -30,22 +27,6 @@ async function git(cwd: string, ...args: string[]): Promise<string> {
 	return stdout.trim();
 }
 
-async function hubFor(dataDir: string, records: Array<Record<string, unknown>>): Promise<Hub> {
-	const sessionsDir = join(dataDir, "sessions");
-	const indexPath = join(dataDir, "sessions.json");
-	await mkdir(sessionsDir, { recursive: true });
-	await writeFile(indexPath, `${JSON.stringify(records, null, 2)}\n`);
-	return new Hub({
-		piBin: "pi",
-		sessionsDir,
-		dataDir,
-		indexPath,
-		idleMs: 0,
-		extraPiArgs: [],
-		log: () => {},
-	});
-}
-
 function record(cwd: string, id: string): Record<string, unknown> {
 	return {
 		logicalId: `logical-${id}`,
@@ -57,12 +38,12 @@ function record(cwd: string, id: string): Record<string, unknown> {
 }
 
 after(async () => {
-	for (const dir of roots) await rm(dir, { recursive: true, force: true });
+	await cleanupRoots();
 });
 
 describe("dashboard git branch", () => {
 	it("reports the enclosing repo branch for a repo and a subdirectory", async () => {
-		const repo = await root();
+		const repo = await tempRoot("pixip-branch-");
 		await git(repo, "init", "-b", "main");
 		await writeFile(join(repo, "file.txt"), "x\n");
 		await git(repo, "add", "file.txt");
@@ -70,19 +51,19 @@ describe("dashboard git branch", () => {
 		const sub = join(repo, "nested", "deeper");
 		await mkdir(sub, { recursive: true });
 
-		const hub = await hubFor(await root(), [record(repo, "p1"), record(sub, "p2")]);
+		const hub = await hubFor([record(repo, "p1"), record(sub, "p2")]);
 		const infos = await hub.list();
 		assert.equal(infos.length, 2);
 		assert.ok(infos.every((info) => info.branch === "main"));
 	});
 
 	it("hides the branch outside a repo and shows the short SHA when detached", async () => {
-		const plain = await root();
-		const hub = await hubFor(await root(), [record(plain, "p1")]);
+		const plain = await tempRoot("pixip-branch-");
+		const hub = await hubFor([record(plain, "p1")]);
 		const infos = await hub.list();
 		assert.equal(infos[0]?.branch, undefined);
 
-		const repo = await root();
+		const repo = await tempRoot("pixip-branch-");
 		await git(repo, "init", "-b", "main");
 		await writeFile(join(repo, "file.txt"), "x\n");
 		await git(repo, "add", "file.txt");
@@ -90,7 +71,7 @@ describe("dashboard git branch", () => {
 		await git(repo, "checkout", "--detach");
 		const sha = await git(repo, "rev-parse", "--short", "HEAD");
 
-		const detached = await hubFor(await root(), [record(repo, "p2")]);
+		const detached = await hubFor([record(repo, "p2")]);
 		const [info] = await detached.list();
 		assert.equal(info?.branch, sha);
 	});

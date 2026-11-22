@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, before, describe, it } from "node:test";
@@ -9,10 +8,9 @@ import { after, before, describe, it } from "node:test";
 import WebSocket from "ws";
 
 import { pidAlive, readDaemonState, refreshDaemon, runningDaemon, fetchHealth, fetchSessions } from "../src/daemon.ts";
+import { FIXTURE, cleanupRoots, tempRoot, testRoots, waitFor } from "./helpers/harness.ts";
 
 const CLI = fileURLToPath(new URL("../bin/pixip.ts", import.meta.url));
-const FIXTURE = fileURLToPath(new URL("./fixtures/fake-pi.mjs", import.meta.url));
-const roots: string[] = [];
 
 interface RunResult {
 	code: number;
@@ -33,12 +31,6 @@ function run(args: string[], env: Record<string, string> = {}): Promise<RunResul
 			},
 		);
 	});
-}
-
-async function root(): Promise<string> {
-	const dir = await mkdtemp(join(tmpdir(), "pixip-daemon-"));
-	roots.push(dir);
-	return dir;
 }
 
 /** `start` on an ephemeral port; returns the printed URL and the state. */
@@ -64,21 +56,12 @@ async function createSession(url: string, cwd: string): Promise<Record<string, u
 	return JSON.parse(text) as Record<string, unknown>;
 }
 
-async function waitFor(check: () => boolean | Promise<boolean>, timeoutMs = 5000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		if (await Promise.resolve(check()).catch(() => false)) return;
-		await new Promise((resolve) => setTimeout(resolve, 50));
-	}
-	throw new Error("timed out waiting");
-}
-
 before(async () => {
 	await chmod(FIXTURE, 0o755);
 });
 
 after(async () => {
-	for (const dir of roots) {
+	for (const dir of testRoots()) {
 		const state = await readDaemonState(dir);
 		if (state && pidAlive(state.pid)) {
 			try {
@@ -87,13 +70,13 @@ after(async () => {
 				// already gone
 			}
 		}
-		await rm(dir, { recursive: true, force: true });
 	}
+	await cleanupRoots();
 });
 
 describe("daemon lifecycle", () => {
 	it("starts, reports, refreshes, tails and stops one data dir", async () => {
-		const dir = await root();
+		const dir = await tempRoot("pixip-daemon-");
 		const { url, pid } = await start(dir);
 
 		const state = await readDaemonState(dir);
@@ -142,7 +125,7 @@ describe("daemon lifecycle", () => {
 	});
 
 	it("cleans a stale pid instead of failing", async () => {
-		const dir = await root();
+		const dir = await tempRoot("pixip-daemon-");
 		await writeFile(join(dir, "pixip.pid"), "999999\n");
 		await writeFile(
 			join(dir, "pixip.state.json"),
@@ -168,7 +151,7 @@ describe("daemon lifecycle", () => {
 	});
 
 	it("turns stop from inside a pixip session into a restart", async () => {
-		const dir = await root();
+		const dir = await tempRoot("pixip-daemon-");
 		const { pid } = await start(dir);
 		const result = await run(["stop", "--data-dir", dir], { PIXIP_INSIDE: "1" });
 		assert.equal(result.code, 0, result.stderr);
@@ -184,7 +167,7 @@ describe("daemon lifecycle", () => {
 	});
 
 	it("does not start a daemon when an inside stop finds none running", async () => {
-		const dir = await root();
+		const dir = await tempRoot("pixip-daemon-");
 		const result = await run(["stop", "--data-dir", dir], { PIXIP_INSIDE: "1" });
 		assert.equal(result.code, 0, result.stderr);
 		assert.match(result.stdout, /not running/);
@@ -192,7 +175,7 @@ describe("daemon lifecycle", () => {
 	});
 
 	it("answers SIGHUP with a soft refresh", async () => {
-		const dir = await root();
+		const dir = await tempRoot("pixip-daemon-");
 		const { url, pid } = await start(dir);
 		process.kill(pid, "SIGHUP");
 		await waitFor(async () => (await fetchHealth(url).catch(() => ({ reloads: 0 }))).reloads === 1);
@@ -204,7 +187,7 @@ describe("daemon lifecycle", () => {
 
 describe("hard restart", () => {
 	it("refuses while busy, times out with --when-idle and replaces with --force", async () => {
-		const dir = await root();
+		const dir = await tempRoot("pixip-daemon-");
 		const { url, pid } = await start(dir, { FAKE_PI_IS_STREAMING: "1" });
 		await createSession(url, dir);
 
@@ -226,7 +209,7 @@ describe("hard restart", () => {
 	});
 
 	it("keeps a JSONL session listed across the restart", async () => {
-		const dir = await root();
+		const dir = await tempRoot("pixip-daemon-");
 		const id = "01a1fb3f-aaaa-7664-b952-f6673a2c7a8c";
 		const sessionsDir = join(dir, "sessions");
 		await mkdir(sessionsDir, { recursive: true });
@@ -263,7 +246,7 @@ describe("hard restart", () => {
 	});
 
 	it("announces a restart and reattaches the same logical session on reconnect", async () => {
-		const dir = await root();
+		const dir = await tempRoot("pixip-daemon-");
 		const sessionId = "01a1fb3f-aaaa-7664-b952-f6673a2c7a8c";
 		const entry = {
 			type: "message",
@@ -316,7 +299,7 @@ describe("hard restart", () => {
 	});
 
 	it("does the stop/start in a detached helper that survives its caller", async () => {
-		const dir = await root();
+		const dir = await tempRoot("pixip-daemon-");
 		const { pid } = await start(dir);
 		// Start a foreground restart, wait until the helper has logged its first
 		// line (it is alive and owns the stop/start), then kill the foreground.
@@ -336,7 +319,7 @@ describe("hard restart", () => {
 	});
 
 	it("exposes the helper directly with --detached", async () => {
-		const dir = await root();
+		const dir = await tempRoot("pixip-daemon-");
 		const { pid } = await start(dir);
 		const replaced = await run(["restart", "--detached", "--data-dir", dir]);
 		assert.equal(replaced.code, 0, replaced.stderr);
@@ -346,7 +329,7 @@ describe("hard restart", () => {
 	});
 
 	it("--when-idle does not wait for the calling session", async () => {
-		const dir = await root();
+		const dir = await tempRoot("pixip-daemon-");
 		const { url, pid } = await start(dir, { FAKE_PI_IS_STREAMING: "1" });
 		const created = await createSession(url, dir);
 		const logicalId = String(created["logicalId"]);
@@ -361,7 +344,7 @@ describe("hard restart", () => {
 	});
 
 	it("starts when nothing is running", async () => {
-		const dir = await root();
+		const dir = await tempRoot("pixip-daemon-");
 		const result = await run(["restart", "--data-dir", dir, "--port", "0", "--pi", FIXTURE]);
 		assert.equal(result.code, 0, result.stderr);
 		assert.match(result.stdout, /listening on/);

@@ -1,33 +1,25 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
 
 import { readCommandLayer, resolveSessionPolicy, validateCommandLayer } from "../src/commands.ts";
-
-const roots: string[] = [];
-
-async function root(): Promise<string> {
-	const dir = await mkdtemp(join(tmpdir(), "pixip-config-"));
-	roots.push(dir);
-	return dir;
-}
-
-after(async () => {
-	for (const dir of roots) await rm(dir, { recursive: true, force: true });
-});
+import { cleanupRoots, tempRoot } from "./helpers/harness.ts";
 
 const noLog = () => {};
 
+after(async () => {
+	await cleanupRoots();
+});
+
 describe("command config files", () => {
 	it("returns undefined when the file does not exist", async () => {
-		const dir = await root();
+		const dir = await tempRoot("pixip-config-");
 		assert.equal(await readCommandLayer(join(dir, "pixip.json"), noLog), undefined);
 	});
 
 	it("reports malformed JSON with the file path", async () => {
-		const dir = await root();
+		const dir = await tempRoot("pixip-config-");
 		const path = join(dir, "pixip.json");
 		await writeFile(path, "{not json");
 		await assert.rejects(readCommandLayer(path, noLog), (error: Error) => {
@@ -71,7 +63,7 @@ describe("command config files", () => {
 
 describe("resolveSessionPolicy", () => {
 	it("merges data dir, project and CLI restrict-only", async () => {
-		const dataDir = await root();
+		const dataDir = await tempRoot("pixip-config-");
 		const cwd = join(dataDir, "project");
 		await mkdir(cwd, { recursive: true });
 		await writeFile(
@@ -94,7 +86,7 @@ describe("resolveSessionPolicy", () => {
 	});
 
 	it("ignores missing files and keeps the CLI layer", async () => {
-		const dataDir = await root();
+		const dataDir = await tempRoot("pixip-config-");
 		const policy = await resolveSessionPolicy({
 			dataDir,
 			cwd: join(dataDir, "nowhere"),
@@ -105,7 +97,7 @@ describe("resolveSessionPolicy", () => {
 	});
 
 	it("fails the resolve when a file is malformed (attach shows the path)", async () => {
-		const dataDir = await root();
+		const dataDir = await tempRoot("pixip-config-");
 		await writeFile(join(dataDir, "pixip.json"), "[1,2,3]");
 		await assert.rejects(
 			resolveSessionPolicy({ dataDir, cwd: dataDir, log: noLog }),

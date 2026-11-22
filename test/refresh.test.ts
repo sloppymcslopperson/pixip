@@ -1,57 +1,17 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { after, before, describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 
 import WebSocket from "ws";
 
-import { Hub } from "../src/hub.ts";
+import type { Hub } from "../src/hub.ts";
 import { isLoopback, startServer, type RunningServer } from "../src/server.ts";
+import { cleanupRoots, fixtureRoot, hubFor, spawns, waitFor, type TestPaths } from "./helpers/harness.ts";
 
-const FIXTURE = fileURLToPath(new URL("./fixtures/fake-pi.mjs", import.meta.url));
-const roots: string[] = [];
-
-interface Paths {
-	dir: string;
-	dataDir: string;
-	sessionsDir: string;
-	clientDir: string;
-	indexPath: string;
-	logPath: string;
-	logs: string[];
-}
-
-async function fixtureRoot(): Promise<Paths> {
-	const dir = await mkdtemp(join(tmpdir(), "pixip-refresh-"));
-	roots.push(dir);
-	const paths: Paths = {
-		dir,
-		dataDir: join(dir, "data"),
-		sessionsDir: join(dir, "data", "sessions"),
-		clientDir: join(dir, "client"),
-		indexPath: join(dir, "data", "sessions.json"),
-		logPath: join(dir, "spawns.jsonl"),
-		logs: [],
-	};
-	await mkdir(paths.sessionsDir, { recursive: true });
-	await mkdir(paths.clientDir, { recursive: true });
-	return paths;
-}
-
-async function boot(paths: Paths): Promise<{ hub: Hub; server: RunningServer }> {
-	const hub = new Hub({
-		piBin: FIXTURE,
-		sessionsDir: paths.sessionsDir,
-		dataDir: paths.dataDir,
-		indexPath: paths.indexPath,
-		idleMs: 0,
-		extraPiArgs: [],
-		env: { FAKE_PI_LOG: paths.logPath },
-		log: (message) => paths.logs.push(message),
-	});
+async function boot(paths: TestPaths): Promise<{ hub: Hub; server: RunningServer }> {
+	const hub = hubFor(paths, { log: (message) => paths.logs.push(message) });
 	const server = await startServer({
 		host: "127.0.0.1",
 		port: 0,
@@ -85,24 +45,10 @@ async function connect(url: string): Promise<Inbox> {
 	return { frames, ws, close: () => ws.close() };
 }
 
-async function waitFor(check: () => boolean, timeoutMs = 5000): Promise<void> {
-	const deadline = Date.now() + timeoutMs;
-	while (Date.now() < deadline) {
-		if (check()) return;
-		await new Promise((resolve) => setTimeout(resolve, 20));
-	}
-	throw new Error("timed out waiting for condition");
-}
-
 const policyFrames = (inbox: Inbox) => inbox.frames.filter((frame) => frame["t"] === "policy");
 
-async function spawnCount(paths: Paths): Promise<number> {
-	const text = await readFile(paths.logPath, "utf8").catch(() => "");
-	return text
-		.split("\n")
-		.filter(Boolean)
-		.map((line) => JSON.parse(line) as { type?: string })
-		.filter((record) => record.type === "spawn").length;
+async function spawnCount(paths: TestPaths): Promise<number> {
+	return (await spawns(paths)).filter((record) => record["type"] === "spawn").length;
 }
 
 async function postRefresh(url: string): Promise<{ status: number; body: Record<string, unknown> }> {
@@ -110,17 +56,13 @@ async function postRefresh(url: string): Promise<{ status: number; body: Record<
 	return { status: response.status, body: (await response.json()) as Record<string, unknown> };
 }
 
-before(async () => {
-	await chmod(FIXTURE, 0o755);
-});
-
 after(async () => {
-	for (const dir of roots) await rm(dir, { recursive: true, force: true });
+	await cleanupRoots();
 });
 
 describe("soft refresh", () => {
 	it("serves new client bytes without a restart and reports counters", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-refresh-");
 		await writeFile(join(paths.clientDir, "index.html"), "v1");
 		const { hub, server } = await boot(paths);
 
@@ -146,7 +88,7 @@ describe("soft refresh", () => {
 	});
 
 	it("re-resolves policy for live sessions and keeps the child", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-refresh-");
 		const project = join(paths.dir, "project");
 		await mkdir(project, { recursive: true });
 		await writeFile(join(paths.dataDir, "pixip.json"), JSON.stringify({ commands: { deny: ["logout"] } }));
@@ -174,7 +116,7 @@ describe("soft refresh", () => {
 	});
 
 	it("broadcasts a fresh session list to list sockets", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-refresh-");
 		const { hub, server } = await boot(paths);
 		const inbox = await connect(`${server.url}ws`);
 		await waitFor(() => inbox.frames.some((frame) => frame["t"] === "hello"));
@@ -191,7 +133,7 @@ describe("soft refresh", () => {
 	});
 
 	it("fails a malformed policy refresh without half-applying it", async () => {
-		const paths = await fixtureRoot();
+		const paths = await fixtureRoot("pixip-refresh-");
 		const { hub, server } = await boot(paths);
 		const created = await hub.create(paths.dir);
 		const inbox = await connect(`${server.url}ws?session=${created.id}`);
