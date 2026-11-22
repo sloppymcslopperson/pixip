@@ -11,7 +11,7 @@ import { type NameSource } from "./sessionIndex.ts";
 import { isBlockingUiMethod, SYMBOL_PENDING, coverageKey } from "./jsonl.ts";
 import { resolveSessionPolicy, type CommandLayer } from "./commands.ts";
 import { frameError, frameEvent, frameFooter, frameRestarting, frameSessions, frameStatus } from "./wire.ts";
-import { CommandPolicy, FooterData, SessionInfo } from "./wire.ts";
+import type { CommandPolicy, FooterData, SessionInfo } from "./wire.ts";
 
 const run = promisify(execFile);
 

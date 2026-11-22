@@ -21,7 +21,7 @@ import {
 } from "./sessionIndex.ts";
 import { moveFile, nameFromLines, pathExists, readFromEnd, readHead, uniquePath, SYMBOL_PENDING } from "./jsonl.ts";
 import { type CommandLayer } from "./commands.ts";
-import { CommandPolicy, SessionInfo } from "./wire.ts";
+import type { CommandPolicy, SessionInfo } from "./wire.ts";
 
 const run = promisify(execFile);
 

@@ -23,7 +23,7 @@ import {
 } from "./jsonl.ts";
 import { resolveSessionPolicy, type CommandLayer } from "./commands.ts";
 import { framePolicy } from "./wire.ts";
-import { BashResult, CommandPolicy, SessionInfo } from "./wire.ts";
+import type { BashResult, CommandPolicy, SessionInfo } from "./wire.ts";
 
 const run = promisify(execFile);
 

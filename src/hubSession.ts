@@ -15,7 +15,7 @@ import { resolveModelArgument, resolveThinkingArgument } from "./client/commands
 import { exportFileName } from "./client/sessionInfo.js";
 import { fallbackTitle, normalizeTitle, titlePrompt } from "./titles.ts";
 import { frameEvent } from "./wire.ts";
-import { CommandPolicy, DynamicCommand, ModelSummary, SessionInfo } from "./wire.ts";
+import type { CommandPolicy, DynamicCommand, ModelSummary, SessionInfo } from "./wire.ts";
 
 const run = promisify(execFile);
 
