@@ -60,5 +60,9 @@ export function filterDirEntries(entries, query) {
 	const list = Array.isArray(entries) ? entries : [];
 	const needle = typeof query === "string" ? query.trim().toLowerCase() : "";
 	if (!needle) return list;
-	return list.filter((entry) => String(entry?.name ?? "").toLowerCase().includes(needle));
+	return list.filter((entry) =>
+		String(entry?.name ?? "")
+			.toLowerCase()
+			.includes(needle),
+	);
 }

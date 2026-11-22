@@ -15,19 +15,22 @@ import {
 	toolCallsOf,
 } from "./render.js";
 import { classifyInput, commandQuery, filterCommands, isAllowed, menuCatalog, menuInsertText } from "./commands.js";
-import { MAX_IMAGE_BYTES, MAX_IMAGE_EDGE, MAX_IMAGE_SOURCE_BYTES, MAX_UPLOAD_BYTES, attachmentPrompt, looksLikeImage, sizeLabel } from "./attachments.js";
+import {
+	MAX_IMAGE_BYTES,
+	MAX_IMAGE_EDGE,
+	MAX_IMAGE_SOURCE_BYTES,
+	MAX_UPLOAD_BYTES,
+	attachmentPrompt,
+	looksLikeImage,
+	sizeLabel,
+} from "./attachments.js";
 import { crumbTrail, filterDirEntries, initialDirectory, parentDirectory } from "./directoryPicker.js";
 import { queueCount, queueFromEvent, queueTexts, restoreText } from "./queue.js";
 import { flattenTree } from "./tree.js";
 import { addonStatusText, addonWidgets, applyAddonUi, createAddonUi } from "./addonUi.js";
 import { createSessionCache } from "./sessionCache.js";
 import { formatSession } from "./sessionInfo.js";
-import {
-	contextLevel,
-	footerPwdLine,
-	footerStatsLeft,
-	footerStatsRight,
-} from "./footer.js";
+import { contextLevel, footerPwdLine, footerStatsLeft, footerStatsRight } from "./footer.js";
 import {
 	COLLAPSED_STORAGE_KEY,
 	KEEP_ACTIVE_STORAGE_KEY,
@@ -206,7 +209,7 @@ function route() {
 			history.replaceState(null, "", "");
 			void showList();
 		}
-	} else showList();
+	} else void showList();
 }
 
 async function showList() {
@@ -290,7 +293,7 @@ function renderList(sessions, defaultCwd = state.defaultCwd, home = state.home) 
 	ui.list.textContent = "";
 	const form = document.createElement("form");
 	form.id = "new-row";
-	const value = draft !== undefined ? draft : state.defaultCwd ?? "";
+	const value = draft !== undefined ? draft : (state.defaultCwd ?? "");
 	form.innerHTML = `<input name="cwd" value="${escapeHtml(value)}" placeholder="/path/to/project" autocapitalize="off" autocorrect="off" spellcheck="false" /><button type="button" class="browse">browse</button><button type="submit">new</button>`;
 	form.addEventListener("submit", (event) => {
 		event.preventDefault();
@@ -686,15 +689,20 @@ async function deleteSession(session) {
 		await refreshDashboard();
 		const token = result?.undo?.token;
 		if (token) {
-			actionToast(`deleted ${session.name ?? session.id.slice(0, 8)}`, "undo", async () => {
-				try {
-					await apiJson(`/api/trash/${encodeURIComponent(token)}/restore`, { method: "POST" });
-					await refreshDashboard();
-					toast("restored");
-				} catch (error) {
-					toast(`restore failed: ${error.message}`);
-				}
-			}, 10_000);
+			actionToast(
+				`deleted ${session.name ?? session.id.slice(0, 8)}`,
+				"undo",
+				async () => {
+					try {
+						await apiJson(`/api/trash/${encodeURIComponent(token)}/restore`, { method: "POST" });
+						await refreshDashboard();
+						toast("restored");
+					} catch (error) {
+						toast(`restore failed: ${error.message}`);
+					}
+				},
+				10_000,
+			);
 		} else {
 			toast("deleted");
 		}
@@ -856,7 +864,9 @@ function renderStoredSheet(kind, items) {
 async function restoreStored(kind, item) {
 	const id = item.logicalId ?? item.id;
 	try {
-		await apiJson(`/api/${kind === "archive" ? "archived" : "trash"}/${encodeURIComponent(id)}/restore`, { method: "POST" });
+		await apiJson(`/api/${kind === "archive" ? "archived" : "trash"}/${encodeURIComponent(id)}/restore`, {
+			method: "POST",
+		});
 		await refreshDashboard();
 		toast("restored");
 		await showStoredSheet(kind);
@@ -1169,7 +1179,10 @@ function handleFrame(frame) {
 			restoreClearedQueue(frame);
 			break;
 		case "tree":
-			openTreeSheet(Array.isArray(frame.tree) ? frame.tree : [], typeof frame.leafId === "string" ? frame.leafId : null);
+			openTreeSheet(
+				Array.isArray(frame.tree) ? frame.tree : [],
+				typeof frame.leafId === "string" ? frame.leafId : null,
+			);
 			break;
 		case "fork":
 			if (frame.cancelled) toast("fork cancelled");
@@ -1391,9 +1404,10 @@ function renderTranscript(distance = null) {
 	}
 	const older = state.more && oldestEntryId() ? earlierButton() : null;
 
-	ui.log.innerHTML = entries.length === 0
-		? '<div class="block meta">no messages yet — say something</div>'
-		: htmlOf(entries.slice(start), calls);
+	ui.log.innerHTML =
+		entries.length === 0
+			? '<div class="block meta">no messages yet — say something</div>'
+			: htmlOf(entries.slice(start), calls);
 	if (older) ui.log.prepend(older);
 	restore();
 	const trackTools = () => {
@@ -1450,9 +1464,7 @@ function renderResume(entries) {
 function appendRestartNotice(interrupted) {
 	const note = document.createElement("div");
 	note.className = "block meta restart";
-	note.textContent = interrupted
-		? "pixip restarted — the previous turn was interrupted"
-		: "pixip restarted";
+	note.textContent = interrupted ? "pixip restarted — the previous turn was interrupted" : "pixip restarted";
 	ui.log.append(note);
 	scrollToEnd();
 }
@@ -1601,11 +1613,7 @@ function handleEvent(event) {
 function handleDelta(delta) {
 	if (delta.type !== "text_delta" && delta.type !== "text_end") return;
 	if (!state.streaming) {
-		state.streaming = appendBlock(
-			"assistant",
-			'<div class="who">pi</div><div class="text live-text"></div>',
-			true,
-		);
+		state.streaming = appendBlock("assistant", '<div class="who">pi</div><div class="text live-text"></div>', true);
 	}
 	const target = state.streaming.querySelector(".live-text");
 	if (!target) return;
@@ -1890,7 +1898,10 @@ function openExportSheet(html, jsonl) {
 	note.textContent = "downloads only · nothing is sent to the model";
 	const actions = document.createElement("div");
 	actions.className = "sheet-actions";
-	for (const [label, url] of [["download HTML", html], ["download JSONL", jsonl]]) {
+	for (const [label, url] of [
+		["download HTML", html],
+		["download JSONL", jsonl],
+	]) {
 		if (!url) continue;
 		const link = document.createElement("a");
 		link.className = "sheet-download";
@@ -2005,7 +2016,7 @@ const builtinHandlers = {
 		}
 		send({ t: "set_thinking_query", query: args });
 	},
-	"new"() {
+	new() {
 		send({ t: "new_session" });
 	},
 	resume() {
@@ -2104,8 +2115,10 @@ function renderAttachment() {
 	name.textContent = attachment.name;
 	const sub = document.createElement("span");
 	sub.className = "attachment-sub";
-	if (attachment.kind === "image") sub.textContent = `${sizeLabel(attachment.size)} · ${attachment.width}×${attachment.height}`;
-	else if (attachment.kind === "file") sub.textContent = `${sizeLabel(attachment.size)} · ${attachment.uploading ? "uploading…" : "ready"}`;
+	if (attachment.kind === "image")
+		sub.textContent = `${sizeLabel(attachment.size)} · ${attachment.width}×${attachment.height}`;
+	else if (attachment.kind === "file")
+		sub.textContent = `${sizeLabel(attachment.size)} · ${attachment.uploading ? "uploading…" : "ready"}`;
 	else if (attachment.kind === "busy") sub.textContent = attachment.label;
 	else {
 		card.classList.add("error");
@@ -2217,7 +2230,11 @@ async function prepareImage(file) {
 
 async function uploadAttachment(file, seq) {
 	if (file.size > MAX_UPLOAD_BYTES) {
-		state.pendingAttachment = { kind: "error", name: file.name || "file", error: `file is ${sizeLabel(file.size)}; max 100 MB` };
+		state.pendingAttachment = {
+			kind: "error",
+			name: file.name || "file",
+			error: `file is ${sizeLabel(file.size)}; max 100 MB`,
+		};
 		renderAttachment();
 		return;
 	}
@@ -2364,13 +2381,14 @@ function renderReplace(entries, more) {
 }
 
 function applyPolicy(policy) {
-	state.policy = policy && typeof policy === "object"
-		? {
-				allow: Array.isArray(policy.allow) ? policy.allow.filter((name) => typeof name === "string") : [],
-				deny: Array.isArray(policy.deny) ? policy.deny.filter((name) => typeof name === "string") : [],
-				bash: policy.bash !== false,
-			}
-		: null;
+	state.policy =
+		policy && typeof policy === "object"
+			? {
+					allow: Array.isArray(policy.allow) ? policy.allow.filter((name) => typeof name === "string") : [],
+					deny: Array.isArray(policy.deny) ? policy.deny.filter((name) => typeof name === "string") : [],
+					bash: policy.bash !== false,
+				}
+			: null;
 }
 
 /** Denied commands never reach the model; they get a local notice instead. */
@@ -2438,9 +2456,10 @@ function copySheet(text) {
 
 function submitSlash(text, attachment) {
 	const busy = state.info?.state === "busy";
-	const images = attachment?.kind === "image"
-		? [{ type: "image", data: attachment.data, mimeType: attachment.mimeType }]
-		: undefined;
+	const images =
+		attachment?.kind === "image"
+			? [{ type: "image", data: attachment.data, mimeType: attachment.mimeType }]
+			: undefined;
 	const outgoing = attachment?.kind === "file" && attachment.path ? attachmentPrompt(text, attachment.path) : text;
 	send({ t: "prompt", text: outgoing, ...(busy ? { streamingBehavior: "steer" } : {}), ...(images ? { images } : {}) });
 	// No optimistic user echo: an extension command may consume the prompt, and
@@ -2451,9 +2470,10 @@ function submitSlash(text, attachment) {
 
 function submitText(text, attachment) {
 	const busy = state.info?.state === "busy";
-	const images = attachment?.kind === "image"
-		? [{ type: "image", data: attachment.data, mimeType: attachment.mimeType }]
-		: undefined;
+	const images =
+		attachment?.kind === "image"
+			? [{ type: "image", data: attachment.data, mimeType: attachment.mimeType }]
+			: undefined;
 	const outgoing = attachment?.kind === "file" && attachment.path ? attachmentPrompt(text, attachment.path) : text;
 	send({ t: busy ? "steer" : "prompt", text: outgoing, ...(images ? { images } : {}) });
 	const content = [];

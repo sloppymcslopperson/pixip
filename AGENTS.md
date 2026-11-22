@@ -1,4 +1,5 @@
 <!-- fit:begin -->
+
 ## FIT tickets
 
 This repository uses FIT: tickets are Markdown files under `fit/open/`,
@@ -25,6 +26,7 @@ Tools: `fit_init`, `fit_list`, `fit_show`, `fit_new`, `fit_new_batch`,
 `fit_check`.
 
 Guardrails:
+
 - Prefer dedicated tools over direct manipulation when one exists. For FIT
   operations, use the FIT tools rather than ad-hoc shell or editor changes.
 - Do not read ticket files or scan ticket bodies unless the task requires it.
@@ -34,6 +36,7 @@ Guardrails:
   from `fit_list` or `fit_show`.
 - If a ticket changed since you read it, re-read it instead of forcing a
   write.
+
 <!-- fit:end -->
 
 ## pixip
@@ -59,7 +62,7 @@ Rules:
   re-encode a Pi record on the path to the socket; that is both the latency
   budget and the Rust-port boundary.
 - `--data-dir` is the test isolation boundary (Pi gets `--session-dir
-  <data-dir>/sessions`). Never point tests at `~/.pi/agent/sessions`, and never
+<data-dir>/sessions`). Never point tests at `~/.pi/agent/sessions`, and never
   attach two processes to one live session file.
 - The UI has no authentication. Binding is loopback by default; binding a
   non-loopback address is an explicit opt-in and prints a warning. Do not add a

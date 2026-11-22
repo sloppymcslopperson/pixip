@@ -10,8 +10,25 @@ import { resolveSessionPolicy, type CommandLayer } from "./commands.ts";
 import { resolveModelArgument, resolveThinkingArgument } from "./client/commands.js";
 import { exportFileName } from "./client/sessionInfo.js";
 import { fallbackTitle, normalizeTitle, titlePrompt } from "./titles.ts";
-import { frameError, frameEvent, frameFooter, frameModels, framePolicy, frameRestarting, frameSessions, frameSnapshot, frameStatus } from "./wire.ts";
-import type { BashResult, CommandPolicy, DynamicCommand, FooterData, ModelSummary, SessionInfo, SessionState } from "./wire.ts";
+import {
+	frameError,
+	frameEvent,
+	frameFooter,
+	framePolicy,
+	frameRestarting,
+	frameSessions,
+	frameSnapshot,
+	frameStatus,
+} from "./wire.ts";
+import type {
+	BashResult,
+	CommandPolicy,
+	DynamicCommand,
+	FooterData,
+	ModelSummary,
+	SessionInfo,
+	SessionState,
+} from "./wire.ts";
 
 const run = promisify(execFile);
 
@@ -213,8 +230,7 @@ export class Hub {
 
 	async list(): Promise<SessionInfo[]> {
 		const records = await this.readIndex();
-		const recordFor = (piId: string) =>
-			records.find((record) => record.piId === piId || record.piIds.includes(piId));
+		const recordFor = (piId: string) => records.find((record) => record.piId === piId || record.piIds.includes(piId));
 		const seen = new Set<string>();
 		const infos: SessionInfo[] = [];
 		// Live sessions first: a just-created session has no JSONL until its first
@@ -495,11 +511,7 @@ export class Hub {
 	 * One window of entries immediately before `before`, read from the JSONL while
 	 * the live session keeps running. `more` says whether older entries remain.
 	 */
-	async earlier(
-		id: string,
-		before: string,
-		limit = WINDOW_ENTRIES,
-	): Promise<{ entries: unknown[]; more: boolean }> {
+	async earlier(id: string, before: string, limit = WINDOW_ENTRIES): Promise<{ entries: unknown[]; more: boolean }> {
 		const path = await this.sessionPath(id);
 		if (!path || !before) return { entries: [], more: false };
 
@@ -716,7 +728,10 @@ export class Hub {
 
 	async setModel(id: string, provider: string, modelId: string): Promise<void> {
 		const live = this.require(id);
-		const data = (await live.proc.command({ type: "set_model", provider, modelId })) as { id?: string; provider?: string };
+		const data = (await live.proc.command({ type: "set_model", provider, modelId })) as {
+			id?: string;
+			provider?: string;
+		};
 		live.info.model = data.id ?? modelId;
 		this.emitStatus(live);
 		await this.sendFooter(live);
@@ -846,8 +861,9 @@ export class Hub {
 			const result = resolveModelArgument(models, query) as { model?: ModelSummary };
 			return result.model;
 		};
-		const sessionModel = models.find((model) => model.id === live.info.model) ?? (models.length === 1 ? models[0] : undefined);
-		const chosen = requested ? resolve(requested) ?? sessionModel : sessionModel;
+		const sessionModel =
+			models.find((model) => model.id === live.info.model) ?? (models.length === 1 ? models[0] : undefined);
+		const chosen = requested ? (resolve(requested) ?? sessionModel) : sessionModel;
 		if (!chosen) return requested || live.info.model || undefined;
 		return chosen.provider ? `${chosen.provider}/${chosen.id}` : chosen.id;
 	}
@@ -933,7 +949,7 @@ export class Hub {
 		const data = (await live.proc.command(
 			{ type: "fork", entryId },
 			{ timeoutMs: this.options.promptTimeoutMs ?? 0 },
-		) as { text?: unknown; cancelled?: unknown } | null);
+		)) as { text?: unknown; cancelled?: unknown } | null;
 		if (data?.cancelled) return { text: null, cancelled: true };
 		await this.rekeyFromState(live);
 		return { text: typeof data?.text === "string" ? data.text : null, cancelled: false };
@@ -942,10 +958,9 @@ export class Hub {
 	/** `/clone`: duplicate the active branch; same re-key path as `/fork`. */
 	async clone(id: string): Promise<{ cancelled: boolean }> {
 		const live = this.require(id);
-		const data = (await live.proc.command(
-			{ type: "clone" },
-			{ timeoutMs: this.options.promptTimeoutMs ?? 0 },
-		) as { cancelled?: unknown } | null);
+		const data = (await live.proc.command({ type: "clone" }, { timeoutMs: this.options.promptTimeoutMs ?? 0 })) as {
+			cancelled?: unknown;
+		} | null;
 		if (data?.cancelled) return { cancelled: true };
 		await this.rekeyFromState(live);
 		return { cancelled: false };
@@ -979,7 +994,10 @@ export class Hub {
 		if (this.live.has(header.id)) throw new Error(`session ${header.id} is already attached`);
 
 		await mkdir(this.options.sessionsDir, { recursive: true });
-		const stamp = (typeof header.timestamp === "string" ? header.timestamp : new Date().toISOString()).replace(/[:.]/g, "-");
+		const stamp = (typeof header.timestamp === "string" ? header.timestamp : new Date().toISOString()).replace(
+			/[:.]/g,
+			"-",
+		);
 		const target = join(this.options.sessionsDir, `${stamp}_${header.id}.jsonl`);
 		if (resolve(target) !== source) await writeFile(target, text);
 
@@ -999,10 +1017,11 @@ export class Hub {
 		// The live session now *is* the imported one: follow its identity and cwd.
 		live.info.logicalId = logicalId;
 		live.info.cwd = imported.cwd;
-		const result = (await live.proc.command(
-			{ type: "switch_session", sessionPath: target },
-			{ timeoutMs: this.options.promptTimeoutMs ?? 0 },
-		) as { cancelled?: boolean } | null) ?? {};
+		const result =
+			((await live.proc.command(
+				{ type: "switch_session", sessionPath: target },
+				{ timeoutMs: this.options.promptTimeoutMs ?? 0 },
+			)) as { cancelled?: boolean } | null) ?? {};
 		if (result.cancelled) return { info: live.info, cancelled: true };
 
 		const info = await this.rekeyFromState(live);
@@ -1064,10 +1083,10 @@ export class Hub {
 	 */
 	async newSession(id: string): Promise<SessionInfo> {
 		const live = this.require(id);
-		const result = (await live.proc.command(
-			{ type: "new_session" },
-			{ timeoutMs: this.options.promptTimeoutMs ?? 0 },
-		) as { cancelled?: boolean } | null) ?? {};
+		const result =
+			((await live.proc.command({ type: "new_session" }, { timeoutMs: this.options.promptTimeoutMs ?? 0 })) as {
+				cancelled?: boolean;
+			} | null) ?? {};
 		if (result.cancelled) throw new Error("new session was cancelled by an extension");
 		await this.clearUploads(live.info.logicalId ?? live.info.id);
 		return await this.rekeyFromState(live);
@@ -1375,11 +1394,7 @@ export class Hub {
 	 * records, these are questions: the child is blocked until one response
 	 * arrives, so they must survive a browser reload or background reconnect.
 	 */
-	private cacheBlockingUi(
-		live: LiveSession,
-		request: { id?: unknown; method?: string },
-		raw: string,
-	): void {
+	private cacheBlockingUi(live: LiveSession, request: { id?: unknown; method?: string }, raw: string): void {
 		if (!isBlockingUiMethod(request.method)) return;
 		const id = typeof request.id === "string" ? request.id : "";
 		if (!id) return;
@@ -1567,9 +1582,9 @@ export class Hub {
 
 	private async readIndex(): Promise<SessionIndexRecord[]> {
 		if (this.index) return this.index;
-		let records: SessionIndexRecord[] = [];
+		const records: SessionIndexRecord[] = [];
 		try {
-			const parsed = JSON.parse(await readFile(this.options.indexPath, "utf8")) as unknown;
+			const parsed: unknown = JSON.parse(await readFile(this.options.indexPath, "utf8"));
 			if (Array.isArray(parsed)) {
 				for (const raw of parsed) records.push(...normalizeRecord(raw, this.options.sessionsDir));
 			}
@@ -1602,8 +1617,7 @@ export class Hub {
 			if (!piIds.includes(info.id)) piIds.push(info.id);
 			const name = info.name ?? existing?.name;
 			const source =
-				nameSource ??
-				(info.name !== undefined && existing?.name !== info.name ? "manual" : existing?.nameSource);
+				nameSource ?? (info.name !== undefined && existing?.name !== info.name ? "manual" : existing?.nameSource);
 			const next: SessionIndexRecord = {
 				logicalId,
 				piId: info.id,
@@ -1620,7 +1634,10 @@ export class Hub {
 	}
 
 	/** Archive/trash one session; shared by single, bulk and delete paths. */
-	private async storeSession(id: string, root: string): Promise<{ info: SessionInfo; record: SessionIndexRecord; dir: string }> {
+	private async storeSession(
+		id: string,
+		root: string,
+	): Promise<{ info: SessionInfo; record: SessionIndexRecord; dir: string }> {
 		const live = this.findLive(id);
 		if (live) {
 			const state = live.info.state;
@@ -1669,10 +1686,7 @@ export class Hub {
 		let record = records.find((item) => item.logicalId === id || item.piId === id || item.piIds.includes(id));
 		if (!record && info) {
 			record = records.find(
-				(item) =>
-					item.logicalId === info.logicalId ||
-					item.piId === info.id ||
-					item.piIds.includes(info.id),
+				(item) => item.logicalId === info.logicalId || item.piId === info.id || item.piIds.includes(info.id),
 			);
 		}
 		if (!record) {
@@ -1823,7 +1837,10 @@ export class Hub {
 		return items;
 	}
 
-	private async findStored(root: string, id: string): Promise<{ dir: string; record: StoredSessionRecord } | undefined> {
+	private async findStored(
+		root: string,
+		id: string,
+	): Promise<{ dir: string; record: StoredSessionRecord } | undefined> {
 		const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
 		for (const entry of entries) {
 			if (!entry.isDirectory()) continue;
@@ -1840,7 +1857,12 @@ export class Hub {
 	private async readStoredRecord(dir: string): Promise<StoredSessionRecord | undefined> {
 		try {
 			const parsed = JSON.parse(await readFile(join(dir, "meta.json"), "utf8")) as Partial<StoredSessionRecord>;
-			if (typeof parsed.logicalId !== "string" || typeof parsed.piId !== "string" || typeof parsed.storedAt !== "string") return undefined;
+			if (
+				typeof parsed.logicalId !== "string" ||
+				typeof parsed.piId !== "string" ||
+				typeof parsed.storedAt !== "string"
+			)
+				return undefined;
 			const piIds = Array.isArray(parsed.piIds)
 				? parsed.piIds.filter((id): id is string => typeof id === "string")
 				: [];
@@ -2085,9 +2107,7 @@ function normalizeRecord(raw: unknown, fallbackCwd: string): SessionIndexRecord[
 	if (!raw || typeof raw !== "object") return [];
 	const record = raw as Partial<SessionIndexRecord>;
 	if (typeof record.logicalId !== "string" || typeof record.piId !== "string") return [];
-	const piIds = Array.isArray(record.piIds)
-		? record.piIds.filter((id): id is string => typeof id === "string")
-		: [];
+	const piIds = Array.isArray(record.piIds) ? record.piIds.filter((id): id is string => typeof id === "string") : [];
 	return [
 		{
 			logicalId: record.logicalId,
@@ -2153,7 +2173,6 @@ async function pathExists(path: string): Promise<boolean> {
 		return false;
 	}
 }
-
 
 /** First `maxBytes` of a file, decoded once (never a whole-session read). */
 async function readHead(path: string, maxBytes: number): Promise<{ text: string }> {
@@ -2263,7 +2282,7 @@ function truncateContent(content: unknown, limit: number): unknown {
 		if (!block || typeof block !== "object") return block;
 		const copy = { ...(block as Record<string, unknown>) };
 		for (const key of ["text", "thinking", "output"]) {
-			if (typeof copy[key] === "string") copy[key] = truncateText(copy[key] as string, limit);
+			if (typeof copy[key] === "string") copy[key] = truncateText(copy[key], limit);
 		}
 		if (copy["arguments"] && typeof copy["arguments"] === "object") {
 			copy["arguments"] = truncateArgs(copy["arguments"], limit);
@@ -2276,7 +2295,7 @@ function truncateContent(content: unknown, limit: number): unknown {
 function truncateEntry(entry: unknown, limit: number): unknown {
 	if (!entry || typeof entry !== "object") return entry;
 	const copy = { ...(entry as Record<string, unknown>) };
-	if (typeof copy["summary"] === "string") copy["summary"] = truncateText(copy["summary"] as string, limit);
+	if (typeof copy["summary"] === "string") copy["summary"] = truncateText(copy["summary"], limit);
 	const message = copy["message"];
 	if (message && typeof message === "object") {
 		const next = { ...(message as Record<string, unknown>) };
@@ -2299,11 +2318,7 @@ export function frameSessionList(infos: SessionInfo[]): string {
 	return frameSessions(infos);
 }
 
-export function frameForSnapshot(
-	info: SessionInfo,
-	entries: unknown[],
-	leafId: string | null,
-): string {
+export function frameForSnapshot(info: SessionInfo, entries: unknown[], leafId: string | null): string {
 	return frameSnapshot(info, entries, leafId);
 }
 

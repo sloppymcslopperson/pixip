@@ -106,7 +106,10 @@ describe("archive and trash", () => {
 
 		const archived = await hub.archive(created.id);
 		assert.equal(archived.state, "stopped");
-		assert.equal((await hub.list()).some((session) => session.id === created.id), false);
+		assert.equal(
+			(await hub.list()).some((session) => session.id === created.id),
+			false,
+		);
 		assert.equal(await exists(file), false);
 
 		const items = await hub.listArchived();
@@ -116,7 +119,10 @@ describe("archive and trash", () => {
 
 		const restored = await hub.restoreArchived(created.logicalId ?? created.id);
 		assert.equal(restored.logicalId, created.logicalId);
-		assert.equal((await hub.list()).some((session) => session.logicalId === created.logicalId), true);
+		assert.equal(
+			(await hub.list()).some((session) => session.logicalId === created.logicalId),
+			true,
+		);
 		assert.equal(await exists(file), true);
 		assert.deepEqual(await hub.listArchived(), []);
 		await hub.shutdown();
@@ -131,14 +137,20 @@ describe("archive and trash", () => {
 
 		const deleted = await hub.deleteSession(created.id);
 		assert.equal(deleted.token, created.logicalId);
-		assert.equal((await hub.list()).some((session) => session.id === created.id), false);
+		assert.equal(
+			(await hub.list()).some((session) => session.id === created.id),
+			false,
+		);
 		assert.equal(await exists(file), false);
 		const trash = await hub.listTrash();
 		assert.equal(trash.length, 1);
 		assert.ok((trash[0]?.expiresAt ?? 0) > Date.now());
 
 		const restored = await hub.restoreTrash(deleted.token);
-		assert.equal((await hub.list()).some((session) => session.id === restored.id), true);
+		assert.equal(
+			(await hub.list()).some((session) => session.id === restored.id),
+			true,
+		);
 		assert.equal(await exists(file), true);
 		assert.deepEqual(await hub.listTrash(), []);
 
@@ -174,9 +186,18 @@ describe("archive and trash", () => {
 		assert.equal(result.archived.length, 2);
 		assert.deepEqual(result.failed, []);
 		const listed = await hub.list();
-		assert.equal(listed.some((session) => session.id === first.id), false);
-		assert.equal(listed.some((session) => session.id === second.id), false);
-		assert.equal(listed.some((session) => session.id === live.id), true);
+		assert.equal(
+			listed.some((session) => session.id === first.id),
+			false,
+		);
+		assert.equal(
+			listed.some((session) => session.id === second.id),
+			false,
+		);
+		assert.equal(
+			listed.some((session) => session.id === live.id),
+			true,
+		);
 		await hub.shutdown();
 
 		const busyPaths = await fixtureRoot();

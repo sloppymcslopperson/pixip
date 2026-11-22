@@ -2,14 +2,22 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { markdownToHtml } from "../src/client/markdown.js";
-import { ansiToHtml, bashCardHtml, escapeHtml, pendingErrorHtml, pendingSessionHtml, renderAssistantBody, renderMessage, summarizeArgs, textOf, toolBlock } from "../src/client/render.js";
+import {
+	ansiToHtml,
+	bashCardHtml,
+	escapeHtml,
+	pendingErrorHtml,
+	pendingSessionHtml,
+	renderAssistantBody,
+	renderMessage,
+	summarizeArgs,
+	textOf,
+	toolBlock,
+} from "../src/client/render.js";
 
 describe("ansi", () => {
 	it("maps SGR colors to spans and leaves text alone", () => {
-		assert.equal(
-			ansiToHtml("\u001b[31mred\u001b[0m plain"),
-			'<span style="color:#f7768e">red</span> plain',
-		);
+		assert.equal(ansiToHtml("\u001b[31mred\u001b[0m plain"), '<span style="color:#f7768e">red</span> plain');
 	});
 
 	it("keeps nested attributes on one span", () => {
@@ -41,7 +49,13 @@ describe("rendering", () => {
 	});
 
 	it("joins text content blocks", () => {
-		assert.equal(textOf([{ type: "text", text: "a" }, { type: "thinking", thinking: "b" }]), "ab");
+		assert.equal(
+			textOf([
+				{ type: "text", text: "a" },
+				{ type: "thinking", thinking: "b" },
+			]),
+			"ab",
+		);
 	});
 
 	it("renders recorded user images as thumbnails without losing text or the fork action", () => {
@@ -105,7 +119,13 @@ describe("rendering", () => {
 		const failed = bashCardHtml({ command: "false", output: "", exitCode: 1 });
 		assert.match(failed, /class="block bash error empty"/);
 		assert.match(failed, /exit 1/);
-		const truncated = bashCardHtml({ command: "yes", output: "x", exitCode: 0, truncated: true, fullOutputPath: "/tmp/full.log" });
+		const truncated = bashCardHtml({
+			command: "yes",
+			output: "x",
+			exitCode: 0,
+			truncated: true,
+			fullOutputPath: "/tmp/full.log",
+		});
 		assert.match(truncated, /truncated/);
 		assert.match(truncated, /\/tmp\/full\.log/);
 	});
@@ -134,7 +154,10 @@ describe("markdown", () => {
 
 	it("opens links in a new tab", () => {
 		const html = markdownToHtml("[docs](https://example.com/a?b=1&c=2)");
-		assert.match(html, /<a href="https:\/\/example.com\/a\?b=1&amp;c=2" target="_blank" rel="noopener noreferrer">docs<\/a>/);
+		assert.match(
+			html,
+			/<a href="https:\/\/example.com\/a\?b=1&amp;c=2" target="_blank" rel="noopener noreferrer">docs<\/a>/,
+		);
 	});
 
 	it("keeps in-page anchors and drops unsafe schemes", () => {
@@ -145,7 +168,7 @@ describe("markdown", () => {
 	});
 
 	it("escapes raw html instead of executing it", () => {
-		const html = markdownToHtml("<div onclick=\"x()\">hi</div>\n\n<script>alert(1)</script>");
+		const html = markdownToHtml('<div onclick="x()">hi</div>\n\n<script>alert(1)</script>');
 		assert.equal(html.includes("<div"), false);
 		assert.equal(html.includes("<script"), false);
 		assert.match(html, /&lt;div onclick=&quot;x\(\)&quot;&gt;hi&lt;\/div&gt;/);
@@ -154,7 +177,7 @@ describe("markdown", () => {
 
 	it("escapes markup inside fenced code and keeps it verbatim", () => {
 		const html = markdownToHtml("```\n<b>a</b>\n  indented\n```");
-		assert.match(html, /&lt;b&gt;a&lt;\/b&gt;\n  indented/);
+		assert.match(html, /&lt;b&gt;a&lt;\/b&gt;\n {2}indented/);
 	});
 
 	it("renders nothing for empty input", () => {
@@ -178,7 +201,10 @@ describe("markdown", () => {
 		assert.match(withId, /data-fork="e&quot;1"/);
 		assert.match(withId, /class="fork-action"/);
 		// Assistant messages never get the affordance.
-		assert.equal(renderMessage({ role: "assistant", content: [{ type: "text", text: "hi" }] }, "a1").includes("data-fork"), false);
+		assert.equal(
+			renderMessage({ role: "assistant", content: [{ type: "text", text: "hi" }] }, "a1").includes("data-fork"),
+			false,
+		);
 	});
 
 	it("keeps thinking blocks as escaped ansi text", () => {
@@ -189,13 +215,9 @@ describe("markdown", () => {
 	});
 });
 
-
 describe("pending new session", () => {
 	it("renders the starting row before an id exists", () => {
-		assert.equal(
-			pendingSessionHtml(),
-			'<div class="block meta starting pending-session">starting session…</div>',
-		);
+		assert.equal(pendingSessionHtml(), '<div class="block meta starting pending-session">starting session…</div>');
 	});
 
 	it("renders and escapes a create failure", () => {

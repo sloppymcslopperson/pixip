@@ -136,7 +136,9 @@ describe("built-in commands over the socket", () => {
 		await waitFor(() => framesOf(inbox, "snapshot").length > 0);
 
 		inbox.ws.send(JSON.stringify({ t: "compact", instructions: "keep the API notes" }));
-		await waitFor(() => framesOf(inbox, "event").some((frame) => (frame["ev"] as { type?: string })?.type === "compaction_end"));
+		await waitFor(() =>
+			framesOf(inbox, "event").some((frame) => (frame["ev"] as { type?: string })?.type === "compaction_end"),
+		);
 		const compact = (await records(paths)).find((record) => record["type"] === "compact");
 		assert.equal(compact?.["customInstructions"], "keep the API notes");
 
@@ -159,7 +161,9 @@ describe("built-in commands over the socket", () => {
 		await waitFor(() => framesOf(inbox, "snapshot").length > 0);
 
 		inbox.ws.send(JSON.stringify({ t: "set_session_name", name: "dogfood" }));
-		await waitFor(() => framesOf(inbox, "status").some((frame) => (frame["session"] as { name?: string })?.name === "dogfood"));
+		await waitFor(() =>
+			framesOf(inbox, "status").some((frame) => (frame["session"] as { name?: string })?.name === "dogfood"),
+		);
 		const rename = (await records(paths)).find((record) => record["type"] === "set_session_name");
 		assert.equal(rename?.["name"], "dogfood");
 
@@ -181,7 +185,10 @@ describe("built-in commands over the socket", () => {
 		await waitFor(() => framesOf(inbox, "opened").some((frame) => frame["rekey"] === true));
 		const opened = framesOf(inbox, "opened").at(-1);
 		assert.equal((opened?.["session"] as { id?: string })?.id, NEW_ID);
-		assert.equal((await records(paths)).some((record) => record["type"] === "new_session"), true);
+		assert.equal(
+			(await records(paths)).some((record) => record["type"] === "new_session"),
+			true,
+		);
 
 		// The socket's active id followed the re-key: a normal command still works.
 		inbox.ws.send(JSON.stringify({ t: "models" }));
@@ -333,10 +340,18 @@ describe("built-in commands over the socket", () => {
 		const TREE = {
 			tree: [
 				{
-					entry: { type: "message", id: "u1", parentId: null, message: { role: "user", content: [{ type: "text", text: "first" }] } },
+					entry: {
+						type: "message",
+						id: "u1",
+						parentId: null,
+						message: { role: "user", content: [{ type: "text", text: "first" }] },
+					},
 					label: "main",
 					children: [
-						{ entry: { type: "message", id: "a1", parentId: "u1", message: { role: "assistant", content: [] } }, children: [] },
+						{
+							entry: { type: "message", id: "a1", parentId: "u1", message: { role: "assistant", content: [] } },
+							children: [],
+						},
 					],
 				},
 			],
@@ -351,7 +366,10 @@ describe("built-in commands over the socket", () => {
 		const frame = framesOf(inbox, "tree")[0];
 		assert.deepEqual(frame?.["tree"], TREE.tree);
 		assert.equal(frame?.["leafId"], "a1");
-		assert.equal((await records(paths)).some((entry) => entry["type"] === "get_tree"), true);
+		assert.equal(
+			(await records(paths)).some((entry) => entry["type"] === "get_tree"),
+			true,
+		);
 
 		inbox.close();
 		await server.close();
@@ -368,7 +386,11 @@ describe("built-in commands over the socket", () => {
 			cwd: "/tmp/imported-project",
 			timestamp: "2026-11-21T00:00:00.000Z",
 		});
-		const body = [header, JSON.stringify({ type: "message", id: "m1", parentId: null, message: { role: "user", content: "hello" } })].join("\n") + "\n";
+		const body =
+			[
+				header,
+				JSON.stringify({ type: "message", id: "m1", parentId: null, message: { role: "user", content: "hello" } }),
+			].join("\n") + "\n";
 		const source = join(paths.dir, "foreign.jsonl");
 		await writeFile(source, body);
 
@@ -377,7 +399,9 @@ describe("built-in commands over the socket", () => {
 		await waitFor(() => framesOf(inbox, "snapshot").length > 0);
 
 		inbox.ws.send(JSON.stringify({ t: "import", path: source }));
-		await waitFor(() => framesOf(inbox, "opened").some((frame) => (frame["session"] as { id?: string })?.id === IMPORTED_ID));
+		await waitFor(() =>
+			framesOf(inbox, "opened").some((frame) => (frame["session"] as { id?: string })?.id === IMPORTED_ID),
+		);
 		await waitFor(() => framesOf(inbox, "import").length > 0);
 		assert.equal(framesOf(inbox, "import")[0]?.["cancelled"], false);
 
@@ -386,9 +410,15 @@ describe("built-in commands over the socket", () => {
 		assert.equal(await readFile(source, "utf8"), body);
 
 		const index = JSON.parse(await readFile(paths.indexPath, "utf8")) as Array<Record<string, unknown>>;
-		assert.equal(index.some((record) => record["piId"] === IMPORTED_ID), true);
+		assert.equal(
+			index.some((record) => record["piId"] === IMPORTED_ID),
+			true,
+		);
 		const listed = await hub.list();
-		assert.equal(listed.some((session) => session.id === IMPORTED_ID), true);
+		assert.equal(
+			listed.some((session) => session.id === IMPORTED_ID),
+			true,
+		);
 		const switched = (await records(paths)).find((entry) => entry["type"] === "switch_session");
 		assert.equal(switched?.["sessionPath"], copied);
 
@@ -433,7 +463,10 @@ describe("built-in commands over the socket", () => {
 
 	it("answers copy with Pi's last assistant text", async () => {
 		const paths = await fixtureRoot();
-		const { hub, server, url } = await boot(paths, { FAKE_PI_SESSION_ID: OLD_ID, FAKE_PI_LAST_TEXT: "the last answer" });
+		const { hub, server, url } = await boot(paths, {
+			FAKE_PI_SESSION_ID: OLD_ID,
+			FAKE_PI_LAST_TEXT: "the last answer",
+		});
 		const inbox = await connect(url);
 		await waitFor(() => framesOf(inbox, "snapshot").length > 0);
 
@@ -453,16 +486,25 @@ describe("built-in commands over the socket", () => {
 		await waitFor(() => framesOf(inbox, "snapshot").length > 0);
 
 		inbox.ws.send(JSON.stringify({ t: "set_model_query", query: "acme/other-model" }));
-		await waitFor(() => framesOf(inbox, "status").some((frame) => (frame["session"] as { model?: string })?.model === "other-model"));
+		await waitFor(() =>
+			framesOf(inbox, "status").some((frame) => (frame["session"] as { model?: string })?.model === "other-model"),
+		);
 		const setModel = (await records(paths)).find((record) => record["type"] === "set_model");
-		assert.deepEqual({ provider: setModel?.["provider"], id: setModel?.["modelId"] }, { provider: "acme", id: "other-model" });
+		assert.deepEqual(
+			{ provider: setModel?.["provider"], id: setModel?.["modelId"] },
+			{ provider: "acme", id: "other-model" },
+		);
 
 		inbox.ws.send(JSON.stringify({ t: "set_model_query", query: "deepseek" }));
 		await waitFor(() => framesOf(inbox, "error").length > 0);
 		assert.match(String(framesOf(inbox, "error")[0]?.["message"]), /unknown model/);
 
 		inbox.ws.send(JSON.stringify({ t: "set_thinking_query", query: "med" }));
-		await waitFor(() => framesOf(inbox, "status").some((frame) => (frame["session"] as { thinkingLevel?: string })?.thinkingLevel === "medium"));
+		await waitFor(() =>
+			framesOf(inbox, "status").some(
+				(frame) => (frame["session"] as { thinkingLevel?: string })?.thinkingLevel === "medium",
+			),
+		);
 		const thinking = (await records(paths)).find((record) => record["type"] === "set_thinking_level");
 		assert.equal(thinking?.["level"], "medium");
 

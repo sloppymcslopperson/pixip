@@ -105,15 +105,24 @@ describe("listDirectories", () => {
 
 	it("refuses paths outside home and missing directories", async () => {
 		const home = await homeWithProjects();
-		await assert.rejects(() => listDirectories("/", home), (error: unknown) => {
-			return error instanceof DirError && error.status === 403;
-		});
-		await assert.rejects(() => listDirectories(join(home, ".."), home), (error: unknown) => {
-			return error instanceof DirError && error.status === 403;
-		});
-		await assert.rejects(() => listDirectories(join(home, "missing"), home), (error: unknown) => {
-			return error instanceof DirError && error.status === 404;
-		});
+		await assert.rejects(
+			() => listDirectories("/", home),
+			(error: unknown) => {
+				return error instanceof DirError && error.status === 403;
+			},
+		);
+		await assert.rejects(
+			() => listDirectories(join(home, ".."), home),
+			(error: unknown) => {
+				return error instanceof DirError && error.status === 403;
+			},
+		);
+		await assert.rejects(
+			() => listDirectories(join(home, "missing"), home),
+			(error: unknown) => {
+				return error instanceof DirError && error.status === 404;
+			},
+		);
 	});
 });
 
@@ -130,14 +139,23 @@ describe("createDirectory", () => {
 	it("rejects duplicates, traversal and paths outside home", async () => {
 		const home = await homeWithProjects();
 		await createDirectory("~", "made", home);
-		await assert.rejects(() => createDirectory("~", "made", home), (error: unknown) => {
-			return error instanceof DirError && error.status === 409;
-		});
-		await assert.rejects(() => createDirectory("~", "../made", home), (error: unknown) => {
-			return error instanceof DirError && error.status === 400;
-		});
-		await assert.rejects(() => createDirectory("/", "made", home), (error: unknown) => {
-			return error instanceof DirError && error.status === 403;
-		});
+		await assert.rejects(
+			() => createDirectory("~", "made", home),
+			(error: unknown) => {
+				return error instanceof DirError && error.status === 409;
+			},
+		);
+		await assert.rejects(
+			() => createDirectory("~", "../made", home),
+			(error: unknown) => {
+				return error instanceof DirError && error.status === 400;
+			},
+		);
+		await assert.rejects(
+			() => createDirectory("/", "made", home),
+			(error: unknown) => {
+				return error instanceof DirError && error.status === 403;
+			},
+		);
 	});
 });

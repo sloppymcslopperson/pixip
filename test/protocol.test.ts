@@ -13,7 +13,7 @@ describe("LineBuffer", () => {
 	it("keeps partial records across chunks", () => {
 		const buffer = new LineBuffer();
 		assert.deepEqual(buffer.push(Buffer.from('{"a":')), []);
-		assert.deepEqual(buffer.push(Buffer.from('1}\n')), ['{"a":1}']);
+		assert.deepEqual(buffer.push(Buffer.from("1}\n")), ['{"a":1}']);
 	});
 
 	it("does not split on U+2028 or U+2029", () => {

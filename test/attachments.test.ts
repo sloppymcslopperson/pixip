@@ -69,7 +69,9 @@ async function records(paths: Paths): Promise<Array<Record<string, unknown>>> {
 }
 
 async function exists(path: string): Promise<boolean> {
-	return await stat(path).then(() => true).catch(() => false);
+	return await stat(path)
+		.then(() => true)
+		.catch(() => false);
 }
 
 async function waitFor(check: () => boolean | Promise<boolean>, timeoutMs = 5000): Promise<void> {
@@ -165,7 +167,10 @@ describe("file uploads", () => {
 		const created = await hub.create(paths.dir);
 
 		const response = await fetch(
-			new URL(`api/sessions/${encodeURIComponent(created.id)}/uploads?name=${encodeURIComponent("notes file.txt")}`, server.url),
+			new URL(
+				`api/sessions/${encodeURIComponent(created.id)}/uploads?name=${encodeURIComponent("notes file.txt")}`,
+				server.url,
+			),
 			{ method: "POST", body: Buffer.from("hello attachment") },
 		);
 		assert.equal(response.status, 200);

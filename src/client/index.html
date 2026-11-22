@@ -22,13 +22,27 @@
 			<div id="more-wrap" class="bar-more">
 				<div id="bar-menu" class="bar-menu" role="group" aria-label="Display options" hidden>
 					<div id="scale" role="group" aria-label="Transcript text size">
-						<button id="scale-down" class="ghost scale-btn" type="button" aria-label="Decrease transcript text size">A−</button>
+						<button id="scale-down" class="ghost scale-btn" type="button" aria-label="Decrease transcript text size">
+							A−
+						</button>
 						<output id="scale-value" class="scale-value" aria-live="polite">100%</output>
-						<button id="scale-up" class="ghost scale-btn" type="button" aria-label="Increase transcript text size">A+</button>
+						<button id="scale-up" class="ghost scale-btn" type="button" aria-label="Increase transcript text size">
+							A+
+						</button>
 					</div>
 					<button id="reload" class="ghost" aria-label="Reload assets and config">reload</button>
 				</div>
-				<button id="more" class="ghost more-btn" type="button" aria-label="More options" aria-haspopup="true" aria-expanded="false" aria-controls="bar-menu">…</button>
+				<button
+					id="more"
+					class="ghost more-btn"
+					type="button"
+					aria-label="More options"
+					aria-haspopup="true"
+					aria-expanded="false"
+					aria-controls="bar-menu"
+				>
+					…
+				</button>
 			</div>
 		</header>
 
@@ -48,8 +62,24 @@
 			<form id="composer" hidden>
 				<div id="attachment" hidden></div>
 				<div id="compose-row">
-					<button id="attach" type="button" aria-label="Add attachment" aria-haspopup="menu" aria-expanded="false" aria-controls="attach-menu">+</button>
-					<textarea id="input" rows="1" placeholder="message pi…" autocomplete="off" autocapitalize="sentences" spellcheck="false"></textarea>
+					<button
+						id="attach"
+						type="button"
+						aria-label="Add attachment"
+						aria-haspopup="menu"
+						aria-expanded="false"
+						aria-controls="attach-menu"
+					>
+						+
+					</button>
+					<textarea
+						id="input"
+						rows="1"
+						placeholder="message pi…"
+						autocomplete="off"
+						autocapitalize="sentences"
+						spellcheck="false"
+					></textarea>
 					<button id="send" type="submit" aria-label="Send">↑</button>
 				</div>
 				<input id="image-input" type="file" accept="image/*" hidden />

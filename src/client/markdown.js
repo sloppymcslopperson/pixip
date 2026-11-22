@@ -14,11 +14,7 @@ const SAFE_HREF = /^(?:https?:|mailto:|#)/i;
 const BASE_TABLE = Renderer.prototype.table;
 
 export function escapeHtml(value) {
-	return String(value)
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;");
+	return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 const renderer = new Renderer();

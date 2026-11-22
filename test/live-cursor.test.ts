@@ -233,7 +233,10 @@ describe("snapshot / live boundary", () => {
 		assert.equal(snapshot?.["resume"], undefined);
 		const sent = (snapshot?.["entries"] as Array<{ id: string }>).map((item) => item.id);
 		assert.deepEqual(sent, ["e1", "e2"]);
-		assert.equal(inbox.frames.some((frame) => frame["t"] === "error"), false);
+		assert.equal(
+			inbox.frames.some((frame) => frame["t"] === "error"),
+			false,
+		);
 		inbox.close();
 		await server.close();
 		await hub.shutdown();

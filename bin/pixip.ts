@@ -71,7 +71,7 @@ interface Options {
 	detached: boolean;
 }
 
-function parseArgs(argv: string[], command: Command): Options {
+function parseArgs(argv: string[]): Options {
 	const options: Options = {
 		host: "127.0.0.1",
 		port: 8137,
@@ -156,6 +156,7 @@ function parseArgs(argv: string[], command: Command): Options {
 			case "-h":
 				printHelp();
 				process.exit(0);
+				break;
 			default:
 				throw new Error(`unknown argument ${arg}`);
 		}
@@ -244,7 +245,7 @@ function serveArgs(options: Options): string[] {
 async function main(): Promise<void> {
 	const argv = process.argv.slice(2);
 	const command: Command = SUBCOMMANDS.has(argv[0] ?? "") ? (argv.shift() as Command) : "serve";
-	const options = parseArgs(argv, command);
+	const options = parseArgs(argv);
 	switch (command) {
 		case "start":
 			return await cmdStart(options);

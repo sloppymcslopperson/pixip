@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { MAX_IMAGE_BYTES, MAX_IMAGE_EDGE, MAX_IMAGE_SOURCE_BYTES, MAX_UPLOAD_BYTES, attachmentPrompt, looksLikeImage, sizeLabel } from "../src/client/attachments.js";
+import {
+	MAX_IMAGE_BYTES,
+	MAX_IMAGE_EDGE,
+	MAX_IMAGE_SOURCE_BYTES,
+	MAX_UPLOAD_BYTES,
+	attachmentPrompt,
+	looksLikeImage,
+	sizeLabel,
+} from "../src/client/attachments.js";
 
 describe("client attachment limits", () => {
 	it("uses the agreed image and file caps", () => {

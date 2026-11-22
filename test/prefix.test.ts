@@ -281,10 +281,7 @@ describe("policy frame", () => {
 		const paths = await fixtureRoot();
 		const cwd = join(paths.dir, "project");
 		await mkdir(cwd, { recursive: true });
-		await writeFile(
-			join(paths.dataDir, "pixip.json"),
-			JSON.stringify({ commands: { deny: ["name"], bash: false } }),
-		);
+		await writeFile(join(paths.dataDir, "pixip.json"), JSON.stringify({ commands: { deny: ["name"], bash: false } }));
 		await writeFile(join(cwd, ".pixip.json"), JSON.stringify({ commands: { deny: ["/model"] } }));
 		const { hub, server } = await boot(paths);
 		const created = await hub.create(cwd);

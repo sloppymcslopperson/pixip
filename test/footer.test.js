@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { contextLevel, footerPwdLine, footerStatsLeft, footerStatsRight, formatCwd, formatTokens } from "../src/client/footer.js";
+import {
+	contextLevel,
+	footerPwdLine,
+	footerStatsLeft,
+	footerStatsRight,
+	formatCwd,
+	formatTokens,
+} from "../src/client/footer.js";
 
 const base = {
 	cwd: "/home/sloppy/dev/sin",

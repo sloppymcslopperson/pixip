@@ -8,7 +8,8 @@
 
 /** Normalize one verbatim `queue_update` event into strings. */
 export function queueFromEvent(event) {
-	const texts = (value) => (Array.isArray(value) ? value.filter((item) => typeof item === "string" && item.length > 0) : []);
+	const texts = (value) =>
+		Array.isArray(value) ? value.filter((item) => typeof item === "string" && item.length > 0) : [];
 	return {
 		steering: texts(event?.steering),
 		followUp: texts(event?.followUp),

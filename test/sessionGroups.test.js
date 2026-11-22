@@ -94,7 +94,10 @@ describe("pinning and collapse", () => {
 	});
 
 	it("collapses to pinned rows and reports the hidden count", () => {
-		assert.deepEqual(groupView(proj, true).rows.map((session) => session.id), ["a3", "a2"]);
+		assert.deepEqual(
+			groupView(proj, true).rows.map((session) => session.id),
+			["a3", "a2"],
+		);
 		assert.equal(groupView(proj, true).hidden, 1);
 		assert.equal(groupView(other, true).hidden, 1);
 		assert.equal(groupView(unknown, true).hidden, 0);
@@ -141,7 +144,10 @@ describe("labels and storage", () => {
 	});
 
 	it("parses only boolean collapse entries and ignores bad JSON", () => {
-		assert.deepEqual(parseCollapsed(JSON.stringify({ "/a": true, "/b": false, x: "yes" })), { "/a": true, "/b": false });
+		assert.deepEqual(parseCollapsed(JSON.stringify({ "/a": true, "/b": false, x: "yes" })), {
+			"/a": true,
+			"/b": false,
+		});
 		assert.deepEqual(parseCollapsed("not json"), {});
 		assert.deepEqual(parseCollapsed("[true]"), {});
 		assert.deepEqual(parseCollapsed(null), {});

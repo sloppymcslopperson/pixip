@@ -31,7 +31,13 @@ page.on("console", (message) => {
 	if (message.type() === "error") problems.push(`console: ${message.text()}`);
 });
 
-await page.setViewport({ width, height, deviceScaleFactor: width < 600 ? 2 : 1, isMobile: width < 600, hasTouch: width < 600 });
+await page.setViewport({
+	width,
+	height,
+	deviceScaleFactor: width < 600 ? 2 : 1,
+	isMobile: width < 600,
+	hasTouch: width < 600,
+});
 await page.goto(url, { waitUntil: "networkidle2", timeout: 30_000 });
 await new Promise((resolve) => setTimeout(resolve, 1200));
 

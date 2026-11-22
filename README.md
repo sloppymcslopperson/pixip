@@ -6,8 +6,8 @@ has a normal text box instead of a pane grid.
 
 Prototype. Single supervisor process (`pixip`) + static client, no build step.
 
-| phone | desktop |
-|---|---|
+| phone                            | desktop                              |
+| -------------------------------- | ------------------------------------ |
 | ![phone](docs/phone-session.png) | ![desktop](docs/desktop-session.png) |
 
 ```bash
@@ -24,11 +24,11 @@ node bin/pixip.ts --data-dir ./tmp/dev        # http://127.0.0.1:8137/
 Existing options are slow, shaped around terminals or editors, and some of them
 need plugins rewritten to work:
 
-| | Substrate | What it costs |
-|---|---|---|
-| AoE | tmux + PTY | web UI mirrors a terminal: fixed columns, copy mode, chords on a phone; agent-agnostic so Pi's structure is lost |
-| pi-web | spawns pi over WS | one process, no lifecycle (stop/restart/fork), sessions die with the server |
-| pi-acp / ACP | one adapter per session | editor-shaped; a session belongs to one client |
+|              | Substrate               | What it costs                                                                                                    |
+| ------------ | ----------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| AoE          | tmux + PTY              | web UI mirrors a terminal: fixed columns, copy mode, chords on a phone; agent-agnostic so Pi's structure is lost |
+| pi-web       | spawns pi over WS       | one process, no lifecycle (stop/restart/fork), sessions die with the server                                      |
+| pi-acp / ACP | one adapter per session | editor-shaped; a session belongs to one client                                                                   |
 
 pixip is built on `pi --mode rpc`: a long-lived Pi subprocess with a JSON command
 and event stream. That means **no PTY, no tmux, no terminal emulation**, and
@@ -48,7 +48,7 @@ do in the TUI.
    safe-area padding, tap targets, collapsed tool output, approvals as a bottom
    sheet instead of "go find the terminal". One asset set serves every width:
    the phone layout is verifiable by resizing a desktop browser, and a wide
-   window is expected to show *more* (session cards or a rail), not a stretched
+   window is expected to show _more_ (session cards or a rail), not a stretched
    single column.
 3. **Pi's semantics, not a byte stream.** Messages, thinking, tool calls and
    results, compaction notices, `session_info_changed` — the things a terminal

@@ -234,7 +234,11 @@ export async function stopDaemon(
 }
 
 /** Spawn a detached serve process and wait until it reports healthy. */
-export async function startDaemon(input: { dataDir: string; args: string[]; timeoutMs?: number }): Promise<DaemonState> {
+export async function startDaemon(input: {
+	dataDir: string;
+	args: string[];
+	timeoutMs?: number;
+}): Promise<DaemonState> {
 	const { dataDir, args, timeoutMs = 15_000 } = input;
 	const paths = daemonPaths(dataDir);
 	await mkdir(join(dataDir, "sessions"), { recursive: true });
@@ -270,7 +274,9 @@ export async function startDaemon(input: { dataDir: string; args: string[]; time
 
 /** Sessions that are not safely restartable yet (`idle`/`stopped`/`error` are). */
 export function busySessions(sessions: SessionInfo[]): SessionInfo[] {
-	return sessions.filter((session) => session.state !== "idle" && session.state !== "stopped" && session.state !== "error");
+	return sessions.filter(
+		(session) => session.state !== "idle" && session.state !== "stopped" && session.state !== "error",
+	);
 }
 
 export function describeSessions(sessions: SessionInfo[]): string {

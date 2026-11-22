@@ -10,7 +10,7 @@ remote terminal.
    (message, delta, tool execution, UI request), never a byte stream of screen
    cells. This is what removes tmux-shaped impedance.
 2. **Events are never re-encoded.** `src/rpc.ts` parses a line to correlate
-   responses, then hands the *original string* to the hub. The hub splices it into
+   responses, then hands the _original string_ to the hub. The hub splices it into
    `{"t":"event","ev":<raw>}`. In Rust this is `serde_json::value::RawValue`; the
    hub never builds a value tree for the hot path.
 3. **Pi's JSONL files are the source of truth.** The hub keeps process state, not
@@ -52,7 +52,7 @@ remote terminal.
  {"t":"ui","id":…,"value":…} ───▶ ┤─ extension_ui_response ──────▶  ctx.ui
 ```
 
-One child process per *attached* session. `--idle-ms` detaches it; the list still
+One child process per _attached_ session. `--idle-ms` detaches it; the list still
 shows the session as `stopped` from the JSONL header, and opening it reattaches.
 
 Opening a session is a two-step paint. The hub reads the JSONL tail **before**
@@ -80,51 +80,51 @@ All frames are JSON text on one websocket. `v` is bumped on breaking change.
 
 Hub → client:
 
-| frame | fields | notes |
-|---|---|---|
-| `hello` | `v`, `sessions`, `defaultCwd`, `home` | sent on a session-less socket |
-| `sessions` | `sessions` | list refresh |
-| `snapshot` | `session`, `entries`, `leafId`, `more`, `replace?` | (re)places the window; `more` = older entries exist, so "load earlier" is offered; `replace` drops windows loaded before a compaction or `/new` |
-| `history` | `entries`, `more` | answer to `earlier`: the window just before the oldest held entry |
-| `status` | `session` | state/name/model changes |
-| `event` | `ev` | **verbatim** Pi record |
-| `opened` | `session`, `rekey?` | reply to `create`; `rekey` when `/new` moved the session to a new Pi id |
-| `copy` | `text` | answer to a `copy` frame: Pi's last assistant text (`null` if none) |
-| `policy` | `policy` (`allow`, `deny`, `bash`) | effective per-session command policy |
-| `commands` | `commands` (`name`, `description?`, `source`) | live `get_commands` entries for the `/` menu; sent once per attach, cached by the client |
-| `queue` | `steering`, `followUp` | answer to `clear_queue`: the texts Pi removed, restored into the composer unsent |
-| `tree` | `tree`, `leafId` | answer to `/tree`: Pi's read-only session tree |
-| `fork` | `text`, `cancelled` | answer to `/fork`; the new session itself arrives as `opened` with `rekey` |
-| `clone` | `cancelled` | answer to `/clone`; same re-key path |
-| `import` | `cancelled` | answer to `/import`; the switched-to session arrives as `opened` |
-| `export` | `html`, `jsonl` | download URLs served by the export REST route (`jsonl` is `null` when Pi has no file yet) |
-| `bash` | `id`, `command`, `excludeFromContext`, `output`, `exitCode`, `cancelled`, `truncated`, `fullOutputPath?`, `error?` | terminal result for `!`/`!!`; chunks arrive as `event` |
-| `error` | `message` | protocol/command failure |
+| frame      | fields                                                                                                             | notes                                                                                                                                           |
+| ---------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hello`    | `v`, `sessions`, `defaultCwd`, `home`                                                                              | sent on a session-less socket                                                                                                                   |
+| `sessions` | `sessions`                                                                                                         | list refresh                                                                                                                                    |
+| `snapshot` | `session`, `entries`, `leafId`, `more`, `replace?`                                                                 | (re)places the window; `more` = older entries exist, so "load earlier" is offered; `replace` drops windows loaded before a compaction or `/new` |
+| `history`  | `entries`, `more`                                                                                                  | answer to `earlier`: the window just before the oldest held entry                                                                               |
+| `status`   | `session`                                                                                                          | state/name/model changes                                                                                                                        |
+| `event`    | `ev`                                                                                                               | **verbatim** Pi record                                                                                                                          |
+| `opened`   | `session`, `rekey?`                                                                                                | reply to `create`; `rekey` when `/new` moved the session to a new Pi id                                                                         |
+| `copy`     | `text`                                                                                                             | answer to a `copy` frame: Pi's last assistant text (`null` if none)                                                                             |
+| `policy`   | `policy` (`allow`, `deny`, `bash`)                                                                                 | effective per-session command policy                                                                                                            |
+| `commands` | `commands` (`name`, `description?`, `source`)                                                                      | live `get_commands` entries for the `/` menu; sent once per attach, cached by the client                                                        |
+| `queue`    | `steering`, `followUp`                                                                                             | answer to `clear_queue`: the texts Pi removed, restored into the composer unsent                                                                |
+| `tree`     | `tree`, `leafId`                                                                                                   | answer to `/tree`: Pi's read-only session tree                                                                                                  |
+| `fork`     | `text`, `cancelled`                                                                                                | answer to `/fork`; the new session itself arrives as `opened` with `rekey`                                                                      |
+| `clone`    | `cancelled`                                                                                                        | answer to `/clone`; same re-key path                                                                                                            |
+| `import`   | `cancelled`                                                                                                        | answer to `/import`; the switched-to session arrives as `opened`                                                                                |
+| `export`   | `html`, `jsonl`                                                                                                    | download URLs served by the export REST route (`jsonl` is `null` when Pi has no file yet)                                                       |
+| `bash`     | `id`, `command`, `excludeFromContext`, `output`, `exitCode`, `cancelled`, `truncated`, `fullOutputPath?`, `error?` | terminal result for `!`/`!!`; chunks arrive as `event`                                                                                          |
+| `error`    | `message`                                                                                                          | protocol/command failure                                                                                                                        |
 
 Client → hub:
 
-| frame | fields | maps to |
-|---|---|---|
-| `create` | `cwd`, `name?` | spawn a new session |
-| `prompt` | `text`, `streamingBehavior?` | `prompt` (`"steer"` while busy: extension commands must still execute) |
-| `steer` | `text` | `prompt` with `streamingBehavior: "steer"` (RPC `steer` only queues, so an idle steer would never run); the chips follow Pi's verbatim `queue_update` events |
-| `clear_queue` | – | `clear_queue`; answered with a `queue` frame carrying the restored texts |
-| `tree` | – | `get_tree`, answered with a `tree` frame |
-| `fork` | `entryId` | `fork`; the hub re-reads `get_state`, re-keys and the socket sends `opened` with `rekey` |
-| `clone` | – | `clone`; same re-key path |
-| `import` | `path` | copy a JSONL into `<data-dir>/sessions/`, `switch_session`, re-key |
-| `export` | – | `export_html` under `<data-dir>/exports/`, answered with download URLs |
-| `bash` | `id`, `command`, `excludeFromContext` | `bash`; `id` is repeated on streamed updates and the final frame |
-| `compact` | `instructions?` | `compact` (`customInstructions`) |
-| `set_session_name` | `name` | `set_session_name` |
-| `new_session` | – | `new_session`; the hub re-keys and sends `opened` with `rekey` |
-| `resnapshot` | – | full `snapshot` with `replace: true` |
-| `copy` | – | `get_last_assistant_text`, answered with a `copy` frame |
-| `set_model_query` / `set_thinking_query` | `query` | resolve against `get_available_models` / levels, then set |
-| `abort` | – | `abort` |
-| `earlier` | `before` (entry id) | hub reads the preceding window from the JSONL and replies with `history` |
-| `stop` | – | detach process, keep JSONL |
-| `ui` | `id`, `value` \| `confirmed` \| `cancelled` | `extension_ui_response` |
+| frame                                    | fields                                      | maps to                                                                                                                                                      |
+| ---------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `create`                                 | `cwd`, `name?`                              | spawn a new session                                                                                                                                          |
+| `prompt`                                 | `text`, `streamingBehavior?`                | `prompt` (`"steer"` while busy: extension commands must still execute)                                                                                       |
+| `steer`                                  | `text`                                      | `prompt` with `streamingBehavior: "steer"` (RPC `steer` only queues, so an idle steer would never run); the chips follow Pi's verbatim `queue_update` events |
+| `clear_queue`                            | –                                           | `clear_queue`; answered with a `queue` frame carrying the restored texts                                                                                     |
+| `tree`                                   | –                                           | `get_tree`, answered with a `tree` frame                                                                                                                     |
+| `fork`                                   | `entryId`                                   | `fork`; the hub re-reads `get_state`, re-keys and the socket sends `opened` with `rekey`                                                                     |
+| `clone`                                  | –                                           | `clone`; same re-key path                                                                                                                                    |
+| `import`                                 | `path`                                      | copy a JSONL into `<data-dir>/sessions/`, `switch_session`, re-key                                                                                           |
+| `export`                                 | –                                           | `export_html` under `<data-dir>/exports/`, answered with download URLs                                                                                       |
+| `bash`                                   | `id`, `command`, `excludeFromContext`       | `bash`; `id` is repeated on streamed updates and the final frame                                                                                             |
+| `compact`                                | `instructions?`                             | `compact` (`customInstructions`)                                                                                                                             |
+| `set_session_name`                       | `name`                                      | `set_session_name`                                                                                                                                           |
+| `new_session`                            | –                                           | `new_session`; the hub re-keys and sends `opened` with `rekey`                                                                                               |
+| `resnapshot`                             | –                                           | full `snapshot` with `replace: true`                                                                                                                         |
+| `copy`                                   | –                                           | `get_last_assistant_text`, answered with a `copy` frame                                                                                                      |
+| `set_model_query` / `set_thinking_query` | `query`                                     | resolve against `get_available_models` / levels, then set                                                                                                    |
+| `abort`                                  | –                                           | `abort`                                                                                                                                                      |
+| `earlier`                                | `before` (entry id)                         | hub reads the preceding window from the JSONL and replies with `history`                                                                                     |
+| `stop`                                   | –                                           | detach process, keep JSONL                                                                                                                                   |
+| `ui`                                     | `id`, `value` \| `confirmed` \| `cancelled` | `extension_ui_response`                                                                                                                                      |
 
 REST is only for discovery, process verbs and downloads: `GET /api/sessions`,
 `POST /api/sessions`, `GET /api/dirs?path=`, `POST /api/dirs`,
@@ -386,20 +386,20 @@ label is never applied over a name that appeared while the one-shot call ran.
 
 `tmp/smoke.mjs` against a local daemon, one prompt, `deepseek-v4.1-flash`:
 
-| step | time |
-|---|---|
-| attach/spawn → `get_state` (Pi cold start) | **1.3 s** |
-| attach → snapshot (8 entries) | +23 ms |
-| prompt sent → `agent_start` | **6 ms** |
-| prompt sent → user `message_end` echoed | **18 ms** |
-| prompt sent → first `text_delta` | 1539 ms (model/provider, not hub) |
-| `stop` (graceful detach) | **46 ms** |
-| reattach after stop (cold) | 1.25 s |
-| open (app loaded) → provisional snapshot frame, 17 MB session | **110–140 ms** |
-| open (app loaded) → transcript painted, 17 MB session | **143–185 ms** |
-| "load earlier" (200 entries from the JSONL, 17 MB session) | 54–77 ms |
-| cold page load (browser, empty session) → transcript painted | ~230 ms |
-| cold page load (browser, 200-entry window) → transcript painted | ~430–550 ms |
+| step                                                            | time                              |
+| --------------------------------------------------------------- | --------------------------------- |
+| attach/spawn → `get_state` (Pi cold start)                      | **1.3 s**                         |
+| attach → snapshot (8 entries)                                   | +23 ms                            |
+| prompt sent → `agent_start`                                     | **6 ms**                          |
+| prompt sent → user `message_end` echoed                         | **18 ms**                         |
+| prompt sent → first `text_delta`                                | 1539 ms (model/provider, not hub) |
+| `stop` (graceful detach)                                        | **46 ms**                         |
+| reattach after stop (cold)                                      | 1.25 s                            |
+| open (app loaded) → provisional snapshot frame, 17 MB session   | **110–140 ms**                    |
+| open (app loaded) → transcript painted, 17 MB session           | **143–185 ms**                    |
+| "load earlier" (200 entries from the JSONL, 17 MB session)      | 54–77 ms                          |
+| cold page load (browser, empty session) → transcript painted    | ~230 ms                           |
+| cold page load (browser, 200-entry window) → transcript painted | ~430–550 ms                       |
 
 The provisional rows are measured with a local daemon and a synthetic 17 MB
 session (1,900 entries, some 400 KB tool outputs): socket timing via the
@@ -464,14 +464,14 @@ still the way to make the child itself fast, and is deliberately not done (1 vCP
 
 The split exists so this is mechanical:
 
-| here | Rust |
-|---|---|
-| `src/rpc.ts` | `tokio::process::Child` + `tokio_util::codec::LinesCodec` (LF only, strip `\r`), `HashMap<Id, oneshot::Sender<Response>>`; do **not** use a Unicode-aware line reader |
-| `src/hub.ts` | `HashMap<SessionId, Session>` behind one `mpsc` command loop; `SessionState` as an enum; `tokio::time::sleep` for idle |
-| `src/wire.ts` | `#[serde(tag = "t")]` enums; event passthrough with `RawValue` |
-| `src/server.ts` | `axum` router + `axum::extract::ws`; `include_bytes!` for the static client |
-| `src/client/*` | unchanged (static assets) |
-| tests | `cargo test` for framing/frames; the same JS tests keep guarding the client |
+| here            | Rust                                                                                                                                                                  |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/rpc.ts`    | `tokio::process::Child` + `tokio_util::codec::LinesCodec` (LF only, strip `\r`), `HashMap<Id, oneshot::Sender<Response>>`; do **not** use a Unicode-aware line reader |
+| `src/hub.ts`    | `HashMap<SessionId, Session>` behind one `mpsc` command loop; `SessionState` as an enum; `tokio::time::sleep` for idle                                                |
+| `src/wire.ts`   | `#[serde(tag = "t")]` enums; event passthrough with `RawValue`                                                                                                        |
+| `src/server.ts` | `axum` router + `axum::extract::ws`; `include_bytes!` for the static client                                                                                           |
+| `src/client/*`  | unchanged (static assets)                                                                                                                                             |
+| tests           | `cargo test` for framing/frames; the same JS tests keep guarding the client                                                                                           |
 
 Rules that keep the port cheap: no dynamic dispatch in the protocol layer, no
 Node-specific APIs beyond `child_process`/`http`, explicit state enum, one writer

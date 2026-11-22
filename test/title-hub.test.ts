@@ -86,7 +86,9 @@ describe("first-prompt session labels", () => {
 		assert.equal(created.name, undefined);
 
 		await hub.prompt(created.id, "Please refactor the authentication module.");
-		await waitFor(async () => (await hub.list()).find((session) => session.id === created.id)?.name === "Refactor auth module");
+		await waitFor(
+			async () => (await hub.list()).find((session) => session.id === created.id)?.name === "Refactor auth module",
+		);
 		assert.equal((await hub.list()).find((session) => session.id === created.id)?.name, "Refactor auth module");
 		await waitFor(async () => (await records(paths))[0]?.["nameSource"] === "auto");
 		const [record] = await records(paths);
@@ -114,7 +116,9 @@ describe("first-prompt session labels", () => {
 		});
 		const created = await hub.create(paths.dir);
 		await hub.prompt(created.id, "Please refactor the authentication module.");
-		await waitFor(async () => (await hub.list()).find((session) => session.id === created.id)?.name === "Retried model title");
+		await waitFor(
+			async () => (await hub.list()).find((session) => session.id === created.id)?.name === "Retried model title",
+		);
 		const titles = (await events(paths)).filter((event) => event["type"] === "title");
 		assert.equal(titles.length, 2);
 		assert.deepEqual((titles[1]?.["args"] as string[]).slice(-3, -1), ["--model", "fake/fake-model"]);
@@ -128,7 +132,10 @@ describe("first-prompt session labels", () => {
 		await namedHub.prompt(named.id, "This should not relabel me.");
 		await new Promise((resolve) => setTimeout(resolve, 150));
 		assert.equal((await namedHub.list()).find((session) => session.id === named.id)?.name, "Keep my name");
-		assert.equal((await events(namedPaths)).some((event) => event["type"] === "title"), false);
+		assert.equal(
+			(await events(namedPaths)).some((event) => event["type"] === "title"),
+			false,
+		);
 		assert.equal((await records(namedPaths))[0]?.["nameSource"], "manual");
 		await namedHub.shutdown();
 
@@ -136,7 +143,9 @@ describe("first-prompt session labels", () => {
 		const hub = hubFor(paths, { FAKE_PI_TITLE: "Automatic label" });
 		const created = await hub.create(paths.dir);
 		await hub.prompt(created.id, "First prompt.");
-		await waitFor(async () => (await hub.list()).find((session) => session.id === created.id)?.name === "Automatic label");
+		await waitFor(
+			async () => (await hub.list()).find((session) => session.id === created.id)?.name === "Automatic label",
+		);
 		await hub.setName(created.id, "My later name");
 		assert.equal((await hub.list()).find((session) => session.id === created.id)?.name, "My later name");
 		assert.equal((await records(paths))[0]?.["nameSource"], "manual");
@@ -151,7 +160,10 @@ describe("first-prompt session labels", () => {
 		const hub = hubFor(paths, { FAKE_PI_TITLE_FAIL: "1" });
 		const created = await hub.create(paths.dir);
 		await hub.prompt(created.id, "Fix the broken login redirect.");
-		await waitFor(async () => (await hub.list()).find((session) => session.id === created.id)?.name === "Fix the broken login redirect");
+		await waitFor(
+			async () =>
+				(await hub.list()).find((session) => session.id === created.id)?.name === "Fix the broken login redirect",
+		);
 		await waitFor(async () => (await records(paths))[0]?.["nameSource"] === "auto");
 		await hub.shutdown();
 	});
@@ -161,7 +173,10 @@ describe("first-prompt session labels", () => {
 		const configured = hubFor(configuredPaths, { FAKE_PI_TITLE: "Configured model title" }, "fake-model");
 		const first = await configured.create(configuredPaths.dir);
 		await configured.prompt(first.id, "Use the configured model.");
-		await waitFor(async () => (await configured.list()).find((session) => session.id === first.id)?.name === "Configured model title");
+		await waitFor(
+			async () =>
+				(await configured.list()).find((session) => session.id === first.id)?.name === "Configured model title",
+		);
 		let title = (await events(configuredPaths)).find((event) => event["type"] === "title");
 		assert.deepEqual((title?.["args"] as string[]).slice(-3, -1), ["--model", "fake/fake-model"]);
 		await configured.shutdown();
@@ -170,7 +185,9 @@ describe("first-prompt session labels", () => {
 		const fallback = hubFor(fallbackPaths, { FAKE_PI_TITLE: "Session model title" }, "missing-model");
 		const second = await fallback.create(fallbackPaths.dir);
 		await fallback.prompt(second.id, "Use the session model instead.");
-		await waitFor(async () => (await fallback.list()).find((session) => session.id === second.id)?.name === "Session model title");
+		await waitFor(
+			async () => (await fallback.list()).find((session) => session.id === second.id)?.name === "Session model title",
+		);
 		title = (await events(fallbackPaths)).find((event) => event["type"] === "title");
 		assert.deepEqual((title?.["args"] as string[]).slice(-3, -1), ["--model", "fake/fake-model"]);
 		await fallback.shutdown();

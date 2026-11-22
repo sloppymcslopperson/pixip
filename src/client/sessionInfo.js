@@ -64,8 +64,9 @@ export function exportFileName(info, ext = "html") {
 		.replace(/[^a-z0-9]+/g, "-")
 		.replace(/^-+|-+$/g, "")
 		.slice(0, 40);
-	const short = String(info?.id ?? "session")
-		.replace(/[^A-Za-z0-9]/g, "")
-		.slice(0, 8) || "session";
+	const short =
+		String(info?.id ?? "session")
+			.replace(/[^A-Za-z0-9]/g, "")
+			.slice(0, 8) || "session";
 	return `${slug || "session"}-${short}.${ext}`;
 }

@@ -12,14 +12,14 @@ to the model).
 
 ## The dogfooding leg
 
-| Order | Ticket | What it unlocks |
-|---|---|---|
-| 1 | `00-prefix-commands` | done: `/`, `!`, `!!` classification, bash, command policy, prompt/steer dispatch |
-| 2 | `01-daemon-refresh` | done: run pixip as a background daemon; soft reload and `--when-idle` restart so the agent can update pixip mid-session |
-| 3 | `02-builtin-commands` | done: `/compact`, `/name`, `/session`, `/copy`, `/model`, `/thinking`, `/new`, `/resume`, `/quit` |
-| 4 | `06-command-menu` | done: `/` suggestion menu and the status line below the composer |
-| 5 | `07-queue-display` | done: visible steering/follow-up queue with clear/restore |
-| 6 | `08-session-commands` | done: `/tree`, `/fork`, `/clone`, `/import`, `/export`; in-place leaf navigation stays TUI-only |
+| Order | Ticket                | What it unlocks                                                                                                         |
+| ----- | --------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| 1     | `00-prefix-commands`  | done: `/`, `!`, `!!` classification, bash, command policy, prompt/steer dispatch                                        |
+| 2     | `01-daemon-refresh`   | done: run pixip as a background daemon; soft reload and `--when-idle` restart so the agent can update pixip mid-session |
+| 3     | `02-builtin-commands` | done: `/compact`, `/name`, `/session`, `/copy`, `/model`, `/thinking`, `/new`, `/resume`, `/quit`                       |
+| 4     | `06-command-menu`     | done: `/` suggestion menu and the status line below the composer                                                        |
+| 5     | `07-queue-display`    | done: visible steering/follow-up queue with clear/restore                                                               |
+| 6     | `08-session-commands` | done: `/tree`, `/fork`, `/clone`, `/import`, `/export`; in-place leaf navigation stays TUI-only                         |
 
 After the leg, the first ticket pixip worked on itself is
 `03-add-font-size-control` (transcript text sizing): a small, self-contained UI
@@ -28,61 +28,61 @@ is either already done or deliberately deferred.
 
 ## Commands
 
-| Command | TUI behaviour | pixip |
-|---|---|---|
-| `/settings` | settings selector | TUI-only |
-| `/model [provider/model]` | picker, or set directly | done (`02-builtin-commands`: sheet or exact/suffix match) |
-| `/thinking [level]` | picker, or set directly | done (`02-builtin-commands`: sheet or exact/prefix match) |
-| `/scoped-models` | configure interactive cycling | TUI-only |
-| `/login`, `/logout` | OAuth/API-key flows | TUI-only (run `pi login` once in a terminal) |
-| `/llama` | llama.cpp router management | TUI-only |
-| `/new` | fresh session in the same child | done (`02-builtin-commands`: re-key + resnapshot) |
-| `/resume` | session picker | done (`02-builtin-commands`: returns to the session list) |
-| `/name [name]` | show/set session name | done (`02-builtin-commands`) |
-| `/session` | session id/file/stats | done (`02-builtin-commands`: meta sheet) |
-| `/tree` | navigate the session tree in place | done (`08-session-commands`: read-only sheet with labels, current branch, per-user-message fork/copy; **in-place leaf navigation is TUI-only** because RPC `get_tree` has no navigate command) |
-| `/fork` | pick a user message, fork a new session | done (`08-session-commands`: tap the fork affordance on a user block, or `/fork <entryId>` / the tree sheet; re-key + resnapshot) |
-| `/clone` | duplicate the current branch | done (`08-session-commands`: re-key + resnapshot, cancellation is a toast) |
-| `/compact [instructions]` | compact context | done (`02-builtin-commands`: plus a transcript resnapshot) |
-| `/import <path>` | import a JSONL | done (`08-session-commands`: copies into `<data-dir>/sessions/`, indexes it, switches to it) |
-| `/copy` | copy last assistant message | done (`02-builtin-commands`: clipboard, sheet fallback) |
-| `/export [path]` | export HTML/JSONL | done (`08-session-commands`: `export_html` under `<data-dir>/exports/` plus the JSONL, both as HTTP attachments) |
-| `/share` | upload and return a viewer link | TUI-only |
-| `/trust` | save a project trust decision | TUI-only |
-| `/mcp` | MCP server management | TUI-only |
-| `/reload` | reload Pi resources | TUI-only (the header `reload`/`pixip refresh` soft-refreshes pixip's assets/config/index, not Pi's resources) |
-| `/hotkeys` | keybinding help | TUI-only (web keyboard is different) |
-| `/changelog` | changelog viewer | TUI-only |
-| `/quit` | quit Pi | done (`02-builtin-commands`: soft quit, detach + session list) |
-| `/debug` | debug view | TUI-only |
-| `/extension` | extension commands, e.g. `/fit` | done (`00-prefix-commands`: passthrough to Pi) |
-| `/template` | prompt templates | done (`00-prefix-commands`: passthrough to Pi) |
-| `/skill:name` | skills | done (`00-prefix-commands`: passthrough to Pi) |
-| unknown `/thing` | sent as a prompt | done (`00-prefix-commands`: same passthrough) |
+| Command                   | TUI behaviour                           | pixip                                                                                                                                                                                          |
+| ------------------------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/settings`               | settings selector                       | TUI-only                                                                                                                                                                                       |
+| `/model [provider/model]` | picker, or set directly                 | done (`02-builtin-commands`: sheet or exact/suffix match)                                                                                                                                      |
+| `/thinking [level]`       | picker, or set directly                 | done (`02-builtin-commands`: sheet or exact/prefix match)                                                                                                                                      |
+| `/scoped-models`          | configure interactive cycling           | TUI-only                                                                                                                                                                                       |
+| `/login`, `/logout`       | OAuth/API-key flows                     | TUI-only (run `pi login` once in a terminal)                                                                                                                                                   |
+| `/llama`                  | llama.cpp router management             | TUI-only                                                                                                                                                                                       |
+| `/new`                    | fresh session in the same child         | done (`02-builtin-commands`: re-key + resnapshot)                                                                                                                                              |
+| `/resume`                 | session picker                          | done (`02-builtin-commands`: returns to the session list)                                                                                                                                      |
+| `/name [name]`            | show/set session name                   | done (`02-builtin-commands`)                                                                                                                                                                   |
+| `/session`                | session id/file/stats                   | done (`02-builtin-commands`: meta sheet)                                                                                                                                                       |
+| `/tree`                   | navigate the session tree in place      | done (`08-session-commands`: read-only sheet with labels, current branch, per-user-message fork/copy; **in-place leaf navigation is TUI-only** because RPC `get_tree` has no navigate command) |
+| `/fork`                   | pick a user message, fork a new session | done (`08-session-commands`: tap the fork affordance on a user block, or `/fork <entryId>` / the tree sheet; re-key + resnapshot)                                                              |
+| `/clone`                  | duplicate the current branch            | done (`08-session-commands`: re-key + resnapshot, cancellation is a toast)                                                                                                                     |
+| `/compact [instructions]` | compact context                         | done (`02-builtin-commands`: plus a transcript resnapshot)                                                                                                                                     |
+| `/import <path>`          | import a JSONL                          | done (`08-session-commands`: copies into `<data-dir>/sessions/`, indexes it, switches to it)                                                                                                   |
+| `/copy`                   | copy last assistant message             | done (`02-builtin-commands`: clipboard, sheet fallback)                                                                                                                                        |
+| `/export [path]`          | export HTML/JSONL                       | done (`08-session-commands`: `export_html` under `<data-dir>/exports/` plus the JSONL, both as HTTP attachments)                                                                               |
+| `/share`                  | upload and return a viewer link         | TUI-only                                                                                                                                                                                       |
+| `/trust`                  | save a project trust decision           | TUI-only                                                                                                                                                                                       |
+| `/mcp`                    | MCP server management                   | TUI-only                                                                                                                                                                                       |
+| `/reload`                 | reload Pi resources                     | TUI-only (the header `reload`/`pixip refresh` soft-refreshes pixip's assets/config/index, not Pi's resources)                                                                                  |
+| `/hotkeys`                | keybinding help                         | TUI-only (web keyboard is different)                                                                                                                                                           |
+| `/changelog`              | changelog viewer                        | TUI-only                                                                                                                                                                                       |
+| `/quit`                   | quit Pi                                 | done (`02-builtin-commands`: soft quit, detach + session list)                                                                                                                                 |
+| `/debug`                  | debug view                              | TUI-only                                                                                                                                                                                       |
+| `/extension`              | extension commands, e.g. `/fit`         | done (`00-prefix-commands`: passthrough to Pi)                                                                                                                                                 |
+| `/template`               | prompt templates                        | done (`00-prefix-commands`: passthrough to Pi)                                                                                                                                                 |
+| `/skill:name`             | skills                                  | done (`00-prefix-commands`: passthrough to Pi)                                                                                                                                                 |
+| unknown `/thing`          | sent as a prompt                        | done (`00-prefix-commands`: same passthrough)                                                                                                                                                  |
 
 ## Composer and runtime
 
-| Behaviour | pixip |
-|---|---|
-| `!cmd`, `!!cmd` (bash, excluded from context) | done (`00-prefix-commands`: streamed card, `!!` badge) |
-| Command menu on `/` | done (`06-command-menu`: filtered static + `get_commands` rows, prefix-first, TUI-only dimmed, footer below the composer) |
-| Steering/follow-up queue visible, clear + restore | done (`07-queue-display`: chips from `queue_update`, X clears and restores both lists into the composer) |
-| Abort a running bash | deferred (gap; TUI-only for now) |
-| Input history (up/down) | deferred |
-| `@file` completion | deferred |
-| Image paste/attachments | done (`00-web-image-upload`: `+` menu for photo/camera or arbitrary file, clipboard paste, one removable preview; images travel as Pi `ImageContent`, other files upload to `<data-dir>/uploads/<logical-session>/` and the prompt gets their absolute path) |
-| Esc to abort/clear | abort via the stop button; queue clear via the X on the chips (`07-queue-display`) |
-| Long `notify` text readable (extension commands) | done (`00-prefix-commands`: dismissible sheet, not a 3.2 s toast) |
-| Transcript text size (50–150 %, header `A−`/`A+`) | done (`03-add-font-size-control`: seven steps, device-local, transcript-only, long-press reset) |
-| Working / compacting status | done (footer + toasts) |
-| Markdown rendering | done (`00-render-markdown`) |
-| Diff/syntax colouring and TUI theme values | `85-theme-tokens` |
-| TUI status line | done (`16-tui-status-line`) |
-| Full transcript (not just windows) | `10-expand-full-transcript` |
-| Desktop multi-session surface | `25-desktop-surface` |
-| Responsive layout contract | `20-responsive-layout` |
-| Worktree create/teardown (AoE parity) | `60-worktrees-for-aoe-parity` |
-| Auth posture / VPN bind | `80-vpn-bind-and-auth-posture` |
+| Behaviour                                         | pixip                                                                                                                                                                                                                                                        |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `!cmd`, `!!cmd` (bash, excluded from context)     | done (`00-prefix-commands`: streamed card, `!!` badge)                                                                                                                                                                                                       |
+| Command menu on `/`                               | done (`06-command-menu`: filtered static + `get_commands` rows, prefix-first, TUI-only dimmed, footer below the composer)                                                                                                                                    |
+| Steering/follow-up queue visible, clear + restore | done (`07-queue-display`: chips from `queue_update`, X clears and restores both lists into the composer)                                                                                                                                                     |
+| Abort a running bash                              | deferred (gap; TUI-only for now)                                                                                                                                                                                                                             |
+| Input history (up/down)                           | deferred                                                                                                                                                                                                                                                     |
+| `@file` completion                                | deferred                                                                                                                                                                                                                                                     |
+| Image paste/attachments                           | done (`00-web-image-upload`: `+` menu for photo/camera or arbitrary file, clipboard paste, one removable preview; images travel as Pi `ImageContent`, other files upload to `<data-dir>/uploads/<logical-session>/` and the prompt gets their absolute path) |
+| Esc to abort/clear                                | abort via the stop button; queue clear via the X on the chips (`07-queue-display`)                                                                                                                                                                           |
+| Long `notify` text readable (extension commands)  | done (`00-prefix-commands`: dismissible sheet, not a 3.2 s toast)                                                                                                                                                                                            |
+| Transcript text size (50–150 %, header `A−`/`A+`) | done (`03-add-font-size-control`: seven steps, device-local, transcript-only, long-press reset)                                                                                                                                                              |
+| Working / compacting status                       | done (footer + toasts)                                                                                                                                                                                                                                       |
+| Markdown rendering                                | done (`00-render-markdown`)                                                                                                                                                                                                                                  |
+| Diff/syntax colouring and TUI theme values        | `85-theme-tokens`                                                                                                                                                                                                                                            |
+| TUI status line                                   | done (`16-tui-status-line`)                                                                                                                                                                                                                                  |
+| Full transcript (not just windows)                | `10-expand-full-transcript`                                                                                                                                                                                                                                  |
+| Desktop multi-session surface                     | `25-desktop-surface`                                                                                                                                                                                                                                         |
+| Responsive layout contract                        | `20-responsive-layout`                                                                                                                                                                                                                                       |
+| Worktree create/teardown (AoE parity)             | `60-worktrees-for-aoe-parity`                                                                                                                                                                                                                                |
+| Auth posture / VPN bind                           | `80-vpn-bind-and-auth-posture`                                                                                                                                                                                                                               |
 
 ## pixip-only behaviour (no TUI equivalent)
 
@@ -105,11 +105,11 @@ restrict-only layers (a more specific layer can only narrow):
 
 ```json
 {
-  "commands": {
-    "allow": ["compact", "name", "model"],
-    "deny": ["login"],
-    "bash": true
-  }
+	"commands": {
+		"allow": ["compact", "name", "model"],
+		"deny": ["login"],
+		"bash": true
+	}
 }
 ```
 

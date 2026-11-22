@@ -1,12 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import {
-	crumbTrail,
-	filterDirEntries,
-	initialDirectory,
-	parentDirectory,
-} from "../src/client/directoryPicker.js";
+import { crumbTrail, filterDirEntries, initialDirectory, parentDirectory } from "../src/client/directoryPicker.js";
 
 describe("initialDirectory", () => {
 	it("uses the cwd only when it is inside home", () => {

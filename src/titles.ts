@@ -16,8 +16,8 @@ export function normalizeTitle(raw: string): string {
 		.find(Boolean);
 	if (!line) return "";
 	let text = line
-		.replace(/^(?:title|label|session)\s*[:\-]\s*/i, "")
-		.replace(/^[\s"'`*_#>\-]+/, "")
+		.replace(/^(?:title|label|session)\s*[:-]\s*/i, "")
+		.replace(/^[\s"'`*_#>-]+/, "")
 		.replace(/[\s"'`*_#.!?,;:]+$/, "")
 		.replace(/\s+/g, " ")
 		.trim();

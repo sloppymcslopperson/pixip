@@ -13,7 +13,13 @@ async function fixture(lines: string[]): Promise<{ dir: string; path: string; id
 	roots.push(dir);
 	const id = "01a1fb3f-aaaa-7664-b952-f6673a2c7a8c";
 	const path = join(dir, `2026-11-21T00-00-00-000Z_${id}.jsonl`);
-	const header = JSON.stringify({ type: "session", version: 3, id, cwd: "/tmp/project", timestamp: "2026-11-21T00:00:00.000Z" });
+	const header = JSON.stringify({
+		type: "session",
+		version: 3,
+		id,
+		cwd: "/tmp/project",
+		timestamp: "2026-11-21T00:00:00.000Z",
+	});
 	await writeFile(path, [header, ...lines].join("\n") + "\n");
 	return { dir, path, id };
 }
@@ -46,22 +52,27 @@ after(async () => {
 describe("jsonl windows", () => {
 	it("parses entries oldest first and skips jinxed lines", () => {
 		const entries = parseEntries([message(1), "not json", "", message(2), '{"type":'].join("\n"));
-		assert.deepEqual(entries.map((entry) => (entry as { id: string }).id), ["m1", "m2"]);
+		assert.deepEqual(
+			entries.map((entry) => (entry as { id: string }).id),
+			["m1", "m2"],
+		);
 	});
 
 	it("drops a partial first line and honours the entry limit", () => {
 		const lines = Array.from({ length: 10 }, (_, index) => message(index)).join("\n");
 		const text = `alf line\n${lines}`;
 		const entries = parseEntries(text, { dropFirst: true, maxEntries: 3 });
-		assert.deepEqual(entries.map((entry) => (entry as { id: string }).id), ["m7", "m8", "m9"]);
+		assert.deepEqual(
+			entries.map((entry) => (entry as { id: string }).id),
+			["m7", "m8", "m9"],
+		);
 	});
 
 	it("truncates long text and tool output, leaving short entries alone", () => {
 		const long = "x".repeat(ENTRY_TEXT_LIMIT + 50);
-		const [short, big] = truncateEntries([
-			JSON.parse(message(1, "short")),
-			JSON.parse(message(2, long)),
-		]) as Array<{ message: { content: Array<{ text: string }> } }>;
+		const [short, big] = truncateEntries([JSON.parse(message(1, "short")), JSON.parse(message(2, long))]) as Array<{
+			message: { content: Array<{ text: string }> };
+		}>;
 		assert.equal(short?.message.content[0]?.text, "short");
 		const text = big?.message.content[0]?.text ?? "";
 		assert.ok(text.startsWith("x".repeat(ENTRY_TEXT_LIMIT)));
@@ -76,9 +87,15 @@ describe("jsonl windows", () => {
 		assert.deepEqual(snapshot?.entries, []);
 		assert.equal(snapshot?.more, false);
 
-		await writeFile(path, `${JSON.stringify({ type: "session", version: 3, id, cwd: "/tmp/project", timestamp: "2026-11-21T00:00:00.000Z" })}\n${message(0)}\n{"type":"mess`);
+		await writeFile(
+			path,
+			`${JSON.stringify({ type: "session", version: 3, id, cwd: "/tmp/project", timestamp: "2026-11-21T00:00:00.000Z" })}\n${message(0)}\n{"type":"mess`,
+		);
 		const partial = await hub.provisional(id);
-		assert.deepEqual(partial?.entries.map((entry) => (entry as { id: string }).id), ["m0"]);
+		assert.deepEqual(
+			partial?.entries.map((entry) => (entry as { id: string }).id),
+			["m0"],
+		);
 	});
 
 	it("returns the last window with more older entries", async () => {

@@ -27,10 +27,7 @@ if (argv.includes("--print") || argv.includes("-p")) {
 	}
 	const logTitle = () => {
 		if (env.FAKE_PI_LOG) {
-			appendFileSync(
-				env.FAKE_PI_LOG,
-				`${JSON.stringify({ type: "title", args: argv, title, pid: process.pid })}\n`,
-			);
+			appendFileSync(env.FAKE_PI_LOG, `${JSON.stringify({ type: "title", args: argv, title, pid: process.pid })}\n`);
 		}
 	};
 	if (env.FAKE_PI_TITLE_FAIL === "1") {
@@ -190,7 +187,9 @@ function handle(line) {
 			logRecord({ type: "switch_session", sessionPath: command.sessionPath });
 			if (env.FAKE_PI_SWITCH_CANCELLED === "1") return ok(command.id, "switch_session", { cancelled: true });
 			const path = String(command.sessionPath);
-			const lines = readFileSync(path, "utf8").split("\n").filter((line) => line.trim());
+			const lines = readFileSync(path, "utf8")
+				.split("\n")
+				.filter((line) => line.trim());
 			let header = {};
 			try {
 				header = JSON.parse(lines[0] ?? "{}");
@@ -278,9 +277,12 @@ function handle(line) {
 			for (const event of JSON.parse(env.FAKE_PI_ON_PROMPT ?? "[]")) send(event);
 			const settle = JSON.parse(env.FAKE_PI_SETTLE ?? "[]");
 			if (settle.length) {
-				setTimeout(() => {
-					for (const event of settle) send(event);
-				}, Number(env.FAKE_PI_SETTLE_DELAY_MS ?? 100));
+				setTimeout(
+					() => {
+						for (const event of settle) send(event);
+					},
+					Number(env.FAKE_PI_SETTLE_DELAY_MS ?? 100),
+				);
 			}
 			// `prompt` with a streaming behavior models a busy run: the text joins
 			// the pending queue (real Pi would also start a turn when idle, which the

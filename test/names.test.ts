@@ -13,7 +13,13 @@ async function fixture(lines: string[], id = ID): Promise<{ dir: string; path: s
 	const dir = await mkdtemp(join(tmpdir(), "pixip-names-"));
 	roots.push(dir);
 	const path = join(dir, `2026-11-21T00-00-00-000Z_${id}.jsonl`);
-	const header = JSON.stringify({ type: "session", version: 3, id, cwd: "/tmp/project", timestamp: "2026-11-21T00:00:00.000Z" });
+	const header = JSON.stringify({
+		type: "session",
+		version: 3,
+		id,
+		cwd: "/tmp/project",
+		timestamp: "2026-11-21T00:00:00.000Z",
+	});
 	await writeFile(path, [header, ...lines].join("\n") + "\n");
 	const hub = new Hub({
 		piBin: "true",
@@ -29,7 +35,13 @@ async function fixture(lines: string[], id = ID): Promise<{ dir: string; path: s
 const info = (name: string | null, id = "i1") =>
 	JSON.stringify({ type: "session_info", id, parentId: null, timestamp: "2026-11-21T00:00:01.000Z", name });
 const message = (index: number) =>
-	JSON.stringify({ type: "message", id: `m${index}`, parentId: null, timestamp: "2026-11-21T00:00:01.000Z", message: { role: "user", content: [{ type: "text", text: `q${index}` }] } });
+	JSON.stringify({
+		type: "message",
+		id: `m${index}`,
+		parentId: null,
+		timestamp: "2026-11-21T00:00:01.000Z",
+		message: { role: "user", content: [{ type: "text", text: `q${index}` }] },
+	});
 
 after(async () => {
 	for (const dir of roots) await rm(dir, { recursive: true, force: true });

@@ -204,7 +204,7 @@ describe("soft refresh", () => {
 		assert.equal(policyFrames(inbox).length, 1);
 		const health = (await (await fetch(new URL("health", server.url))).json()) as Record<string, unknown>;
 		assert.equal(health["reloads"], 0);
-		assert.equal((await spawnCount(paths)), 1);
+		assert.equal(await spawnCount(paths), 1);
 
 		inbox.close();
 		await server.close();

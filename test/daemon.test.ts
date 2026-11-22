@@ -64,10 +64,10 @@ async function createSession(url: string, cwd: string): Promise<Record<string, u
 	return JSON.parse(text) as Record<string, unknown>;
 }
 
-async function waitFor(check: () => Promise<boolean>, timeoutMs = 5000): Promise<void> {
+async function waitFor(check: () => boolean | Promise<boolean>, timeoutMs = 5000): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
 	while (Date.now() < deadline) {
-		if (await check().catch(() => false)) return;
+		if (await Promise.resolve(check()).catch(() => false)) return;
 		await new Promise((resolve) => setTimeout(resolve, 50));
 	}
 	throw new Error("timed out waiting");
@@ -285,7 +285,7 @@ describe("hard restart", () => {
 		const ws = new WebSocket(`${url.replace(/^http/, "ws")}ws?session=${encodeURIComponent(sessionId)}`);
 		const frames: Array<Record<string, unknown>> = [];
 		ws.on("message", (data) => frames.push(JSON.parse(String(data)) as Record<string, unknown>));
-		await waitFor(async () => frames.some((frame) => frame["t"] === "snapshot"), 10_000);
+		await waitFor(() => frames.some((frame) => frame["t"] === "snapshot"), 10_000);
 		const first = frames.find((frame) => frame["t"] === "snapshot");
 		assert.equal((first?.["entries"] as unknown[]).length, 1);
 
@@ -303,7 +303,7 @@ describe("hard restart", () => {
 		);
 		const next: Array<Record<string, unknown>> = [];
 		reopened.on("message", (data) => next.push(JSON.parse(String(data)) as Record<string, unknown>));
-		await waitFor(async () => next.some((frame) => frame["t"] === "snapshot"), 15_000);
+		await waitFor(() => next.some((frame) => frame["t"] === "snapshot"), 15_000);
 		const snapshot = next.find((frame) => frame["t"] === "snapshot");
 		assert.equal(snapshot?.["resume"], true);
 		assert.equal((snapshot?.["session"] as Record<string, unknown>)["logicalId"], logicalId);

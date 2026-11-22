@@ -5,7 +5,7 @@ import { fallbackTitle, normalizeTitle, titlePrompt } from "../src/titles.ts";
 
 describe("session titles", () => {
 	it("normalizes model output to sentence case, 3-5 words and 40 chars", () => {
-		assert.equal(normalizeTitle("  \"Refactor Auth Module\"  "), "Refactor auth module");
+		assert.equal(normalizeTitle('  "Refactor Auth Module"  '), "Refactor auth module");
 		assert.equal(normalizeTitle("Title: Fix the broken login"), "Fix the broken login");
 		assert.equal(normalizeTitle("one two three four five six seven"), "One two three four five");
 		assert.equal(normalizeTitle("x".repeat(80)), `X${"x".repeat(39)}`);

@@ -25,18 +25,27 @@ describe("flattenTree", () => {
 	it("walks roots depth-first and indents children", () => {
 		const { tree: roots, leafId } = tree();
 		const rows = flattenTree(roots, leafId);
-		assert.deepEqual(rows.map((row) => [row.id, row.depth]), [
-			["u1", 0],
-			["a1", 1],
-			["u2", 2],
-		]);
+		assert.deepEqual(
+			rows.map((row) => [row.id, row.depth]),
+			[
+				["u1", 0],
+				["a1", 1],
+				["u2", 2],
+			],
+		);
 	});
 
 	it("marks the leaf and its ancestor chain as current", () => {
 		const { tree: roots, leafId } = tree();
 		const rows = flattenTree(roots, leafId);
-		assert.deepEqual(rows.map((row) => row.leaf), [false, false, true]);
-		assert.deepEqual(rows.map((row) => row.current), [true, true, true]);
+		assert.deepEqual(
+			rows.map((row) => row.leaf),
+			[false, false, true],
+		);
+		assert.deepEqual(
+			rows.map((row) => row.current),
+			[true, true, true],
+		);
 		assert.deepEqual(
 			flattenTree(roots, "a1").map((row) => row.current),
 			[true, true, false],
@@ -48,10 +57,28 @@ describe("flattenTree", () => {
 			{
 				entry: { type: "message", id: "u1", parentId: null, message: { role: "user", content: "hello" } },
 				label: "good branch",
-				children: [{ entry: { type: "message", id: "a1", parentId: "u1", message: { role: "assistant", content: [{ type: "text", text: "hi" }] } }, children: [] }],
+				children: [
+					{
+						entry: {
+							type: "message",
+							id: "a1",
+							parentId: "u1",
+							message: { role: "assistant", content: [{ type: "text", text: "hi" }] },
+						},
+						children: [],
+					},
+				],
 			},
 			{ entry: { type: "compaction", id: "c1", parentId: "a1", summary: "compacted" }, children: [] },
-			{ entry: { type: "message", id: "orphan", parentId: "missing", message: { role: "user", content: [{ type: "text", text: "orphaned" }] } }, children: [] },
+			{
+				entry: {
+					type: "message",
+					id: "orphan",
+					parentId: "missing",
+					message: { role: "user", content: [{ type: "text", text: "orphaned" }] },
+				},
+				children: [],
+			},
 		];
 		const rows = flattenTree(roots, null);
 		assert.equal(rows.length, 4);

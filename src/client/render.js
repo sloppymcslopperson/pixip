@@ -17,10 +17,6 @@ export function pendingErrorHtml(message) {
 }
 
 const SGR = /\u001b\[([0-9;]*)m/y;
-const OSC = /\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g;
-const CSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
-const ESC = /\u001b[@-Z\\-_]/g;
-
 /** ANSI SGR -> spans. Cursor moves, OSC titles and other CSI are dropped. */
 export function ansiToHtml(text) {
 	// CR without LF means "overwrite this line" (progress bars): keep the last segment.
@@ -85,21 +81,48 @@ export function ansiToHtml(text) {
 	return html;
 }
 
-const FG = ["#f5f5f5", "#f7768e", "#9ece6a", "#e0af68", "#7aa2f7", "#bb9af7", "#7dcfff", "#c0caf5",
-	"#4e5568", "#ff899d", "#b9f27c", "#ffd08a", "#9ab8ff", "#d0a9ff", "#a4e8ff", "#ffffff"];
+const FG = [
+	"#f5f5f5",
+	"#f7768e",
+	"#9ece6a",
+	"#e0af68",
+	"#7aa2f7",
+	"#bb9af7",
+	"#7dcfff",
+	"#c0caf5",
+	"#4e5568",
+	"#ff899d",
+	"#b9f27c",
+	"#ffd08a",
+	"#9ab8ff",
+	"#d0a9ff",
+	"#a4e8ff",
+	"#ffffff",
+];
 
 function applySgr(state, params) {
 	const codes = params.length === 0 ? [0] : params.split(";").map((part) => (part === "" ? 0 : Number(part)));
 	for (let index = 0; index < codes.length; index += 1) {
 		const code = codes[index];
-		if (code === 0) state = Object.assign(state, { fg: null, bg: null, bold: false, dim: false, italic: false, underline: false, invert: false });
+		if (code === 0)
+			state = Object.assign(state, {
+				fg: null,
+				bg: null,
+				bold: false,
+				dim: false,
+				italic: false,
+				underline: false,
+				invert: false,
+			});
 		else if (code === 1) state.bold = true;
 		else if (code === 2) state.dim = true;
 		else if (code === 3) state.italic = true;
 		else if (code === 4) state.underline = true;
 		else if (code === 7) state.invert = true;
-		else if (code === 22) { state.bold = false; state.dim = false; }
-		else if (code === 23) state.italic = false;
+		else if (code === 22) {
+			state.bold = false;
+			state.dim = false;
+		} else if (code === 23) state.italic = false;
 		else if (code === 24) state.underline = false;
 		else if (code === 27) state.invert = false;
 		else if (code >= 30 && code <= 37) state.fg = FG[code - 30];
@@ -141,7 +164,9 @@ function xterm256(n) {
 export function summarizeArgs(name, args) {
 	if (!args || typeof args !== "object") return "";
 	const pick = (key) => (typeof args[key] === "string" ? args[key] : undefined);
-	const text = [pick("command"), pick("path"), pick("pattern"), pick("url"), pick("query"), pick("file_path")].find(Boolean);
+	const text = [pick("command"), pick("path"), pick("pattern"), pick("url"), pick("query"), pick("file_path")].find(
+		Boolean,
+	);
 	if (!text) return "";
 	return text.replace(/\s+/g, " ").slice(0, 96);
 }
@@ -179,7 +204,8 @@ export function renderUserBody(message) {
 	const text = escapeHtml(textOf(content));
 	const images = Array.isArray(content)
 		? content.filter(
-				(block) => block && block.type === "image" && typeof block.data === "string" && typeof block.mimeType === "string",
+				(block) =>
+					block && block.type === "image" && typeof block.data === "string" && typeof block.mimeType === "string",
 			)
 		: [];
 	const thumbs = images
@@ -188,7 +214,11 @@ export function renderUserBody(message) {
 				`<button type="button" class="msg-image" aria-label="Open attached image"><img src="data:${escapeHtml(block.mimeType)};base64,${block.data}" alt="attached image" loading="lazy" /></button>`,
 		)
 		.join("");
-	const textHtml = text ? `<div class="text">${text}</div>` : images.length === 0 ? '<div class="text">[image]</div>' : "";
+	const textHtml = text
+		? `<div class="text">${text}</div>`
+		: images.length === 0
+			? '<div class="text">[image]</div>'
+			: "";
 	return `${textHtml}${thumbs ? `<div class="msg-images">${thumbs}</div>` : ""}`;
 }
 
@@ -197,9 +227,10 @@ export function renderMessage(message, entryId) {
 	if (message.role === "user") {
 		// Snapshot entries carry their id; live `message_start` records do not, so
 		// the affordance appears once the message is part of the loaded window.
-		const fork = typeof entryId === "string" && entryId
-			? ` <button type="button" class="fork-action" data-fork="${escapeHtml(entryId)}" aria-label="Fork from this message" title="Fork from this message">fork</button>`
-			: "";
+		const fork =
+			typeof entryId === "string" && entryId
+				? ` <button type="button" class="fork-action" data-fork="${escapeHtml(entryId)}" aria-label="Fork from this message" title="Fork from this message">fork</button>`
+				: "";
 		return `<section class="block user"><div class="who">you${fork}</div>${renderUserBody(message)}</section>`;
 	}
 	if (message.role === "assistant") {
@@ -267,7 +298,8 @@ export function renderAssistantBody(content, includeTools = true) {
 	const body = markdownToHtml(text.join(""));
 	if (body.trim()) html += `<div class="text">${body}</div>`;
 	if (includeTools) {
-		for (const call of tools) html += toolBlock(call.name, summarizeArgs(call.name, call.arguments), "", "", null, call.id ?? "");
+		for (const call of tools)
+			html += toolBlock(call.name, summarizeArgs(call.name, call.arguments), "", "", null, call.id ?? "");
 	}
 	return html;
 }

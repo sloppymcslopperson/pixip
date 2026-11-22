@@ -41,7 +41,10 @@ export interface ResolvePolicyInput {
 }
 
 /** One policy file, or `undefined` when it does not exist. */
-export async function readCommandLayer(path: string, log: (message: string) => void): Promise<CommandLayer | undefined> {
+export async function readCommandLayer(
+	path: string,
+	log: (message: string) => void,
+): Promise<CommandLayer | undefined> {
 	let text: string;
 	try {
 		text = await readFile(path, "utf8");
@@ -111,5 +114,5 @@ export async function resolveSessionPolicy(input: ResolvePolicyInput): Promise<C
 		if (project) layers.push(project);
 	}
 	if (input.cli) layers.push(input.cli);
-	return resolvePolicy(layers) as CommandPolicy;
+	return resolvePolicy(layers);
 }

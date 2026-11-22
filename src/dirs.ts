@@ -130,9 +130,9 @@ export async function listDirectories(input: string | null | undefined, home: st
 	const dirents = await readdir(path, { withFileTypes: true }).catch((error: unknown) => {
 		throw fsError(error, path);
 	});
-	const entries = (
-		await Promise.all(dirents.map((dirent) => entryFor(path, root, dirent.name)))
-	).filter((entry): entry is DirEntry => entry !== null);
+	const entries = (await Promise.all(dirents.map((dirent) => entryFor(path, root, dirent.name)))).filter(
+		(entry): entry is DirEntry => entry !== null,
+	);
 	return {
 		path,
 		home: root,

@@ -38,7 +38,10 @@ describe("command config files", () => {
 	});
 
 	it("rejects wrong types with the file path", () => {
-		assert.throws(() => validateCommandLayer({ commands: { allow: "compact" } }, "/x/pixip.json", noLog), /commands\.allow/);
+		assert.throws(
+			() => validateCommandLayer({ commands: { allow: "compact" } }, "/x/pixip.json", noLog),
+			/commands\.allow/,
+		);
 		assert.throws(() => validateCommandLayer({ commands: { deny: [1] } }, "/x/pixip.json", noLog), /commands\.deny/);
 		assert.throws(() => validateCommandLayer({ commands: { bash: "no" } }, "/x/pixip.json", noLog), /commands\.bash/);
 		assert.throws(() => validateCommandLayer({ commands: [] }, "/x/pixip.json", noLog), /must be an object/);
@@ -53,8 +56,8 @@ describe("command config files", () => {
 			(message) => logged.push(message),
 		);
 		assert.deepEqual(layer, { allow: ["compact"], deny: ["fit"], bash: false });
-		assert.ok(logged.some((line) => line.includes("unknown key \"theme\"")));
-		assert.ok(logged.some((line) => line.includes("unknown key \"commands.nope\"")));
+		assert.ok(logged.some((line) => line.includes('unknown key "theme"')));
+		assert.ok(logged.some((line) => line.includes('unknown key "commands.nope"')));
 	});
 
 	it("accepts an empty document as a neutral layer", () => {
@@ -92,13 +95,21 @@ describe("resolveSessionPolicy", () => {
 
 	it("ignores missing files and keeps the CLI layer", async () => {
 		const dataDir = await root();
-		const policy = await resolveSessionPolicy({ dataDir, cwd: join(dataDir, "nowhere"), cli: { deny: ["login"] }, log: noLog });
+		const policy = await resolveSessionPolicy({
+			dataDir,
+			cwd: join(dataDir, "nowhere"),
+			cli: { deny: ["login"] },
+			log: noLog,
+		});
 		assert.deepEqual(policy, { allow: [], deny: ["login"], bash: true });
 	});
 
 	it("fails the resolve when a file is malformed (attach shows the path)", async () => {
 		const dataDir = await root();
 		await writeFile(join(dataDir, "pixip.json"), "[1,2,3]");
-		await assert.rejects(resolveSessionPolicy({ dataDir, cwd: dataDir, log: noLog }), /pixip\.json: expected a JSON object/);
+		await assert.rejects(
+			resolveSessionPolicy({ dataDir, cwd: dataDir, log: noLog }),
+			/pixip\.json: expected a JSON object/,
+		);
 	});
 });

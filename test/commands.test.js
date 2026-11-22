@@ -39,7 +39,11 @@ describe("classifyInput", () => {
 
 	it("parses slash names and arguments, keeping the verbatim text", () => {
 		assert.deepEqual(
-			{ kind: classifyInput("/compact").kind, name: classifyInput("/compact").name, args: classifyInput("/compact").args },
+			{
+				kind: classifyInput("/compact").kind,
+				name: classifyInput("/compact").name,
+				args: classifyInput("/compact").args,
+			},
 			{ kind: "builtin", name: "compact", args: "" },
 		);
 		const withArgs = classifyInput("/compact  keep the API notes  ");
@@ -100,7 +104,22 @@ describe("catalog", () => {
 	it("has one entry per command, with the 02 built-ins", () => {
 		assert.deepEqual(
 			BUILTIN_COMMANDS.map((command) => command.name),
-			["compact", "name", "session", "copy", "model", "thinking", "new", "resume", "quit", "tree", "fork", "clone", "import", "export"],
+			[
+				"compact",
+				"name",
+				"session",
+				"copy",
+				"model",
+				"thinking",
+				"new",
+				"resume",
+				"quit",
+				"tree",
+				"fork",
+				"clone",
+				"import",
+				"export",
+			],
 		);
 		assert.ok(TUI_ONLY_COMMANDS.length >= 10);
 		assert.equal(COMMANDS.length, BUILTIN_COMMANDS.length + TUI_ONLY_COMMANDS.length);
@@ -128,10 +147,10 @@ describe("resolvePolicy", () => {
 
 	it("intersects non-empty allow lists and treats empty as no restriction", () => {
 		assert.deepEqual(resolvePolicy([{ allow: [] }, { allow: ["compact", "name"] }]).allow, ["compact", "name"]);
-		assert.deepEqual(
-			resolvePolicy([{ allow: ["compact", "name", "model"] }, { allow: ["name", "model"] }]).allow,
-			["name", "model"],
-		);
+		assert.deepEqual(resolvePolicy([{ allow: ["compact", "name", "model"] }, { allow: ["name", "model"] }]).allow, [
+			"name",
+			"model",
+		]);
 		assert.deepEqual(resolvePolicy([{ allow: ["compact"] }, { allow: [] }]).allow, ["compact"]);
 		assert.deepEqual(resolvePolicy([{ allow: ["compact"] }, { allow: ["name"] }]).allow, []);
 	});
@@ -221,7 +240,10 @@ describe("filterCommands", () => {
 	];
 
 	it("matches names case-insensitively", () => {
-		assert.deepEqual(filterCommands(commands, "CO").map((command) => command.name), ["compact", "copy"]);
+		assert.deepEqual(
+			filterCommands(commands, "CO").map((command) => command.name),
+			["compact", "copy"],
+		);
 	});
 
 	it("puts name prefixes before other name matches, then description matches", () => {
@@ -230,7 +252,10 @@ describe("filterCommands", () => {
 			{ name: "sync", summary: "sync notes" },
 			{ name: "copy", summary: "sync notes" },
 		];
-		assert.deepEqual(filterCommands(ranked, "sync").map((command) => command.name), ["sync", "resync", "copy"]);
+		assert.deepEqual(
+			filterCommands(ranked, "sync").map((command) => command.name),
+			["sync", "resync", "copy"],
+		);
 	});
 
 	it("is alphabetical for an empty query and drops non-matches", () => {

@@ -200,7 +200,10 @@ async function handleHttp(
 			return;
 		}
 		if (req.method === "GET" && url.pathname === "/api/info") {
-			send(200, JSON.stringify({ ok: true, wire: WIRE_VERSION, defaultCwd: process.cwd(), home: process.env["HOME"] ?? "" }));
+			send(
+				200,
+				JSON.stringify({ ok: true, wire: WIRE_VERSION, defaultCwd: process.cwd(), home: process.env["HOME"] ?? "" }),
+			);
 			return;
 		}
 		if (req.method === "GET" && url.pathname === "/api/dirs") {
@@ -244,7 +247,15 @@ async function handleHttp(
 		}
 		if (req.method === "POST" && url.pathname === "/api/sessions/archive-inactive") {
 			const result = await hub.archiveInactive();
-			send(200, JSON.stringify({ ok: true, archived: result.archived.length, failed: result.failed, sessions: result.archived }));
+			send(
+				200,
+				JSON.stringify({
+					ok: true,
+					archived: result.archived.length,
+					failed: result.failed,
+					sessions: result.archived,
+				}),
+			);
 			return;
 		}
 		const archiveMatch = /^\/api\/sessions\/([^/]+)\/archive$/.exec(url.pathname);
@@ -511,7 +522,12 @@ async function handleCommand(
 		}
 		switch (type) {
 			case "prompt": {
-				const behavior = message["streamingBehavior"] === "steer" ? "steer" : message["streamingBehavior"] === "followUp" ? "followUp" : undefined;
+				const behavior =
+					message["streamingBehavior"] === "steer"
+						? "steer"
+						: message["streamingBehavior"] === "followUp"
+							? "followUp"
+							: undefined;
 				await hub.prompt(sessionId, String(message["text"] ?? ""), behavior, message["images"]);
 				break;
 			}
@@ -655,7 +671,10 @@ async function loadAssets(clientDir: string): Promise<Map<string, Buffer>> {
 	for (const entry of entries) {
 		if (!entry.isFile()) continue;
 		const path = join(entry.parentPath, entry.name);
-		const relative = `/${path.slice(clientDir.length + 1).split("\\").join("/")}`;
+		const relative = `/${path
+			.slice(clientDir.length + 1)
+			.split("\\")
+			.join("/")}`;
 		assets.set(relative, await readFile(path));
 	}
 	return assets;
