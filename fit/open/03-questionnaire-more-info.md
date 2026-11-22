@@ -1,5 +1,6 @@
 ---
 project: pixip
+grilled: true
 ---
 
 Add a per-question "I need more information" button to the A2UI questionnaire surface. Pressing it ends the tool with a non-error result that tells the model to explain the question and its options in plain text, then ask the questionnaire again.
@@ -28,3 +29,11 @@ Add a per-question "I need more information" button to the A2UI questionnaire su
 ### Note
 
 The owner also likes ending a questionnaire with a free-text notes question; keep that pattern in the fixture/test questionnaire.
+
+### Grilled decisions
+
+- Every question gets the button, choice and text alike.
+- The affected question is **not** answered by pressing it; it becomes the thing the model explains. Answers already collected for the other questions are carried in the result and must not be re-asked. The re-ask starts clean for the affected question only.
+- The model explains the question and its options in chat, then **waits for the user's reply**; it re-asks only if still needed after that reply. No auto re-ask in the same turn.
+- Parity: A2UI panel button, a "More information" row in the TUI custom UI, and a "More information" option in the dialog fallback.
+- Action: `{name:"more_info", context:{questionId, answers:{"@path":"/answers"}}}`. The tool result is non-error, non-cancelled, names the question and its prompt, tells the model to explain in plain text and wait, and lists the other answers already collected.
