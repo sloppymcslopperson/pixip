@@ -296,15 +296,15 @@ export function surfaceOpen() {
 	return queue.active !== null;
 }
 
-/** Dev-only: open the A2UI fixture panel when the page has `?panel=fixture`
- * (short fixture) or `?panel=long` (overflow fixture). */
+/** Dev-only: open an A2UI fixture panel from `?panel=fixture`, `?panel=long`
+ * (overflow fixture) or `?panel=questionnaire` (questionnaire surface fixture). */
 export async function openFixturePanel(search = location.search) {
 	const params = new URLSearchParams(search);
 	const panel = params.get("panel");
-	if (panel !== "fixture" && panel !== "long") return false;
+	if (panel !== "fixture" && panel !== "long" && panel !== "questionnaire") return false;
 	let payload;
 	try {
-		const fixture = panel === "long" ? "?fixture=long" : "";
+		const fixture = panel === "fixture" ? "" : `?fixture=${panel}`;
 		const response = await fetch(`/api/dev/panel-fixture${fixture}`, { cache: "no-store" });
 		if (!response.ok) return false;
 		payload = await response.json();

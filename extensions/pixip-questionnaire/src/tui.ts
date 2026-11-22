@@ -17,6 +17,7 @@ import { normalizeAnswers, type Answer, type Question } from "./questions.ts";
 export interface TuiResult {
 	answers: Answer[];
 	cancelled: boolean;
+	moreInfo?: Question;
 }
 
 interface Draft {
@@ -25,9 +26,13 @@ interface Draft {
 }
 
 type Row =
-	{ kind: "option"; value: string; label: string; description?: string } | { kind: "custom" } | { kind: "done" };
+	| { kind: "option"; value: string; label: string; description?: string }
+	| { kind: "custom" }
+	| { kind: "more_info" }
+	| { kind: "done" };
 
 const OTHER_LABEL = "Type your own answer";
+const MORE_INFO_LABEL = "More information";
 const DONE_LABEL = "Done";
 
 function rowsFor(question: Question): Row[] {
@@ -39,6 +44,7 @@ function rowsFor(question: Question): Row[] {
 	}));
 	rows.push({ kind: "custom" });
 	if (question.multiple) rows.push({ kind: "done" });
+	rows.push({ kind: "more_info" });
 	return rows;
 }
 
@@ -103,7 +109,8 @@ export async function askWithTui(ui: CustomUi, questions: Question[]): Promise<T
 			}
 			return draft;
 		};
-		const submit = (cancelled: boolean) => done({ answers: draftsToAnswers(questions, drafts), cancelled });
+		const submit = (cancelled: boolean, moreInfo?: Question) =>
+			done({ answers: draftsToAnswers(questions, drafts), cancelled, ...(moreInfo ? { moreInfo } : {}) });
 
 		const advance = () => {
 			if (!multi) {
@@ -193,6 +200,10 @@ export async function askWithTui(ui: CustomUi, questions: Question[]): Promise<T
 				refresh();
 				return;
 			}
+			if (row.kind === "more_info") {
+				submit(false, question);
+				return;
+			}
 			if (row.kind === "done") {
 				advance();
 				return;
@@ -277,6 +288,8 @@ export async function askWithTui(ui: CustomUi, questions: Question[]): Promise<T
 								label = `${mark}${row.label}`;
 							} else if (row.kind === "custom") {
 								label = draft.custom ? `${OTHER_LABEL}: ${draft.custom}` : OTHER_LABEL;
+							} else if (row.kind === "more_info") {
+								label = MORE_INFO_LABEL;
 							} else {
 								label = DONE_LABEL;
 							}

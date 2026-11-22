@@ -1,0 +1,280 @@
+{
+	"title": "Questionnaire fixture",
+	"mode": "a2ui",
+	"surfaceId": "questionnaire",
+	"messages": [
+		{
+			"version": "1.0",
+			"createSurface": {
+				"surfaceId": "questionnaire",
+				"catalogId": "https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json",
+				"sendDataModel": false,
+				"dataModel": {
+					"answers": {
+						"color": {
+							"selected": [],
+							"custom": ""
+						},
+						"scope": {
+							"selected": [],
+							"custom": ""
+						},
+						"notes": {
+							"selected": [],
+							"custom": ""
+						}
+					}
+				},
+				"components": [
+					{
+						"id": "root",
+						"component": "Column",
+						"children": ["title", "tabs", "footer"]
+					},
+					{
+						"id": "title",
+						"component": "Text",
+						"variant": "body",
+						"text": "Questionnaire fixture"
+					},
+					{
+						"id": "choice_0",
+						"component": "ChoicePicker",
+						"label": "Choose",
+						"variant": "mutuallyExclusive",
+						"options": [
+							{
+								"value": "red",
+								"label": "Red"
+							},
+							{
+								"value": "blue",
+								"label": "Blue"
+							}
+						],
+						"value": {
+							"@path": "/answers/color/selected"
+						}
+					},
+					{
+						"id": "prompt_row_0",
+						"component": "Row",
+						"children": ["prompt_0", "more_info_btn_0"]
+					},
+					{
+						"id": "question_0",
+						"component": "Column",
+						"children": ["prompt_row_0", "choice_0", "text_0"]
+					},
+					{
+						"id": "prompt_0",
+						"component": "Text",
+						"text": "Which colour should the header use?"
+					},
+					{
+						"id": "more_info_label_0",
+						"component": "Text",
+						"text": "I need more information"
+					},
+					{
+						"id": "more_info_btn_0",
+						"component": "Button",
+						"child": "more_info_label_0",
+						"variant": "borderless",
+						"action": {
+							"event": {
+								"name": "more_info",
+								"context": {
+									"questionId": "color",
+									"answers": {
+										"@path": "/answers"
+									}
+								}
+							}
+						}
+					},
+					{
+						"id": "text_0",
+						"component": "TextField",
+						"label": "Type your own answer",
+						"placeholder": "type something...",
+						"value": {
+							"@path": "/answers/color/custom"
+						}
+					},
+					{
+						"id": "choice_1",
+						"component": "ChoicePicker",
+						"label": "Choose",
+						"variant": "multipleSelection",
+						"options": [
+							{
+								"value": "css",
+								"label": "CSS"
+							},
+							{
+								"value": "js",
+								"label": "JS"
+							}
+						],
+						"value": {
+							"@path": "/answers/scope/selected"
+						}
+					},
+					{
+						"id": "prompt_row_1",
+						"component": "Row",
+						"children": ["prompt_1", "more_info_btn_1"]
+					},
+					{
+						"id": "question_1",
+						"component": "Column",
+						"children": ["prompt_row_1", "choice_1", "text_1"]
+					},
+					{
+						"id": "prompt_1",
+						"component": "Text",
+						"text": "What should this change touch?"
+					},
+					{
+						"id": "more_info_label_1",
+						"component": "Text",
+						"text": "I need more information"
+					},
+					{
+						"id": "more_info_btn_1",
+						"component": "Button",
+						"child": "more_info_label_1",
+						"variant": "borderless",
+						"action": {
+							"event": {
+								"name": "more_info",
+								"context": {
+									"questionId": "scope",
+									"answers": {
+										"@path": "/answers"
+									}
+								}
+							}
+						}
+					},
+					{
+						"id": "text_1",
+						"component": "TextField",
+						"label": "Type your own answer",
+						"placeholder": "type something...",
+						"value": {
+							"@path": "/answers/scope/custom"
+						}
+					},
+					{
+						"id": "prompt_row_2",
+						"component": "Row",
+						"children": ["prompt_2", "more_info_btn_2"]
+					},
+					{
+						"id": "question_2",
+						"component": "Column",
+						"children": ["prompt_row_2", "text_2"]
+					},
+					{
+						"id": "prompt_2",
+						"component": "Text",
+						"text": "Anything else?"
+					},
+					{
+						"id": "more_info_label_2",
+						"component": "Text",
+						"text": "I need more information"
+					},
+					{
+						"id": "more_info_btn_2",
+						"component": "Button",
+						"child": "more_info_label_2",
+						"variant": "borderless",
+						"action": {
+							"event": {
+								"name": "more_info",
+								"context": {
+									"questionId": "notes",
+									"answers": {
+										"@path": "/answers"
+									}
+								}
+							}
+						}
+					},
+					{
+						"id": "text_2",
+						"component": "TextField",
+						"label": "Type your own answer",
+						"placeholder": "type something...",
+						"value": {
+							"@path": "/answers/notes/custom"
+						}
+					},
+					{
+						"id": "tabs",
+						"component": "Tabs",
+						"tabs": [
+							{
+								"title": "Color",
+								"child": "question_0"
+							},
+							{
+								"title": "Scope",
+								"child": "question_1"
+							},
+							{
+								"title": "Notes",
+								"child": "question_2"
+							}
+						]
+					},
+					{
+						"id": "footer",
+						"component": "Row",
+						"children": ["cancel_btn", "submit_btn"]
+					},
+					{
+						"id": "cancel_label",
+						"component": "Text",
+						"text": "Cancel"
+					},
+					{
+						"id": "cancel_btn",
+						"component": "Button",
+						"child": "cancel_label",
+						"variant": "borderless",
+						"action": {
+							"event": {
+								"name": "cancel"
+							}
+						}
+					},
+					{
+						"id": "submit_label",
+						"component": "Text",
+						"text": "Submit"
+					},
+					{
+						"id": "submit_btn",
+						"component": "Button",
+						"child": "submit_label",
+						"variant": "primary",
+						"action": {
+							"event": {
+								"name": "submit",
+								"context": {
+									"answers": {
+										"@path": "/answers"
+									}
+								}
+							}
+						}
+					}
+				]
+			}
+		}
+	]
+}

@@ -28,6 +28,16 @@ function button(id: string, labelId: string, label: string, variant: string, act
 	return [text(labelId, label), { id, component: "Button", child: labelId, variant, action }];
 }
 
+/** Action context for a per-question explanation request. */
+function moreInfoAction(question: Question) {
+	return {
+		event: {
+			name: "more_info",
+			context: { questionId: question.id, answers: { "@path": "/answers" } },
+		},
+	};
+}
+
 /**
  * One createSurface message: title, one tab per question, and a footer with
  * Cancel and Submit. Choice questions bind both a ChoicePicker and a free-form
@@ -52,8 +62,11 @@ export function buildSurface(questions: Question[], options: SurfaceOptions = {}
 
 	questions.forEach((question, index) => {
 		const containerId = `question_${index}`;
+		const promptRowId = `prompt_row_${index}`;
 		const promptId = `prompt_${index}`;
-		const children = [promptId];
+		const moreInfoId = `more_info_btn_${index}`;
+		const moreInfoLabelId = `more_info_label_${index}`;
+		const children = [promptRowId];
 		answers[question.id] = { selected: [], custom: "" };
 
 		if (question.widget === "choice") {
@@ -69,13 +82,23 @@ export function buildSurface(questions: Question[], options: SurfaceOptions = {}
 		}
 
 		children.push(`text_${index}`);
-		components.push({ id: containerId, component: "Column", children }, text(promptId, question.prompt), {
-			id: `text_${index}`,
-			component: "TextField",
-			label: "Type your own answer",
-			placeholder: "type something...",
-			value: { "@path": `/answers/${question.id}/custom` },
-		});
+		components.push(
+			{
+				id: promptRowId,
+				component: "Row",
+				children: [promptId, moreInfoId],
+			},
+			{ id: containerId, component: "Column", children },
+			text(promptId, question.prompt),
+			...button(moreInfoId, moreInfoLabelId, "I need more information", "borderless", moreInfoAction(question)),
+			{
+				id: `text_${index}`,
+				component: "TextField",
+				label: "Type your own answer",
+				placeholder: "type something...",
+				value: { "@path": `/answers/${question.id}/custom` },
+			},
+		);
 		tabs.push({ title: question.label, child: containerId });
 	});
 

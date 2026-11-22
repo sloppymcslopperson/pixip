@@ -61,6 +61,8 @@ const OTHER_CHOICE = "Type your own answer";
 const CHAT_CHOICE = "Answer this in chat";
 const ADD_CHOICE = "Add an item in chat";
 const DONE_CHOICE = "Done";
+const MORE_INFO_CHOICE = "More information";
+const ANSWER_HERE_CHOICE = "Answer here";
 
 type PanelFn = (payload: PanelPayload, opts?: { timeout?: number; signal?: AbortSignal }) => Promise<unknown>;
 type PanelUi = ExtensionUIContext & { panel?: PanelFn };
@@ -163,6 +165,12 @@ export async function askWithDialogs(
 	const raw: Record<string, { selected: string[]; custom: string }> = {};
 	const deferred: string[] = [];
 
+	const moreInfo = (question: Question): AskResult => ({
+		kind: "more_info",
+		question,
+		answers: normalizeAnswers(questions, raw).filter((answer) => answer.id !== question.id),
+	});
+
 	const entered = (id: string) => {
 		const current = raw[id];
 		if (!current) raw[id] = { selected: [], custom: "" };
@@ -177,12 +185,16 @@ export async function askWithDialogs(
 
 		if (question.widget === "text") {
 			if (input) {
+				const mode = await select(title, [ANSWER_HERE_CHOICE, MORE_INFO_CHOICE], opts);
+				if (mode === undefined) return { kind: "cancelled", answers: [] };
+				if (mode === MORE_INFO_CHOICE) return moreInfo(question);
 				const typed = await input(title, "type something...", opts);
 				if (typed === undefined) return { kind: "cancelled", answers: [] };
 				entered(question.id).custom = typed.trim();
 			} else {
-				const choice = await select(title, [CHAT_CHOICE], opts);
+				const choice = await select(title, [CHAT_CHOICE, MORE_INFO_CHOICE], opts);
 				if (choice === undefined) return { kind: "cancelled", answers: [] };
+				if (choice === MORE_INFO_CHOICE) return moreInfo(question);
 				deferred.push(question.id);
 			}
 			continue;
@@ -196,11 +208,12 @@ export async function askWithDialogs(
 		});
 
 		if (!question.multiple) {
-			const options = [...optionLabels, typing ? OTHER_CHOICE : CHAT_CHOICE];
+			const options = [...optionLabels, typing ? OTHER_CHOICE : CHAT_CHOICE, MORE_INFO_CHOICE];
 			let chosen: string | undefined;
 			for (;;) {
 				chosen = await select(title, options, opts);
 				if (chosen === undefined) return { kind: "cancelled", answers: [] };
+				if (chosen === MORE_INFO_CHOICE) return moreInfo(question);
 				if (chosen === CHAT_CHOICE) {
 					deferred.push(question.id);
 					break;
@@ -226,10 +239,11 @@ export async function askWithDialogs(
 				lookup.set(label, option.value);
 				return label;
 			});
-			const options = [...marks, typing ? OTHER_CHOICE : CHAT_CHOICE, DONE_CHOICE];
+			const options = [...marks, typing ? OTHER_CHOICE : CHAT_CHOICE, DONE_CHOICE, MORE_INFO_CHOICE];
 			if (!typing) options.push(ADD_CHOICE);
 			const chosen = await select(title, options, opts);
 			if (chosen === undefined) return { kind: "cancelled", answers: [] };
+			if (chosen === MORE_INFO_CHOICE) return moreInfo(question);
 			if (chosen === CHAT_CHOICE) {
 				deferred.push(question.id);
 				break;
@@ -282,6 +296,31 @@ export async function askWithDialogs(
 	return { kind: "answered", answers: normalizeAnswers(questions, raw) };
 }
 
+/** Model-facing instruction for a per-question "I need more information" press. */
+export function moreInfoText(questions: Question[], result: Extract<AskResult, { kind: "more_info" }>): string {
+	const question = result.question;
+	const lines = [`The user asked for more information about ${question.label}: "${question.prompt}".`];
+	if (question.widget === "choice" && question.options.length > 0) {
+		const options = question.options.map((option, index) => `${index + 1}. ${option.label}`).join("; ");
+		lines.push(`Its options are: ${options}.`);
+	}
+	lines.push(
+		"Explain this question and its options in plain text in chat, then wait for the user's reply before deciding whether to ask it again. " +
+			"This is not a dismissal and it is not an answer to this question; do not re-ask this questionnaire automatically in the same turn.",
+	);
+	const collected = questions
+		.filter((candidate) => candidate.id !== question.id)
+		.map((candidate) =>
+			answerLine(
+				candidate,
+				result.answers.find((answer) => answer.id === candidate.id),
+			),
+		)
+		.filter((line) => !line.endsWith(": Unanswered"));
+	if (collected.length > 0) lines.push("", "Already answered:", ...collected);
+	return lines.join("\n");
+}
+
 function deferredText(questions: Question[], result: Extract<AskResult, { kind: "deferred" }>): string {
 	const labelOf = (id: string) => questions.find((question) => question.id === id)?.label ?? id;
 	const collected = questions
@@ -319,6 +358,8 @@ function finish(questions: Question[], result: AskResult) {
 				"The user dismissed this questionnaire without submitting it. Do not continue with the current task: this means the user wants to clarify or pivot. Stop and wait for the user's next message.",
 				details(questions, result.answers, true),
 			);
+		case "more_info":
+			return textResult(moreInfoText(questions, result), details(questions, result.answers, false));
 		case "deferred":
 			return textResult(deferredText(questions, result), details(questions, result.answers, false));
 		case "unavailable":
@@ -346,7 +387,15 @@ export default function pixipQuestionnaire(pi: ExtensionAPI) {
 				result = await askWithPanel(ui, questions, signal);
 			} else if (ctx.mode === "tui" && typeof ctx.ui.custom === "function") {
 				const tui = await askWithTui(ctx.ui, questions);
-				result = tui.cancelled ? { kind: "cancelled", answers: [] } : { kind: "answered", answers: tui.answers };
+				result = tui.moreInfo
+					? {
+							kind: "more_info",
+							question: tui.moreInfo,
+							answers: tui.answers.filter((answer) => answer.id !== tui.moreInfo?.id),
+						}
+					: tui.cancelled
+						? { kind: "cancelled", answers: [] }
+						: { kind: "answered", answers: tui.answers };
 			} else {
 				result = await askWithDialogs(ctx.ui, questions, signal);
 			}

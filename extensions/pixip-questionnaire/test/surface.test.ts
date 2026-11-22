@@ -52,11 +52,22 @@ describe("buildSurface", () => {
 		assert.equal(textFields.length, 2);
 		assert.deepEqual(textFields[1]?.["value"], { "@path": "/answers/notes/custom" });
 		const buttons = components.filter((component) => component["component"] === "Button");
-		assert.equal(buttons.length, 2);
+		// Two per question ("I need more information") plus Cancel and Submit.
+		assert.equal(buttons.length, 4);
 		const submit = buttons.find((component) => component["id"] === "submit_btn");
 		assert.deepEqual(submit?.["action"], {
 			event: { name: "submit", context: { answers: { "@path": "/answers" } } },
 		});
+		const moreInfo = buttons.filter((component) => String(component["id"]).startsWith("more_info_btn_"));
+		assert.equal(moreInfo.length, 2);
+		assert.deepEqual(moreInfo[0]?.["action"], {
+			event: {
+				name: "more_info",
+				context: { questionId: "color", answers: { "@path": "/answers" } },
+			},
+		});
+		const promptRows = components.filter((component) => component["component"] === "Row");
+		assert.deepEqual(promptRows[0]?.["children"], ["prompt_0", "more_info_btn_0"]);
 	});
 
 	it("uses multipleSelection for multi-select choice questions", () => {

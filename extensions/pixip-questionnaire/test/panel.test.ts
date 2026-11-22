@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { askWithDialogs, askWithPanel } from "../src/index.ts";
+import { askWithDialogs, askWithPanel, moreInfoText } from "../src/index.ts";
 import { validateQuestions, type Question } from "../src/questions.ts";
 
 function questions(...input: unknown[]): Question[] {
@@ -54,6 +54,55 @@ describe("askWithPanel", () => {
 	it("treats an explicit cancel action as a dismissal", async () => {
 		const result = await askWithPanel({ panel: async () => ({ name: "cancel" }) } as never, list, undefined);
 		assert.deepEqual(result, { kind: "cancelled", answers: [] });
+	});
+
+	it("decodes more_info and carries only the other collected answers", async () => {
+		const list = questions(
+			{ id: "color", prompt: "Pick a color", label: "Color", options: [{ value: "red", label: "Red" }] },
+			{ id: "note", prompt: "Anything else?", label: "Notes", widget: "text" },
+		);
+		const result = await askWithPanel(
+			{
+				panel: async () =>
+					JSON.stringify({
+						name: "more_info",
+						context: {
+							questionId: "color",
+							answers: {
+								color: { selected: ["red"] },
+								note: { custom: "hello" },
+							},
+						},
+					}),
+			} as never,
+			list,
+			undefined,
+		);
+		assert.equal(result.kind, "more_info");
+		if (result.kind === "more_info") {
+			assert.equal(result.question.id, "color");
+			assert.deepEqual(
+				result.answers.map((answer) => answer.id),
+				["note"],
+			);
+			const text = moreInfoText(list, result);
+			assert.match(text, /more information about Color/);
+			assert.match(text, /"Pick a color"/);
+			assert.match(text, /Its options are: 1\. Red/);
+			assert.match(text, /wait for the user's reply/);
+			assert.match(text, /Already answered:/);
+			assert.match(text, /Notes: user wrote: hello/);
+			assert.doesNotMatch(text, /Color: user selected/);
+		}
+	});
+
+	it("rejects more_info for an unknown question", async () => {
+		const result = await askWithPanel(
+			{ panel: async () => ({ name: "more_info", context: { questionId: "nope" } }) } as never,
+			list,
+			undefined,
+		);
+		assert.equal(result.kind, "lost");
 	});
 
 	it("reports a missing message, undefined result or thrown panel as an error", async () => {
@@ -142,10 +191,27 @@ describe("askWithDialogs", () => {
 	});
 
 	it("asks a text widget through input", async () => {
-		const ui = queueUi([], ["  hello  "]);
+		const ui = queueUi(["Answer here"], ["  hello  "]);
 		const result = await askWithDialogs(ui, questions({ id: "note", prompt: "Note", widget: "text" }), undefined);
 		assert.equal(result.kind, "answered");
 		if (result.kind === "answered") assert.equal(result.answers[0]?.custom, "hello");
+	});
+
+	it("offers More information in a dialog fallback", async () => {
+		const list = questions(
+			{ id: "color", prompt: "Color", options: [{ value: "red", label: "Red" }] },
+			{ id: "note", prompt: "Note", widget: "text" },
+		);
+		const ui = queueUi(["1. Red", "More information"], ["kept"]);
+		const result = await askWithDialogs(ui, list, undefined);
+		assert.equal(result.kind, "more_info");
+		if (result.kind === "more_info") {
+			assert.equal(result.question.id, "note");
+			assert.deepEqual(
+				result.answers.map((answer) => answer.id),
+				["color"],
+			);
+		}
 	});
 
 	it("cancels when a dialog is dismissed", async () => {
@@ -159,7 +225,7 @@ describe("askWithDialogs", () => {
 	});
 
 	it("asks every question and reviews before submitting", async () => {
-		const ui = queueUi(["1. Red", "Submit answers"], ["later"]);
+		const ui = queueUi(["1. Red", "Answer here", "Submit answers"], ["later"]);
 		const result = await askWithDialogs(
 			ui,
 			questions(

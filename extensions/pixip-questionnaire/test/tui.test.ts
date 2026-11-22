@@ -75,6 +75,27 @@ describe("askWithTui", () => {
 		assert.deepEqual(result.answers[0]?.selected, ["s"]);
 	});
 
+	it("returns the question when More information is chosen", async () => {
+		let send: (data: string) => void = () => {};
+		const custom = (async (factory: never) => {
+			const tui = { requestRender: () => {} } as unknown as TUI;
+			return await new Promise((resolve) => {
+				const component = (factory as Factory)(tui, theme, {}, resolve);
+				send = (data: string) => component.handleInput?.(data);
+			});
+		}) as never;
+		const pending = askWithTui(
+			{ custom },
+			questions({ id: "color", prompt: "Color", options: [{ value: "red", label: "Red" }] }),
+		);
+		send("\x1b[B"); // custom
+		send("\x1b[B"); // More information
+		send("\r");
+		const result = await pending;
+		assert.equal(result.cancelled, false);
+		assert.equal(result.moreInfo?.id, "color");
+	});
+
 	it("Escape cancels without an answer", async () => {
 		let send: (data: string) => void = () => {};
 		const custom = (async (factory: never) => {

@@ -7,6 +7,7 @@ import { normalizeAnswers, type Answer, type Question } from "./questions.ts";
 export type AskResult =
 	| { kind: "answered"; answers: Answer[] }
 	| { kind: "cancelled"; answers: Answer[] }
+	| { kind: "more_info"; question: Question; answers: Answer[] }
 	| { kind: "deferred"; answers: Answer[]; ids: string[]; adding?: { id: string; labels: string[] } }
 	| { kind: "unavailable"; error: string }
 	| { kind: "lost"; error: string };
@@ -44,6 +45,22 @@ export function decodePanelValue(questions: Question[], raw: unknown): AskResult
 	}
 	if (action.name === "submit") {
 		return { kind: "answered", answers: normalizeAnswers(questions, action.context) };
+	}
+	if (action.name === "more_info") {
+		const context = (action.context ?? {}) as { questionId?: unknown; answers?: unknown };
+		const questionId = typeof context.questionId === "string" ? context.questionId.trim() : "";
+		const question = questions.find((candidate) => candidate.id === questionId);
+		if (!question) {
+			return {
+				kind: "lost",
+				error:
+					"The questionnaire panel asked for more information about an unknown question. Ask in plain text instead.",
+			};
+		}
+		// The affected question is not answered: only the other collected answers
+		// travel back, so the re-ask starts clean there.
+		const answers = normalizeAnswers(questions, context.answers).filter((answer) => answer.id !== question.id);
+		return { kind: "more_info", question, answers };
 	}
 	if (action.answers !== undefined) {
 		return { kind: "answered", answers: normalizeAnswers(questions, action.answers) };

@@ -181,7 +181,13 @@ async function handleHttp(
 		// extension_ui_request path. Production never exposes this route.
 		if (req.method === "GET" && options.dev && url.pathname === "/api/dev/panel-fixture") {
 			try {
-				const fixtureName = url.searchParams.get("fixture") === "long" ? "a2ui-panel-long.json" : "a2ui-panel.json";
+				const requested = url.searchParams.get("fixture");
+				const fixtureName =
+					requested === "long"
+						? "a2ui-panel-long.json"
+						: requested === "questionnaire"
+							? "a2ui-questionnaire.json"
+							: "a2ui-panel.json";
 				const fixture = await readFile(join(options.clientDir, "..", "..", "test", "fixtures", fixtureName));
 				send(200, fixture, CONTENT_TYPES[".json"]);
 			} catch {
