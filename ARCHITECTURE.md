@@ -24,7 +24,11 @@ remote terminal.
    extension that calls `ctx.ui.confirm` gets `extension_ui_request` on stdout,
    which the phone answers, which goes back as `extension_ui_response`. That path
    is exercised today (the smoke test observes extension UI requests arriving over
-   the socket).
+   the socket). Blocking UI requests (`select`, `confirm`, `input`, `editor`) are
+   cached on the live session and replayed to a reattaching client before its
+   snapshot; if the last client has been gone for two minutes, the hub answers
+   the request with `cancelled: true` so a backgrounded browser cannot leave Pi
+   waiting forever.
 6. **Isolation for development.** `--data-dir` sets `--session-dir`; nothing in
    `~/.pi/agent/sessions` is read or written by tests.
 

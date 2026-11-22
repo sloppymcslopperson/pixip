@@ -292,6 +292,14 @@ function handle(line) {
 			emitQueue();
 			return ok(command.id, "clear_queue", data);
 		}
+		case "extension_ui_response": {
+			const logged = { type: "extension_ui_response", id: command.id };
+			for (const key of ["value", "confirmed", "cancelled"]) {
+				if (key in command) logged[key] = command[key];
+			}
+			logRecord(logged);
+			return;
+		}
 		case "bash": {
 			logRecord({
 				type: "bash",

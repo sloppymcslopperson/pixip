@@ -43,6 +43,12 @@ interface HubOptions {
 	 * extension command may block on a user dialog. Tests pass a small value.
 	 */
 	promptTimeoutMs?: number;
+	/**
+	 * How long a blocking extension UI request waits after the last client
+	 * detaches before it is cancelled. A reconnect inside this window replays the
+	 * request instead. `0` disables the safety cancel; default 2 minutes.
+	 */
+	pendingUiGraceMs?: number;
 	/** Extra environment for every child; `process.env` is inherited first. */
 	env?: Record<string, string | undefined>;
 	/** How long deleted sessions stay restorable in the trash. Default 60 s. */
@@ -111,12 +117,19 @@ interface AddonUiCache {
 	widgets: Map<string, { placement: "above" | "below"; frame: string }>;
 }
 
+interface PendingUiRequest {
+	frame: string;
+	timer?: NodeJS.Timeout;
+}
+
 interface LiveSession {
 	proc: RpcChild;
 	info: SessionInfo;
 	subs: Set<Subscriber>;
 	/** Latest setStatus/setWidget records, replayed to a late subscriber. */
 	addonUi?: AddonUiCache;
+	/** Unanswered select/confirm/input/editor requests, replayed on reattach. */
+	pendingUi?: Map<string, PendingUiRequest>;
 	idleTimer?: NodeJS.Timeout;
 	branch?: string;
 	footerTimer?: NodeJS.Timeout;
@@ -147,6 +160,9 @@ type Subscriber = (frame: string, key?: string) => void;
 
 const SESSION_FILE = /\.jsonl$/;
 
+/** A blocking dialog with no attached client is cancelled after this long. */
+export const PENDING_UI_GRACE_MS = 120_000;
+
 /** Provisional / live transcript window: entries and raw line bytes. */
 export const WINDOW_ENTRIES = 200;
 export const WINDOW_BYTES = 256 * 1024;
@@ -175,6 +191,7 @@ export class Hub {
 	private readonly archiveRoot: string;
 	private readonly trashRoot: string;
 	private readonly trashGraceMs: number;
+	private readonly pendingUiGraceMs: number;
 	/** Startup cleanup runs once; trash operations wait for it. */
 	private readonly startupTrash: Promise<void>;
 	/** Branch per cwd, so list refreshes do not run git every time. */
@@ -186,6 +203,7 @@ export class Hub {
 		this.archiveRoot = join(dataDir, "archive");
 		this.trashRoot = join(dataDir, "trash");
 		this.trashGraceMs = options.trashGraceMs ?? 60_000;
+		this.pendingUiGraceMs = options.pendingUiGraceMs ?? PENDING_UI_GRACE_MS;
 		this.startupTrash = this.purgeTrashOnStart();
 	}
 
@@ -292,6 +310,7 @@ export class Hub {
 			return known;
 		}
 		this.clearIdle(live);
+		this.clearPendingUi(live);
 		this.live.delete(id);
 		live.info.state = "stopped";
 		await live.proc.close();
@@ -1048,6 +1067,7 @@ export class Hub {
 	/** Answer an extension dialog (`ctx.ui.confirm` and friends) from the phone. */
 	uiResponse(id: string, requestId: string, fields: Record<string, unknown>): void {
 		const live = this.require(id);
+		this.clearPendingUi(live, requestId);
 		live.proc.send({ type: "extension_ui_response", id: requestId, ...fields });
 	}
 
@@ -1074,8 +1094,21 @@ export class Hub {
 		const live = this.live.get(id);
 		if (!live) return () => {};
 		live.subs.add(subscriber);
+		// Replay after adding: records that arrive from now on go through
+		// `broadcast`, and anything cached before this call is delivered here. No
+		// gap, no duplicate, and a reloaded browser gets the dialog back.
+		for (const pending of live.pendingUi?.values() ?? []) {
+			this.clearPendingUiTimer(pending);
+			try {
+				subscriber(pending.frame);
+			} catch {
+				live.subs.delete(subscriber);
+				break;
+			}
+		}
 		return () => {
 			live.subs.delete(subscriber);
+			if (live.subs.size === 0) this.armPendingUiTimers(live);
 		};
 	}
 
@@ -1119,6 +1152,7 @@ export class Hub {
 				if (live?.proc === proc) {
 					this.live.delete(info.id);
 					this.clearIdle(live);
+					this.clearPendingUi(live);
 					live.info.state = "error";
 					this.broadcast(live, frameError(`pi exited (${code ?? signal})`));
 					this.emitStatus(live);
@@ -1207,6 +1241,7 @@ export class Hub {
 		if (!target) return;
 		const typed = record as {
 			type?: string;
+			id?: unknown;
 			name?: string;
 			message?: unknown;
 			assistantMessageEvent?: { type?: string };
@@ -1254,12 +1289,75 @@ export class Hub {
 			}
 			case "extension_ui_request":
 				this.cacheAddonUi(target, typed, raw);
+				this.cacheBlockingUi(target, typed, raw);
 				break;
 			default:
 				break;
 		}
 
 		this.broadcast(target, frameEvent(raw), key);
+	}
+
+	/**
+	 * Cache select/confirm/input/editor until answered. Unlike status/widget
+	 * records, these are questions: the child is blocked until one response
+	 * arrives, so they must survive a browser reload or background reconnect.
+	 */
+	private cacheBlockingUi(
+		live: LiveSession,
+		request: { id?: unknown; method?: string },
+		raw: string,
+	): void {
+		if (!isBlockingUiMethod(request.method)) return;
+		const id = typeof request.id === "string" ? request.id : "";
+		if (!id) return;
+		live.pendingUi ??= new Map();
+		this.clearPendingUi(live, id);
+		const pending: PendingUiRequest = { frame: frameEvent(raw) };
+		live.pendingUi.set(id, pending);
+		if (live.subs.size === 0) this.armPendingUiTimer(live, pending);
+	}
+
+	private armPendingUiTimers(live: LiveSession): void {
+		for (const pending of live.pendingUi?.values() ?? []) this.armPendingUiTimer(live, pending);
+	}
+
+	private armPendingUiTimer(live: LiveSession, pending: PendingUiRequest): void {
+		if (this.pendingUiGraceMs <= 0 || pending.timer) return;
+		for (const [id, entry] of live.pendingUi ?? []) {
+			if (entry !== pending) continue;
+			pending.timer = setTimeout(() => {
+				pending.timer = undefined;
+				if (live.subs.size > 0 || live.pendingUi?.get(id) !== pending) return;
+				live.pendingUi.delete(id);
+				this.options.log(`ui request ${id} has no client; cancelling it so pi can settle`);
+				try {
+					live.proc.send({ type: "extension_ui_response", id, cancelled: true });
+				} catch (error) {
+					this.options.log(`ui request ${id} cancel failed: ${(error as Error).message}`);
+				}
+			}, this.pendingUiGraceMs);
+			pending.timer.unref();
+			return;
+		}
+	}
+
+	private clearPendingUi(live: LiveSession, id?: string): void {
+		if (!live.pendingUi) return;
+		if (id !== undefined) {
+			const pending = live.pendingUi.get(id);
+			if (pending) this.clearPendingUiTimer(pending);
+			live.pendingUi.delete(id);
+			return;
+		}
+		for (const pending of live.pendingUi.values()) this.clearPendingUiTimer(pending);
+		live.pendingUi.clear();
+	}
+
+	private clearPendingUiTimer(pending: PendingUiRequest): void {
+		if (!pending.timer) return;
+		clearTimeout(pending.timer);
+		pending.timer = undefined;
 	}
 
 	private cacheAddonUi(
@@ -2115,6 +2213,10 @@ function truncateEntry(entry: unknown, limit: number): unknown {
 		copy["message"] = next;
 	}
 	return copy;
+}
+
+function isBlockingUiMethod(method: string | undefined): boolean {
+	return method === "select" || method === "confirm" || method === "input" || method === "editor";
 }
 
 /** Key used while a spawn is in flight, before `get_state` reports the real id. */
