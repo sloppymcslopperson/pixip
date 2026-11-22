@@ -3,6 +3,7 @@
 // the composer. App-owned sheets stay in sheets.js.
 import { send, state, ui } from "./app.js";
 import { createSurfaceQueue, enqueueSurface, settleSurface } from "./surfaceQueue.js";
+import { closeAllPanels, closePanel, openPanel, panelTitle } from "./panelHost.js";
 
 const queue = createSurfaceQueue();
 let collapsed = false;
@@ -23,9 +24,13 @@ function observeSurface() {
 	observer.observe(ui.surface);
 }
 
-const BLOCKING = ["select", "confirm", "input", "editor"];
+const BLOCKING = ["select", "confirm", "input", "editor", "panel"];
+const panelTitles = new Map();
 
 function titleOf(request) {
+	if (request?.method === "panel") {
+		return panelTitles.get(request.id) ?? panelTitle(request.payload);
+	}
 	const title = request?.title ?? request?.message;
 	if (typeof title === "string" && title.trim()) return title.trim();
 	if (request?.method === "select") return "Choose an option";
@@ -120,6 +125,20 @@ function mountBody(request) {
 	const { body } = shell();
 	body.textContent = "";
 	const title = titleOf(request);
+
+	if (request.method === "panel") {
+		const id = request.id;
+		openPanel(request, body, {
+			submit: (value) => finishSurface({ value: typeof value === "string" ? value : JSON.stringify(value) }),
+			cancel: () => finishSurface({ cancelled: true }),
+			setTitle: (text) => {
+				if (typeof text !== "string" || !text.trim()) return;
+				panelTitles.set(id, text.trim());
+				shell().title.textContent = text.trim();
+			},
+		});
+		return;
+	}
 
 	if (request.method === "select") {
 		const actions = actionRow();
@@ -226,6 +245,10 @@ export function finishSurface(fields) {
 	const active = queue.active;
 	if (!active) return;
 	const position = logPosition();
+	if (active.method === "panel") {
+		panelTitles.delete(active.id);
+		closePanel(active.id, { discard: true });
+	}
 	send({ t: "ui", id: active.id, ...fields });
 	settleSurface(queue, active.id);
 	collapsed = false;
@@ -239,6 +262,8 @@ export function cancelSurface() {
 
 /** Cancel without sending: only for leaving the session or replacing the view. */
 export function resetSurface() {
+	closeAllPanels({ discard: false });
+	panelTitles.clear();
 	queue.active = null;
 	queue.queued.length = 0;
 	collapsed = false;

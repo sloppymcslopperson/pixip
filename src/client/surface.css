@@ -1,4 +1,4 @@
-/* ---- inline blocking surface (select/confirm/input/editor) ---- */
+/* ---- inline blocking surface (select/confirm/input/editor/panel) ---- */
 /* Docked between the transcript and the composer. No backdrop, no fixed
    positioning: #log keeps the only transcript scroll container. */
 #surface {
@@ -132,4 +132,34 @@
 }
 .surface-actions button:hover {
 	border-color: var(--accent);
+}
+.panel-fallback {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 12px;
+	border: 1px dashed color-mix(in srgb, var(--warn) 50%, var(--line));
+	border-radius: 10px;
+	background: color-mix(in srgb, var(--warn) 7%, var(--bg-soft));
+	font-size: 12.5px;
+}
+.panel-fallback-title {
+	font-weight: 600;
+	color: var(--warn);
+}
+.panel-fallback-detail {
+	color: var(--fg-dim);
+	overflow-wrap: anywhere;
+}
+.panel-fallback button {
+	align-self: flex-start;
+	padding: 8px 12px;
+	border-radius: 9px;
+	border: 1px solid var(--line);
+	background: var(--bg-raised);
+	color: var(--fg);
+}
+.panel-fallback button.primary {
+	border-color: color-mix(in srgb, var(--accent) 60%, var(--line));
+	color: var(--accent);
 }
