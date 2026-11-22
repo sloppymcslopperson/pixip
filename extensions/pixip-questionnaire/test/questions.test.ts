@@ -115,15 +115,15 @@ describe("normalizeAnswers", () => {
 			},
 		});
 		assert.deepEqual(answers, [
-			{ id: "color", selected: ["red"], custom: "", wasCustom: false },
-			{ id: "sizes", selected: ["s", "m"], custom: "", wasCustom: false },
-			{ id: "note", selected: [], custom: "hello", wasCustom: false },
+			{ id: "color", selected: ["red"], custom: "", wasCustom: false, moreInfo: false },
+			{ id: "sizes", selected: ["s", "m"], custom: "", wasCustom: false, moreInfo: false },
+			{ id: "note", selected: [], custom: "hello", wasCustom: false, moreInfo: false },
 		]);
 	});
 
 	it("marks a single-choice custom answer as wasCustom", () => {
 		const answers = normalizeAnswers(parsed, { color: { selected: [], custom: "teal" } });
-		assert.deepEqual(answers, [{ id: "color", selected: [], custom: "teal", wasCustom: true }]);
+		assert.deepEqual(answers, [{ id: "color", selected: [], custom: "teal", wasCustom: true, moreInfo: false }]);
 	});
 
 	it("filters unknown values, deduplicates and omits unanswered questions", () => {
@@ -131,12 +131,18 @@ describe("normalizeAnswers", () => {
 			color: { selected: ["red", "red", "green"], custom: "" },
 			sizes: { selected: [], custom: "" },
 		});
-		assert.deepEqual(answers, [{ id: "color", selected: ["red"], custom: "", wasCustom: false }]);
+		assert.deepEqual(answers, [{ id: "color", selected: ["red"], custom: "", wasCustom: false, moreInfo: false }]);
 	});
 
 	it("accepts a single string selection from older surfaces", () => {
 		const answers = normalizeAnswers(parsed, { color: { selected: "blue" } });
-		assert.deepEqual(answers, [{ id: "color", selected: ["blue"], custom: "", wasCustom: false }]);
+		assert.deepEqual(answers, [{ id: "color", selected: ["blue"], custom: "", wasCustom: false, moreInfo: false }]);
+	});
+
+	it("keeps a more-information flag as an answer for that question", () => {
+		const answers = normalizeAnswers(parsed, { color: { selected: [], custom: "", moreInfo: true } });
+		assert.deepEqual(answers, [{ id: "color", selected: [], custom: "", wasCustom: false, moreInfo: true }]);
+		assert.equal(answerLine(parsed[0]!, answers[0]), "Q1: user asked for more information");
 	});
 
 	it("formats model-facing lines with labels and unanswered questions", () => {
@@ -161,7 +167,7 @@ describe("decodePanelValue", () => {
 		});
 		assert.deepEqual(decodePanelValue(questions, raw), {
 			kind: "answered",
-			answers: [{ id: "color", selected: ["red"], custom: "", wasCustom: false }],
+			answers: [{ id: "color", selected: ["red"], custom: "", wasCustom: false, moreInfo: false }],
 		});
 	});
 

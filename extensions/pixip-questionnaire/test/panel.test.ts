@@ -140,6 +140,34 @@ describe("askWithPanel", () => {
 		}
 	});
 
+	it("keeps a more-information checkbox as that question's answer on submit", async () => {
+		const list = questions(
+			{ id: "color", prompt: "Color", options: [{ value: "red", label: "Red" }] },
+			{ id: "note", prompt: "Note", widget: "text" },
+		);
+		const result = await askWithPanel(
+			{
+				panel: async () =>
+					JSON.stringify({
+						name: "submit",
+						context: {
+							answers: {
+								color: { selected: ["red"], custom: "", moreInfo: false },
+								note: { selected: [], custom: "", moreInfo: true },
+							},
+						},
+					}),
+			} as never,
+			list,
+			undefined,
+		);
+		assert.equal(result.kind, "answered");
+		if (result.kind === "answered") {
+			assert.equal(result.answers[0]?.moreInfo, false);
+			assert.equal(result.answers[1]?.moreInfo, true);
+		}
+	});
+
 	it("reports a host without a panel as unavailable", async () => {
 		const result = await askWithPanel({} as never, list, undefined);
 		assert.equal(result.kind, "unavailable");
@@ -186,7 +214,13 @@ describe("askWithDialogs", () => {
 		);
 		assert.equal(result.kind, "answered");
 		if (result.kind === "answered") {
-			assert.deepEqual(result.answers[0], { id: "color", selected: [], custom: "teal", wasCustom: true });
+			assert.deepEqual(result.answers[0], {
+				id: "color",
+				selected: [],
+				custom: "teal",
+				wasCustom: true,
+				moreInfo: false,
+			});
 		}
 	});
 
@@ -197,20 +231,20 @@ describe("askWithDialogs", () => {
 		if (result.kind === "answered") assert.equal(result.answers[0]?.custom, "hello");
 	});
 
-	it("offers More information in a dialog fallback", async () => {
+	it("keeps More information as that question's answer in a dialog fallback", async () => {
 		const list = questions(
 			{ id: "color", prompt: "Color", options: [{ value: "red", label: "Red" }] },
 			{ id: "note", prompt: "Note", widget: "text" },
 		);
-		const ui = queueUi(["1. Red", "More information"], ["kept"]);
+		const ui = queueUi(["1. Red", "More information", "Submit answers"]);
 		const result = await askWithDialogs(ui, list, undefined);
-		assert.equal(result.kind, "more_info");
-		if (result.kind === "more_info") {
-			assert.equal(result.question.id, "note");
+		assert.equal(result.kind, "answered");
+		if (result.kind === "answered") {
 			assert.deepEqual(
 				result.answers.map((answer) => answer.id),
-				["color"],
+				["color", "note"],
 			);
+			assert.equal(result.answers[1]?.moreInfo, true);
 		}
 	});
 

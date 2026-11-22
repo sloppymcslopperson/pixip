@@ -23,6 +23,7 @@ export interface TuiResult {
 interface Draft {
 	selected: Set<string>;
 	custom: string;
+	moreInfo: boolean;
 }
 
 type Row =
@@ -53,7 +54,7 @@ function draftsToAnswers(questions: Question[], drafts: Map<string, Draft>): Ans
 	for (const question of questions) {
 		const draft = drafts.get(question.id);
 		if (!draft) continue;
-		raw[question.id] = { selected: [...draft.selected], custom: draft.custom };
+		raw[question.id] = { selected: [...draft.selected], custom: draft.custom, moreInfo: draft.moreInfo };
 	}
 	return normalizeAnswers(questions, raw);
 }
@@ -104,7 +105,7 @@ export async function askWithTui(ui: CustomUi, questions: Question[]): Promise<T
 		const draftOf = (question: Question): Draft => {
 			let draft = drafts.get(question.id);
 			if (!draft) {
-				draft = { selected: new Set(), custom: "" };
+				draft = { selected: new Set(), custom: "", moreInfo: false };
 				drafts.set(question.id, draft);
 			}
 			return draft;
@@ -201,7 +202,10 @@ export async function askWithTui(ui: CustomUi, questions: Question[]): Promise<T
 				return;
 			}
 			if (row.kind === "more_info") {
-				submit(false, question);
+				const draft = draftOf(question);
+				draft.moreInfo = !draft.moreInfo;
+				if (!question.multiple) advance();
+				else refresh();
 				return;
 			}
 			if (row.kind === "done") {
@@ -240,7 +244,7 @@ export async function askWithTui(ui: CustomUi, questions: Question[]): Promise<T
 				const tabs = ["← "];
 				questions.forEach((question, index) => {
 					const draft = drafts.get(question.id);
-					const answered = Boolean(draft && (draft.selected.size > 0 || draft.custom));
+					const answered = Boolean(draft && (draft.selected.size > 0 || draft.custom || draft.moreInfo));
 					const label = ` ${answered ? "■" : "□"} ${question.label} `;
 					tabs.push(index === tab ? theme.bg("selectedBg", theme.fg("text", label)) : theme.fg("muted", label));
 					tabs.push(" ");
@@ -262,6 +266,7 @@ export async function askWithTui(ui: CustomUi, questions: Question[]): Promise<T
 					const parts: string[] = [];
 					if (picked.length > 0) parts.push(picked.map((option) => option.label).join(", "));
 					if (draft?.custom) parts.push(`wrote: ${draft.custom}`);
+					if (draft?.moreInfo) parts.push("asked for more information");
 					const value = parts.length > 0 ? theme.fg("text", parts.join("; ")) : theme.fg("warning", "Unanswered");
 					addWith(" ", `${theme.fg("muted", `${question.label}: `)}${value}`);
 				}
@@ -289,7 +294,7 @@ export async function askWithTui(ui: CustomUi, questions: Question[]): Promise<T
 							} else if (row.kind === "custom") {
 								label = draft.custom ? `${OTHER_LABEL}: ${draft.custom}` : OTHER_LABEL;
 							} else if (row.kind === "more_info") {
-								label = MORE_INFO_LABEL;
+								label = `${draft.moreInfo ? "[x] " : "[ ] "}${MORE_INFO_LABEL}`;
 							} else {
 								label = DONE_LABEL;
 							}

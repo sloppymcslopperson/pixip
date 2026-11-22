@@ -75,7 +75,7 @@ describe("askWithTui", () => {
 		assert.deepEqual(result.answers[0]?.selected, ["s"]);
 	});
 
-	it("returns the question when More information is chosen", async () => {
+	it("records More information as that question's answer", async () => {
 		let send: (data: string) => void = () => {};
 		const custom = (async (factory: never) => {
 			const tui = { requestRender: () => {} } as unknown as TUI;
@@ -93,7 +93,8 @@ describe("askWithTui", () => {
 		send("\r");
 		const result = await pending;
 		assert.equal(result.cancelled, false);
-		assert.equal(result.moreInfo?.id, "color");
+		assert.equal(result.moreInfo, undefined);
+		assert.equal(result.answers[0]?.moreInfo, true);
 	});
 
 	it("Escape cancels without an answer", async () => {

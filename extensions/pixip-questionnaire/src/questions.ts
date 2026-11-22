@@ -46,6 +46,8 @@ export interface Answer {
 	custom: string;
 	/** True when a single-select answer is only custom text. */
 	wasCustom: boolean;
+	/** True when the user asked for more information instead of answering. */
+	moreInfo: boolean;
 }
 
 export interface QuestionnaireDetails {
@@ -160,7 +162,7 @@ export function normalizeAnswers(questions: Question[], raw: unknown): Answer[] 
 	for (const question of questions) {
 		const entry = source[question.id];
 		if (!entry || typeof entry !== "object") continue;
-		const value = entry as { selected?: unknown; custom?: unknown };
+		const value = entry as { selected?: unknown; custom?: unknown; moreInfo?: unknown };
 		const selectedRaw = Array.isArray(value.selected)
 			? value.selected
 			: typeof value.selected === "string"
@@ -171,12 +173,14 @@ export function normalizeAnswers(questions: Question[], raw: unknown): Answer[] 
 			(value) => allowed.has(value),
 		);
 		const custom = typeof value.custom === "string" ? value.custom.trim() : "";
-		if (selected.length === 0 && !custom) continue;
+		const moreInfo = value.moreInfo === true;
+		if (selected.length === 0 && !custom && !moreInfo) continue;
 		answers.push({
 			id: question.id,
 			selected,
 			custom,
 			wasCustom: question.widget === "choice" && !question.multiple && selected.length === 0 && custom.length > 0,
+			moreInfo,
 		});
 	}
 	return answers;
@@ -192,11 +196,15 @@ export function selectedLabels(question: Question, answer: Answer): string[] {
 /** One model-facing line per question; unanswered questions are explicit. */
 export function answerLine(question: Question, answer: Answer | undefined): string {
 	if (!answer) return `${question.label}: Unanswered`;
+	if (answer.moreInfo && !answer.custom && answer.selected.length === 0) {
+		return `${question.label}: user asked for more information`;
+	}
 	if (answer.wasCustom) return `${question.label}: user wrote: ${answer.custom}`;
 	const parts: string[] = [];
 	const picked = selectedLabels(question, answer);
 	if (picked.length > 0) parts.push(`user selected: ${picked.join(", ")}`);
 	if (answer.custom) parts.push(`user wrote: ${answer.custom}`);
+	if (answer.moreInfo) parts.push("also asked for more information");
 	if (parts.length === 0) return `${question.label}: Unanswered`;
 	return `${question.label}: ${parts.join("; ")}`;
 }

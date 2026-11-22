@@ -28,15 +28,7 @@ function button(id: string, labelId: string, label: string, variant: string, act
 	return [text(labelId, label), { id, component: "Button", child: labelId, variant, action }];
 }
 
-/** Action context for a per-question explanation request. */
-function moreInfoAction(question: Question) {
-	return {
-		event: {
-			name: "more_info",
-			context: { questionId: question.id, answers: { "@path": "/answers" } },
-		},
-	};
-}
+/** Action context for a per-question explanation request (legacy panels). */
 
 /**
  * One createSurface message: title, one tab per question, and a footer with
@@ -62,12 +54,10 @@ export function buildSurface(questions: Question[], options: SurfaceOptions = {}
 
 	questions.forEach((question, index) => {
 		const containerId = `question_${index}`;
-		const promptRowId = `prompt_row_${index}`;
 		const promptId = `prompt_${index}`;
-		const moreInfoId = `more_info_btn_${index}`;
-		const moreInfoLabelId = `more_info_label_${index}`;
-		const children = [promptRowId];
-		answers[question.id] = { selected: [], custom: "" };
+		const moreInfoId = `more_info_${index}`;
+		const children = [promptId];
+		answers[question.id] = { selected: [], custom: "", moreInfo: false };
 
 		if (question.widget === "choice") {
 			children.push(`choice_${index}`);
@@ -81,22 +71,22 @@ export function buildSurface(questions: Question[], options: SurfaceOptions = {}
 			});
 		}
 
-		children.push(`text_${index}`);
+		children.push(`text_${index}`, moreInfoId);
 		components.push(
-			{
-				id: promptRowId,
-				component: "Row",
-				children: [promptId, moreInfoId],
-			},
 			{ id: containerId, component: "Column", children },
 			text(promptId, question.prompt),
-			...button(moreInfoId, moreInfoLabelId, "I need more information", "borderless", moreInfoAction(question)),
 			{
 				id: `text_${index}`,
 				component: "TextField",
 				label: "Type your own answer",
 				placeholder: "type something...",
 				value: { "@path": `/answers/${question.id}/custom` },
+			},
+			{
+				id: moreInfoId,
+				component: "CheckBox",
+				label: "I need more information",
+				value: { "@path": `/answers/${question.id}/moreInfo` },
 			},
 		);
 		tabs.push({ title: question.label, child: containerId });

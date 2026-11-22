@@ -13,8 +13,10 @@ The tool picks the first transport the host offers:
    `pixip-pi-host`. The payload is `{title, mode: "a2ui", surfaceId, messages}`
    with one `createSurface` and the Basic catalog. Every question gets a
    `ChoicePicker` (choice widgets) and/or a `TextField` ("Type your own answer"),
-   one `Tabs` entry per question, and a footer with Cancel and Submit.
-   Submit returns the A2UI action
+   one `Tabs` entry per question, a per-question "I need more information"
+   checkbox at the bottom, and a footer with Cancel and Submit. The checkbox
+   is an answer field for that question (`moreInfo: true`), so it never closes
+   the panel or discards other questions. Submit returns the A2UI action
    `{name:"submit", context:{answers:{...}}}`, Cancel returns
    `{name:"cancel"}`. A panel that closes with no message is an **error**, not a
    dismissal: the result asks the model to ask in plain text.
@@ -50,7 +52,9 @@ options, or `multiple` on a text question are validation errors. A backlog
 ticket removes the legacy default once callers have moved.
 
 Answers are normalized to option values plus the custom text, with `wasCustom`
-for a single-choice answer typed rather than picked.
+for a single-choice answer typed rather than picked. A question can also carry
+`moreInfo: true` when the user asked for an explanation; that is an answer for
+that question only and Submit still returns all other answers.
 
 ## Install
 

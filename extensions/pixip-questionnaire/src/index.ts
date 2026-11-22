@@ -162,19 +162,13 @@ export async function askWithDialogs(
 	const typing = hostCollectsTypedText();
 	const input = typing && typeof ui.input === "function" ? ui.input.bind(ui) : undefined;
 	const opts = dialogOptions(signal);
-	const raw: Record<string, { selected: string[]; custom: string }> = {};
+	const raw: Record<string, { selected: string[]; custom: string; moreInfo: boolean }> = {};
 	const deferred: string[] = [];
-
-	const moreInfo = (question: Question): AskResult => ({
-		kind: "more_info",
-		question,
-		answers: normalizeAnswers(questions, raw).filter((answer) => answer.id !== question.id),
-	});
 
 	const entered = (id: string) => {
 		const current = raw[id];
-		if (!current) raw[id] = { selected: [], custom: "" };
-		return raw[id] as { selected: string[]; custom: string };
+		if (!current) raw[id] = { selected: [], custom: "", moreInfo: false };
+		return raw[id] as { selected: string[]; custom: string; moreInfo: boolean };
 	};
 
 	for (const [index, question] of questions.entries()) {
@@ -187,14 +181,20 @@ export async function askWithDialogs(
 			if (input) {
 				const mode = await select(title, [ANSWER_HERE_CHOICE, MORE_INFO_CHOICE], opts);
 				if (mode === undefined) return { kind: "cancelled", answers: [] };
-				if (mode === MORE_INFO_CHOICE) return moreInfo(question);
+				if (mode === MORE_INFO_CHOICE) {
+					entered(question.id).moreInfo = true;
+					continue;
+				}
 				const typed = await input(title, "type something...", opts);
 				if (typed === undefined) return { kind: "cancelled", answers: [] };
 				entered(question.id).custom = typed.trim();
 			} else {
 				const choice = await select(title, [CHAT_CHOICE, MORE_INFO_CHOICE], opts);
 				if (choice === undefined) return { kind: "cancelled", answers: [] };
-				if (choice === MORE_INFO_CHOICE) return moreInfo(question);
+				if (choice === MORE_INFO_CHOICE) {
+					entered(question.id).moreInfo = true;
+					continue;
+				}
 				deferred.push(question.id);
 			}
 			continue;
@@ -213,7 +213,10 @@ export async function askWithDialogs(
 			for (;;) {
 				chosen = await select(title, options, opts);
 				if (chosen === undefined) return { kind: "cancelled", answers: [] };
-				if (chosen === MORE_INFO_CHOICE) return moreInfo(question);
+				if (chosen === MORE_INFO_CHOICE) {
+					entered(question.id).moreInfo = true;
+					break;
+				}
 				if (chosen === CHAT_CHOICE) {
 					deferred.push(question.id);
 					break;
@@ -243,7 +246,11 @@ export async function askWithDialogs(
 			if (!typing) options.push(ADD_CHOICE);
 			const chosen = await select(title, options, opts);
 			if (chosen === undefined) return { kind: "cancelled", answers: [] };
-			if (chosen === MORE_INFO_CHOICE) return moreInfo(question);
+			if (chosen === MORE_INFO_CHOICE) {
+				const current = entered(question.id);
+				current.moreInfo = !current.moreInfo;
+				continue;
+			}
 			if (chosen === CHAT_CHOICE) {
 				deferred.push(question.id);
 				break;
@@ -351,8 +358,20 @@ function deferredText(questions: Question[], result: Extract<AskResult, { kind: 
 
 function finish(questions: Question[], result: AskResult) {
 	switch (result.kind) {
-		case "answered":
-			return textResult(answeredText(questions, result.answers), details(questions, result.answers, false));
+		case "answered": {
+			let text = answeredText(questions, result.answers);
+			const requested = result.answers.filter((answer) => answer.moreInfo);
+			if (requested.length > 0) {
+				const labels = requested
+					.map((answer) => questions.find((question) => question.id === answer.id)?.label ?? answer.id)
+					.join(", ");
+				text +=
+					`\n\nMore information requested for: ${labels}. ` +
+					"Explain those questions and their options in plain text in chat, then wait for the user's reply before deciding what to do next. " +
+					"The other answers above remain valid; do not re-ask the whole questionnaire.";
+			}
+			return textResult(text, details(questions, result.answers, false));
+		}
 		case "cancelled":
 			return textResult(
 				"The user dismissed this questionnaire without submitting it. Do not continue with the current task: this means the user wants to clarify or pivot. Stop and wait for the user's next message.",
