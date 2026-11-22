@@ -1,0 +1,1591 @@
+### fit/closed/00-add-ability-to-delete-archive.md
+```
+---
+grilled: true
+---
+
+Add session archive, restore, and delete to the dashboard, plus an "archive all inactive" bulk action. Archive hides a session but keeps it recoverable; delete stages the files for a short undo window, then purges them permanently.
+
+### Decisions
+
+- **Archive** moves the logical session's JSONL files and index metadata to `<data-dir>/archive`; the active session scan never sees them. Archive persists until restored or deleted.
+- **Delete** removes all JSONL files tracked by the logical session's `piIds` and its `sessions.json` record, keeping generated exports. It moves them to `<data-dir>/trash` first for the undo window.
+- **Undo:** delete confirmation is followed by a ~10 s undo toast. The hub keeps trash for 60 s, then purges; leftover trash is purged on startup. Trash is also visible in settings with restore/purge.
+- **Archived view:** settings shows `archived (N)` and `trash (N)` entries; each opens a sheet listing sessions with restore and permanent delete/purge actions.
+- **Bulk:** "archive all inactive" (whole dashboard) means every stopped session across all cwd groups, including index-only sessions, excluding already archived/trashed ones. It continues on per-session failures and reports archived/failed counts.
+- **Live sessions:** single-session archive/delete of an idle session first detaches the child; busy/starting sessions are refused. If stopping fails or the state changes to busy, skip that session and leave files intact. Bulk only considers stopped sessions.
+- **Open tabs:** archiving/deleting a session that another tab has open returns that tab to the dashboard with a toast.
+- **Restore:** preserves logical id, name and cwd; a colliding JSONL path gets a unique filename instead of failing.
+- **UI:** per-row actions menu plus a dashboard "archive inactive" control. Single actions use the in-app sheet for confirmation; bulk uses a native confirm. Errors and undo use the existing toast.
+- **Transport:** REST endpoints parallel to `POST /api/sessions/:id/stop`; the dashboard refetches `/api/sessions` afterwards. No new websocket frames.
+
+### Acceptance criteria
+
+- Archiving a stopped/idle session removes it from the active dashboard and its files from the active sessions store.
+- Restoring an archived session returns it to the dashboard under its original cwd/name/identity.
+- Deleting a session asks for confirmation, removes it from the dashboard, offers undo for ~10 s, and permanently purges after 60 s or on next startup.
+- "Archive all inactive" archives every stopped session, skips busy/live ones, and reports counts.
+- Busy sessions cannot be archived or deleted.
+- `npm run check` is green and `tools/shot.mjs` is run at 390 and 1280 for the dashboard and dialogs.
+
+### Implementation
+
+- `src/hub.ts`: archive/trash move helpers, `meta.json` per stored session, restore with collision-safe paths, bulk stopped-only archive, startup trash purge, 60 s auto-purge, list/restore/purge APIs.
+- `src/server.ts`: REST routes for archive, archive-inactive, delete, archived/trash lists, restore and purge.
+- `src/client/app.js` + `style.css`: row actions menu, confirm sheets, bulk archive control, settings archived/trash sheets, delete undo toast, open-tab removal handling via the existing `sessions` frame.
+- `test/archive.test.ts`: archive/restore, delete/undo/purge, auto-purge, bulk and busy refusal, plus the REST route surface.
+- `ARCHITECTURE.md` and `README.md` document the storage layout and endpoints.
+
+### Verification
+
+- `env -u PIXIP_INSIDE -u PIXIP_SESSION_ID npm run check`: 180 tests pass. (The ambient `PIXIP_INSIDE=1` makes the pre-existing daemon tests expect a restart instead of a stop.)
+- `tools/shot.mjs` at 390 and 1280: no horizontal overflow, no console/page errors; dashboard rows, actions sheet, settings archived/trash and restore flow exercised in headless Chromium.
+```
+
+### fit/closed/00-add-directory-browser-to.md
+```
+---
+grilled: true
+---
+
+Add a directory browser to choose the cwd for the next new session, so a phone user never has to type a path.
+
+### Decisions
+
+- Trigger: a `browse` button beside the existing free-text path input; the picker only fills the input and never creates the session itself.
+- Transport: new REST endpoints `GET /api/dirs?path=` and `POST /api/dirs` (discovery only, matching `/api/sessions`); no new websocket frames.
+- Root scope: browsing is restricted to `$HOME`; symlinks are resolved with `realpath` and rejected with 403 when they escape it.
+- Start path: `defaultCwd` when it is inside `$HOME`, otherwise `$HOME`; accept absolute paths and `~`, treat relative paths as relative to `$HOME`.
+- Navigation: list directories only, always hide dot-directories, parent row, clickable breadcrumb, filter box, and inline single-segment new-folder creation. Reject empty names, `/`, `\\`, `.`, `..` and leading dots.
+- Ordering: directories whose child `.git` entry exists float first and get a small repo badge; otherwise case-insensitive alphabetical.
+- Verification: `npm run check` plus `tools/shot.mjs` at 390 and 1280 for the dashboard and open picker.
+
+### Scope
+
+- Add pure path/listing helpers and tests for them.
+- Add the REST handlers and server-side containment checks.
+- Add the picker sheet, browse button and styles to the client.
+- Update the REST list in `ARCHITECTURE.md` and the feature list in `README.md`.
+
+### Acceptance
+
+- The dashboard `new` form has a `browse` action that opens a sheet rooted at the smart start path.
+- A user can navigate directories, filter the current list, create one folder, and tap "use this directory" to fill the path input.
+- Dot-directories are never listed; repo roots sort first with a badge; escaping symlinks are not listed or entered.
+- Invalid/missing/unreadable paths show an inline error, not a crash or a blank sheet.
+- `npm run check` is green and both screenshot widths render without horizontal overflow.
+
+### Verification
+
+- `env -u PIXIP_INSIDE -u PIXIP_SESSION_ID npm run check`: 203 tests pass, typecheck clean.
+- `tools/shot.mjs` at 390×844 and 1280×900 for the dashboard: no page errors, no horizontal overflow; the picker sheet was opened in the same headless run (390 and 1280), navigated into a child, filtered to an empty result, and `use this directory` filled the new-session input.
+- Creating a folder through the sheet was checked against a temporary `$HOME`; `POST /api/dirs` rejected traversal with 400 and a path outside home with 403.
+- `fit_check`: 0 errors (one pre-existing short-name warning on a closed ticket).
+```
+
+### fit/closed/00-autocommit-all-new-session.md
+```
+autocommit all "new session" buttons should work like the main new session button (instant open)
+```
+
+### fit/closed/00-buttons-in-modals-that.md
+```
+---
+grilled: true
+commit: "5568dee4b09eb92d917df9371453506554fadd9a"
+---
+
+Buttons in modals that overflow should make the button taller so that all text can be viewed (currently it cuts off).
+
+### Decisions
+
+- Scope: every action button/link in `#sheet .sheet-actions`, including extension dialogs, command menus, and model/thinking pickers.
+- Wrap to multiple lines: drop `white-space: nowrap` / `text-overflow: ellipsis`, let the row height grow, keep left alignment and existing padding/radius.
+- Long unbroken labels (URLs/paths) should wrap via `overflow-wrap: anywhere` so nothing is clipped.
+- Preserve current primary/danger styling and hover states.
+
+### Acceptance
+
+- A long-label modal button shows its complete text at 390 px and 1280 px.
+- `npm run check` green and `tools/shot.mjs` captures at 390 and 1280.
+```
+
+### fit/closed/00-cleanup-foundation.md
+```
+---
+grilled: true
+origin: "00-project-cleanup"
+project: pixip
+---
+
+Refactor pixip into a maintainable foundation before the Pi-host and A2UI work, without changing observable behavior, the wire protocol, latency or layout. Work in ordered, independently committable phases and keep `npm run check` plus 390/1280 screenshots green at every phase.
+
+### Phase 0: Tooling and formatting baseline
+
+- Add ESLint 9 flat config with typescript-eslint (modest type-aware rules) and Prettier, plus `.prettierrc.json`, `.prettierignore` and editorconfig if useful.
+- Ignore `fit/`, `tmp/`, `node_modules/`, `package-lock.json`, vendored assets and binary docs from formatting/linting.
+- Scripts: `lint`, `format`, `format:check`; `npm run check` = typecheck + lint + format:check + test.
+- Make one isolated formatting-only commit before structural work.
+- Do not enable `noUnusedLocals`/`noUnusedParameters`.
+
+### Phase 1: Shared test harness
+
+- Add `test/helpers/` with one fake-Pi path, temp-root registry/cleanup, `hubFor`, `sessionFile`, `infoEntry`, `waitFor`, `spawns` and index-record readers.
+- Migrate every Hub/temp-dir test to the harness; keep client-pure tests as they are.
+- Preserve each test's isolation and exact assertions; no test behavior changes.
+- This harness is the place `01-pi-host-integration` will add host fixtures.
+
+### Phase 2: Hub split and backend seam
+
+- Keep `Hub` as the public facade and maintain its exported/open API used by `server.ts`, `bin/pixip.ts` and tests.
+- Extract `src/jsonl.ts` (parse/window/truncate/coverage and header/name helpers).
+- Extract `src/sessionIndex.ts` (record types, index read/write, disk scan, archive/trash records and restore paths).
+- Extract `src/liveSession.ts` (one live child: spawn, event forwarding, pending UI cache/replay, idle/stop).
+- Extract `src/backend.ts` with a small spawn interface and the default `pi --mode rpc` implementation, so `01-pi-host-integration` can add the host without editing the Hub state machine.
+- Keep event framing verbatim; no protocol or latency change. Record before/after cold-attach or event numbers only if a regression needs explaining.
+
+### Phase 3: Client split
+
+- `app.js` keeps boot, routing, socket/frame dispatch and shared state, and stays under the module-size target.
+- Add modules for dashboard/list/groups/new-session, shared sheets/dialogs/confirm, session open/close/cache/restart, transcript/snapshot/deltas/history/bash, composer/input/queue/menu/attachments, and footer/model/thinking/settings controls.
+- Keep existing pure modules (`render.js`, `commands.js`, `sessionCache.js`, etc.) and their tests unchanged; no framework, bundler or new runtime dependency.
+- Split `style.css` into ordered CSS files imported from `index.html` (tokens/base, dashboard, session/transcript, sheets, composer/responsive), preserving cascade order and the single asset set.
+- No DOM/markup duplication per breakpoint and no visual change.
+
+### Phase 4: Repo and docs hygiene
+
+- Add `dev.sh` to `.gitignore` (it contains a private VPN IP); leave the file local.
+- Rename `docs/parity.md` to `docs/TUI-parity.md` and update README/other references; open ticket `04-a2ui-docs` already uses that name.
+- Add a module map to `ARCHITECTURE.md` covering the new client/hub boundaries and the spawn backend seam; keep latency numbers unchanged.
+- Remove any newly dead code revealed by the splits.
+
+### Acceptance
+
+- No JS/TS/CSS source module over ~800 lines; `app.js` and `hub.ts` are composition/facade modules, not feature dumps.
+- All tests use the shared harness where they create a temp root or Hub; existing test count/pass behavior is preserved.
+- `Hub` public behavior and the wire protocol are unchanged; a fake backend/spawn test covers the seam.
+- `npm run check` green, including lint and format check.
+- `tools/shot.mjs` at 390 and 1280 shows the dashboard, a session, a sheet and the composer unchanged.
+- ARCHITECTURE.md module map and TUI parity path are accurate.
+
+### Out of scope
+
+- Process pid/wait helper dedupe in `bin/pixip.ts`/`src/daemon.ts`, server route-table rewrite, behavior fixes, new UI features, host integration and A2UI rendering.
+
+### Outcome
+
+- Commits: tooling/format baseline (`7e15496`, `b6f203c`), shared test harness (`c0834af`), hub split + backend seam (`4f76f42`, `5e55f73`, `0f9c0c1`), client/CSS split (`abf32a5`), repo/docs hygiene (`bc14071`).
+- Hub is now a 738-line facade over `hubLive` (588), `hubStore` (689), `hubControl` (384), `hubSession` (548), with `jsonl`, `sessionIndex` and `backend` seams. `Hub` public API and wire framing are unchanged.
+- Client is a 798-line `app.js` plus dashboard/session/transcript/sheets/composer/menu/controls/toast/transport modules; CSS is six ordered files, all under 800 lines.
+- Every Hub/temp-dir test uses `test/helpers/harness.ts`; `test/backend.test.ts` covers the injected spawn backend.
+- `npm run check` green: typecheck + ESLint + Prettier check + 233 tests.
+- `tools/shot.mjs` at 390 and 1280: dashboard, empty session (composer/footer) and settings sheet render with no page errors or horizontal overflow. Evidence in ignored `tmp/cleanup-shots/`.
+- `dev.sh` is ignored, `docs/TUI-parity.md` is canonical, and ARCHITECTURE.md has the module map. No latency table numbers changed.
+- Note: the split hub method modules use `@ts-nocheck` because they run with the Hub instance as `this`; the public facade, all exports and tests remain typechecked. No behavior changed.
+```
+
+### fit/closed/00-group-sessions-by-cwd.md
+```
+---
+grilled: true
+---
+
+Group sessions by cwd on the dashboard, collapsible and collapsed by default, keeping hot/warm sessions and the most recent session in each group visible even when collapsed.
+
+### Decisions
+
+- Hot = `busy` or `starting`; warm = `idle`; `stopped` and `error` are cold. Pinning is the union of every hot/warm session plus the single most recent session in the group (by `lastActivity`, descending), even if that newest one is cold.
+- Group order follows the newest `lastActivity` in each group, descending; rows within a group are ordered by `lastActivity`, descending. Ties break by id for determinism.
+- A collapsed header shows the home-shortened cwd, the session count, and the hidden count when non-zero (e.g. `~/dev/project  12 sessions · 5 hidden`). The expand/collapse affordance is only interactive when at least one row would actually be hidden; otherwise it is just a section label.
+- Group labels are home-shortened (`/home/x/dev` -> `~/dev`) when the path is under `$HOME`; add `home` to `GET /api/info` and the `hello` frame so the dashboard can do this. Fall back to the full path when home is missing.
+- Bucket by exact cwd with trailing slashes trimmed; blank/missing cwd becomes a single `unknown cwd` group. No symlink resolution or case folding.
+- Each group header has a small `+` "new here" action that creates a session in that exact cwd without toggling the group; the existing cwd/new form stays at the top outside the groups.
+- Per-row `cwd` lines are hidden inside groups, since the header owns the path.
+- Header gear (dashboard only) opens a reusable settings sheet. First item: "Keep hot/warm and newest sessions visible when collapsed", default on, persisted per browser in localStorage. Turning it off means a collapsed group hides every row.
+- Collapse state persists per browser in localStorage, keyed by the full cwd (new groups start collapsed; remembered open groups reopen). Missing/full localStorage falls back to in-memory state.
+- Single-column grouped list at all widths (max ~760-1040 px); no multi-column/rail work, which stays in `backlog/25-desktop-surface`.
+- Scope: client-only grouping plus the additive `home` discovery field; no hub-side grouping, no new session-list protocol, no auth/desktop changes.
+- Verification: `npm run check` plus focused pure-helper tests; attempt `tools/shot.mjs` at 390/1280 and record a screenshot gap if Chromium is unavailable.
+- Docs: update README and ARCHITECTURE where the dashboard or `hello` fields are described.
+
+### Implementation
+
+- `src/client/sessionGroups.js` (new, pure): exact-cwd bucketing with trailing-slash trimming and an `unknown cwd` fallback, activity ordering with deterministic ties, hot/warm classification, pinned-union collapse view, count labels, home-shortened labels, and collapse/pinning storage parsing.
+- `src/client/app.js`: dashboard renders one section per cwd; default collapsed; persisted open states; hot/warm/newest pinning; header count + hidden count; `+` per group; toggle only when collapsing would hide a row; draft preservation for the top new-session form. Header gear is dashboard-only and opens a settings sheet with the pinning checkbox. `home`/`defaultCwd` are cached so list refreshes do not clear them.
+- `src/client/index.html`, `src/client/style.css`: gear button, group header/toggle/`+`, settings-sheet row and hint; rows inside groups no longer repeat the cwd.
+- `src/server.ts`, `src/wire.ts`: additive `home` on `GET /api/info` and the `hello` frame (`frameHello(sessions, defaultCwd, home)`); `WIRE_VERSION` stays 1.
+- `test/sessionGroups.test.js` (new) plus a `frameHello` home assertion in `test/protocol.test.ts`.
+- `README.md` and `ARCHITECTURE.md`: dashboard grouping/settings and the `hello` fields.
+
+### Verification
+
+- `env -u PIXIP_INSIDE -u PIXIP_SESSION_ID npm run check` green: typecheck plus 175/175 tests. A plain `npm run check` in this agent shell fails two pre-existing daemon tests because the parent exports `PIXIP_INSIDE=1`, which intentionally turns `pixip stop` into a restart.
+- `node --check` green for `src/client/app.js`, `src/client/sessionGroups.js`, and `test/sessionGroups.test.js`.
+- Screenshot gap: `/tmp/chrome-shell/.../chrome-headless-shell` is present but cannot launch (`libatk-1.0.so.0` missing, no installed Chromium libs and no sudo). `tools/shot.mjs` at 390/1280 with synthetic grouped sessions remains the owner's step.
+```
+
+### fit/closed/00-if-a-session-is-open-in-a.md
+```
+---
+grilled: true
+commit: "8f1079d"
+---
+
+if a session is open in a git repo, show the branch name on the dashboard
+
+### Decisions
+
+- **Placement:** on each cwd group header, beside the home-shortened path. One branch per repo/group; not repeated on every session row.
+- **Detection:** the hub runs `git -C <cwd> rev-parse --abbrev-ref HEAD` for distinct cwds and includes `branch` in the sessions frame. Results are cached per cwd so list refreshes do not repeat git work; invalidate when a different cwd appears or a session is created/renamed.
+- **Edge cases:** use git's own cwd resolution, so subdirectories, worktrees and submodules show the nearest enclosing repo. Hide the branch entirely when git fails or the path is not a repo. `detached` HEAD shows the abbreviated SHA rather than a branch name.
+- **Presentation:** a small chip on the group header, visually secondary to the path and count; it must not widen or stretch the mobile layout.
+- **Data path:** additive `branch?: string` on the existing session info/sessions frame; no new REST endpoint and nothing on the streaming event path.
+- **Files:** `src/hub.ts`, `src/client/app.js`, `src/client/render.js` (if grouping/labels live there), `src/client/style.css`, `test/title-hub.test.ts` or a focused hub test, and the session-list section of `ARCHITECTURE.md`.
+
+### Acceptance
+
+- A dashboard group whose cwd is inside a git repo shows its current branch.
+- Non-repo groups and git failures show no chip and no error.
+- Subdirectory, worktree and detached-HEAD behavior matches the decisions above.
+- `npm run check` is green and responsive behavior is checked at 390 and 1280.
+```
+
+### fit/closed/00-label-sessions-by-first-prompt.md
+```
+---
+grilled: true
+---
+
+Derive a session label from its first prompt by asking a separate one-shot Pi process to summarize it into three to five words, then set it as the Pi session name. The user can still rename the session from the UI, and manual names always win over automatic labels.
+
+### Decisions
+
+- **Summarizer:** spawn a short-lived `pi --print --no-session` process with tools/extensions/context files disabled; the real session transcript and context are untouched.
+- **When:** only on the first prompt of a session that has no messages and no name (new sessions created in pixip). Existing unnamed sessions are not backfilled.
+- **Name source:** persist `nameSource: "auto" | "manual"` in `sessions.json`. A manual rename wins; never overwrite any existing name at first prompt.
+- **Model:** configurable via `--title-model <provider/model>` and `PIXIP_TITLE_MODEL`; the default is the cheap `deepseek-v4.1-flash` when the session reports it as available, otherwise the session's own model.
+- **Fallback:** if the one-shot call fails, times out (15 s), or returns nothing useful, derive a local 3-5 word label from the first prompt.
+- **Format:** sentence case, 3-5 words, no surrounding quotes, max 40 characters.
+- **UI:** the existing name surfaces update through the normal `status` frames; no new client control for triggering the label.
+
+### Acceptance criteria
+
+- Sending the first prompt to a new unnamed session produces a 3-5 word name that appears in the dashboard, header/status line and `/session`.
+- A session that already has a name at first prompt is never relabeled.
+- A manual rename before or after labeling is never overwritten by the automatic label.
+- Summarization runs off the prompt hot path: prompt dispatch is not delayed, and failures fall back without a toast or transcript entry.
+- The chosen model is configurable; unavailable/default missing models fall back to the session model.
+- `npm run check` is green, including tests for auto label, manual-wins, fallback and model resolution.
+
+### Implementation
+
+- `src/titles.ts`: pure `normalizeTitle`, `fallbackTitle` and bounded `titlePrompt` helpers; sentence case, 3-5 words, 40 chars.
+- `src/hub.ts`: first-prompt trigger on `prompt`, separate `pi --print --no-session` one-shot child, model resolution (configured → cheap default → session model), 15 s timeout, local fallback, `nameSource` persistence, and manual rename protection.
+- `sessions.json` records `nameSource`; archive/trash metadata preserves it, and restore keeps it.
+- `bin/pixip.ts`: `--title-model <provider/id>` and `PIXIP_TITLE_MODEL`; help text updated.
+- `test/fixtures/fake-pi.mjs`: one-shot print mode for title tests (reply/failure/delay).
+- Tests: `test/titles.test.ts` (normalization/fallback/prompt), `test/title-hub.test.ts` (auto label, manual wins, fallback, model choice/fallback).
+- `ARCHITECTURE.md` and `README.md` document the feature.
+
+### Verification
+
+- `env -u PIXIP_INSIDE -u PIXIP_SESSION_ID npm run check`: 187 tests pass, typecheck green.
+- Real one-shot command verified against the installed Pi: `pi --print --no-session --no-tools --no-extensions … --model opencode-go/deepseek-v4.1-flash …` returned a clean 3-5 word label.
+- No client layout changed; the existing name surfaces consume the normal `status`/`sessions` frames.
+```
+
+### fit/closed/00-modal-polish.md
+```
+---
+grilled: true
+commit: "9746fee811eb4a5dc3e095dd1230845528d3dd69"
+---
+
+Polish every modal and sheet: add a shared x close button, accent/neutral action colors, and field-first input ordering. Dialogs close with x or Escape only, never backdrop click, and Enter submits input/editor dialogs. The same treatment applies to Pi extension dialogs and every pixip `#sheet` overlay.
+
+### Scope
+
+- `handleUiRequest` extension dialogs: `select`, `confirm`, `input`, `editor` (and the existing `notify` path stays a toast).
+- Every pixip-owned `#sheet` overlay that already closes through `closeSheet`: archive/delete confirmations, text/session info sheets, directory picker, settings, archived/trash lists, session tree.
+
+### Decisions
+
+- Close affordance: an `×` button at the top-right of the modal header.
+- Dismissal: `×` and Escape cancel/close; backdrop clicks do **not** dismiss.
+- Colors: primary/confirm actions use the accent color, cancel stays neutral, and destructive actions (delete, archive) use the error/red color.
+- Input/editor ordering: field first, title rendered as a secondary hint below the field, then actions (`send`/confirm before `cancel`).
+- Keyboard: Enter submits `input`/`editor` (Shift+Enter inserts a newline in the editor); select/confirm have no Enter shortcut; Escape cancels every modal.
+- `select` options stay neutral buttons with a neutral cancel; `confirm` shows the yes action in accent and no in neutral.
+
+### Acceptance
+
+- Pi extension dialogs and pixip sheets both show a visible `×` with an accessible label.
+- `×`, Escape, and the explicit cancel button all resolve an extension dialog exactly once and close a local sheet.
+- Backdrop clicks never close a modal.
+- Confirm vs cancel colors are visually distinct, and destructive sheet actions are red.
+- Input/editor dialogs render field first, then the title hint, then send/confirm and cancel.
+- Enter submits text input/editor content; existing Pi timeout behavior is unchanged.
+- Empty title falls back to the request message or method name, as today.
+
+### Files
+
+- `src/client/app.js` (`handleUiRequest`, `confirmSheet`, other sheet builders)
+- `src/client/style.css` (shared modal header/close/action styles)
+- `test/` for any extracted pure dialog-rendering helper
+
+### Tests
+
+- Cover the pure parts if extracted: action list, ordering, and close semantics.
+- `npm run check` green.
+- `tools/shot.mjs` at 390 and 1280 with at least one extension dialog and one confirm sheet open.
+
+### Constraints
+
+- Client-only change; no wire protocol, hub, or Pi extension changes.
+- Keep the existing response fields (`value`, `confirmed`, `cancelled`) exactly as Pi expects.
+- No framework/build step; keep markup and styles small.
+```
+
+### fit/closed/00-prefix-commands.md
+```
+---
+grilled: true
+leg: tui-parity-1
+commit: "5dee5b4"
+---
+
+`/`, `/command args`, `!cmd` and `!!cmd` must behave like Pi's TUI from the pixip composer. This slice owns the prefix classifier, the shared command registry/policy (whitelist/blacklist), bash execution, and the prompt/steer dispatch that keeps extension commands working while busy.
+
+### Why now
+
+The owner needs TUI parity to move pixip development into pixip itself (dogfooding): the command surface comes before the rest of the backlog. This is slice 1 of the next leg; the other slices are `05-builtin-commands`, `06-command-menu`, `07-queue-display`, and `08-session-commands` (re-scoped from `backlog/70`). `docs/parity.md` tracks the full TUI surface.
+
+### Goal
+
+- One deep, DOM-free module owns parsing, the command catalog, and the policy; menus/notices/handlers consume it instead of keeping parallel lists.
+- `!`/`!!` run through the RPC `bash` command, stream into a card, and `!!` is excluded from model context.
+- Slash input is classified into: pixip built-in (handled by `05`), Pi extension/template/skill (passthrough), Pi TUI-only (local notice), or unknown (passthrough, exactly like the TUI).
+- Slash input while busy goes through `prompt` with `streamingBehavior: "steer"`, so extension commands still execute immediately and templates/skills queue.
+
+### Done when
+
+- `src/client/commands.js` (pure, no DOM) exports `classifyInput()`, the built-in + TUI-only catalog, `resolvePolicy()`, and `visibleCommands()`; covered by `test/commands.test.js`.
+- The hub resolves a per-session policy from three layers (data-dir `pixip.json`, the session cwd's `.pixip.json`, CLI flags), validates it, and sends it to the client; the merge is restrict-only.
+- `!cmd` and `!!cmd` send a `bash` frame with a client-generated id; `bash_execution_update` events stream into the matching card; a final `bash` frame carries output, exit code, cancellation, truncation and full-output path. `!!` sets `excludeFromContext` and shows an `excluded` badge.
+- `!`/`!!` with no command is a no-op; bash is allowed while the agent is streaming (one at a time); plain text keeps its current idle/busy dispatch.
+- `/extcmd`, templates and skills still work while busy (proven with a fake Pi that logs `streamingBehavior`).
+- TUI-only commands and denied commands produce a local notice and are never sent to the model.
+- `npm run check` green; `docs/parity.md` updated for every command this slice touches; `ARCHITECTURE.md` gains the `bash` frame and the `prompt` `streamingBehavior` note.
+
+### Decisions (grilled 2026-11-21)
+
+- Mapping: `!cmd` -> bash `excludeFromContext: false`; `!!cmd` -> `true`. Classification trims like the TUI: the bang check is on the trimmed line, the command text after the bang is trimmed. No escape for a literal leading `!` (same as the TUI).
+- Rendering: create the card on submit (optimistic), append `bash_execution_update` deltas, then annotate/replace with the final result (exit code, cancelled, truncated, full-output path); no separate user echo line (TUI shows only the bash card). Empty output still shows the card.
+- Busy: bash is allowed while streaming; the RPC `bash` command queues its message for the next prompt. One bash at a time (TUI guard: while `isBashRunning`, refuse with a toast).
+- Slash input while busy uses `prompt` with `streamingBehavior: "steer"` instead of the current separate `steer` command. Plain text may keep using `steer`.
+- Abort-running-bash is **not** in this slice (deferred; listed as a gap in `docs/parity.md`).
+- Config: all three layers, merged restrict-only so a more specific layer can only narrow:
+  - `deny` = union of all layers' names;
+  - `allow` = intersection of the non-empty `allow` lists (an empty list means "no allow restriction");
+  - `bash` = AND of all layers (a `false` anywhere disables `!`/`!!`);
+  - `deny` wins over `allow`; names are bare (`compact`, not `/compact`); command-level granularity only (no per-source filters).
+  - Files: `<data-dir>/pixip.json` and `<session-cwd>/.pixip.json`, section `{"commands": {"allow": [], "deny": [], "bash": true}}`; unknown keys are reported, malformed JSON is a startup error with the file path. CLI flags: `--allow-command <name>` (repeatable), `--deny-command <name>`, `--no-bash`.
+  - Read once per session at attach (hub restart/reconnect to reload), resolved against the session's cwd, and sent to the client as the effective policy.
+- Deep module: classification/catalog/policy filtering live in one pure client module; the hub side is only "read + validate + merge + serve" so the surface stays small.
+- Unknown `/thing` that is not a built-in, TUI-only command, extension command, template or skill is sent to Pi as a prompt (the TUI does the same).
+- The `bash` id is generated by the client and passed through the hub to Pi, so `bash_execution_update.id` matches without parsing event payloads.
+- Policy is per session (cwd-dependent); the list view does not need it.
+
+### Out of scope (own tickets)
+
+- Built-in implementations: `05-builtin-commands`.
+- Menu and footer move: `06-command-menu`.
+- Queue chips: `07-queue-display`.
+- Tree/fork/clone/import/export: `08-session-commands`.
+- Abort bash, input history, `@file` completion, image attachments, settings/auth/trust surfaces: later, tracked in `docs/parity.md`.
+
+### Files
+
+`src/client/commands.js` (new), `src/client/app.js`, `src/client/style.css` (bash card only), `src/commands.ts` (new: config layers + validation), `src/server.ts` (`bash` frame, `prompt` streamingBehavior, policy frame), `src/hub.ts` (`bash()`, `prompt()` behavior, policy resolution, explicit RPC id), `src/rpc.ts` (allow a caller-supplied command id), `src/wire.ts` (`bash`/policy frames), `bin/pixip.ts` (CLI flags), `test/commands.test.js`, `test/fixtures/fake-pi.mjs`, `test/` integration, `docs/parity.md`.
+
+### Tests
+
+- Pure: classification (`""`, `"hi"`, `/name`, `/name x`, `!ls`, `!!ls`, `!`, `!!`, `! `, `" !ls"`), catalog, policy layers/precedence (deny wins, allow intersection, bash AND, malformed config), filtering.
+- Fake Pi: `bash` streams updates then a result and records `excludeFromContext`; `prompt` records `streamingBehavior`; a second `bash` while one runs is refused.
+- Integration over the websocket: `!echo hi` card + deltas + final; `!!` excluded; denied/TUI-only command notices and no prompt sent; extension command while busy keeps `streamingBehavior: "steer"`.
+
+### Notes
+
+- Do not parse/re-encode Pi events: the streamed updates stay the verbatim `event` frames; the final `bash` frame is hub-built from the command response.
+- The TUI's `/` menu, built-ins and queue are separate slices; keep this ticket shippable without them.
+- README/docs: link `docs/parity.md`; do not claim TUI-only commands work.
+
+### Leg update (2026-11-21)
+
+The owner added a second slice, `01-daemon-refresh`, because dogfooding needs pixip to live in a background daemon and pick up hub code/config the agent edits mid-session. It sits between this slice and `05-builtin-commands` (soft refresh keeps children; `--when-idle` restart is the agent's safe self-update). `docs/parity.md` reflects the six-slice order: `00`, `01`, `05`, `06`, `07`, `08`.
+
+### Extension commands (`/fit` and every other extension command)
+
+No pixip-side dependency: `/fit` is a Pi extension command (`pi.registerCommand("fit")` in the `FIT_pi` package), so forwarding the literal slash text to Pi's `prompt` is the whole integration. The owner coordinates development with `/fit`, so this slice must guarantee the following for extension commands generically:
+
+- Forward slash text verbatim (arguments preserved; only the composer's outer trim). No built-in/catalog match means passthrough to `prompt`.
+- While busy use `prompt` with `streamingBehavior: "steer"` (already decided). RPC `steer` does **not** execute extension commands — it expands skills/templates and queues text — so `/fit` while streaming would otherwise be queued as a literal prompt and never run.
+- Do not apply the 20 s `RpcChild` timeout to `prompt`: extension handlers legitimately block on `ctx.ui.select`/`confirm`/`editor` (the FIT human workflow does), so the prompt response can take minutes. Give prompt a long/no timeout (configurable for tests) and treat a late or failed prompt response as advisory rather than an error toast.
+- `notify` with multi-line or long text must be readable: open a dismissible sheet (or an expandable toast) instead of the current 3.2 s toast. Verified real-Pi: `/fit help` sends a 2295-character notify; a toast is useless for that.
+- `extension_ui_request` methods pixip does not implement (e.g. `setStatus`) stay ignored, as today; dialogs (`select`/`confirm`/`input`/`editor`) are answered from the phone through the existing sheet.
+- Policy stays uniform: extension commands are allowed by default; `allow`/`deny` may name `fit` like any other command; nothing in the built-in/TUI-only catalog special-cases it.
+- Tests: the fake Pi emulates an extension command (long `notify`, a `select` dialog, a prompt response delayed past a test-configured short timeout); assert the prompt text arrived verbatim, one dialog and one readable notify, and no error frame. Real-Pi smoke already done for `/fit help` (2026-11-21: notify + successful prompt, idle); repeat for `/fit list` and a dialog-driven `/fit edit` once the timeout work lands.
+
+### Queue renumbering (2026-11-21)
+
+The owner wants the font-size ticket to be the first ticket pixip works on itself, after the 3-ticket AoE batch. Two ids in the prose above changed; use these:
+
+- `05-builtin-commands` -> `02-builtin-commands` (keeps the batch at `00`, `01`, `02`);
+- `10-add-font-size-control` -> `03-add-font-size-control` (next in the queue, first self-hosted ticket).
+
+Queue after the batch: `03-add-font-size-control`, `06-command-menu`, `07-queue-display`, `08-session-commands`. `docs/parity.md` reflects this.
+```
+
+### fit/closed/00-pressing-new-should-instantly.md
+```
+---
+grilled: true
+commit: "3755883"
+---
+
+pressing "new" should instantly open a new session window, with a disabled prompt input box and a little message in the history view until the agent is ready
+
+### Decisions
+
+- **Trigger:** the dashboard cwd form's `new` button only. The in-session `/new` command keeps its current behavior.
+- **Mechanism:** client-side pending view. On submit, immediately show the session view under a synthetic pending route with the history area showing `starting session…` and the composer visibly disabled. The existing `create` websocket frame runs in the background; when the daemon replies with `opened`, replace the URL with the real session id and connect normally. No protocol change.
+- **Pending state:** the composer cannot send while pending. History shows a clear starting message. If spawning fails, show the error in the history view, keep a back/dashboard affordance, and do not leave a ghost session or navigate to a dead id.
+- **Ready:** once the real id is open, the normal snapshot/status path enables the composer when the session is ready; no extra ready state in the hub.
+- **Tests:** cover the pending rendering in `test/` at the pure render level, and check `tools/shot.mjs` at 390 and 1280. No daemon integration test unless the mechanism changes.
+- **Files:** `src/client/app.js`, `src/client/render.js` (pending history row), `src/client/style.css`, `test/render.test.*` (or the existing pure render test file), and the client section of `ARCHITECTURE.md`.
+
+### Acceptance
+
+- Pressing `new` switches to the session window in the same interaction, before Pi has started.
+- The history view shows the starting message and the prompt input is disabled until the session is ready.
+- The window lands on the real session id with no duplicate connection, and a failed spawn shows an error instead of a ghost session.
+- `npm run check` is green and responsive behavior is checked at 390 and 1280.
+```
+
+### fit/closed/00-project-cleanup.md
+```
+---
+grilled: true
+---
+
+Grill and scope the cleanup needed before the Pi-host and A2UI tickets, then record the agreed work as an executable ticket. The grilling is complete and the phased cleanup ticket is `open/00-cleanup-foundation.md` (moved to in_progress for execution).
+
+### Decisions
+
+- One phased cleanup ticket, pure refactor only: no observable behavior, protocol, latency or layout changes; bugs found become follow-up tickets.
+- Scope: shared test harness, client module split, hub split plus Pi spawn backend seam, ESLint/Prettier tooling, repo/docs hygiene. Process-helper and server-route-table work are out.
+- Tooling: ESLint 9 flat + typescript-eslint + Prettier, one isolated formatting commit, `npm run check` runs typecheck + lint + format check + tests.
+- Client shape: `app.js` keeps boot/routing/socket/state; new modules own dashboard, sheets, session lifecycle, transcript, composer/attachments and controls.
+- Hub shape: `Hub` remains the public facade; `sessionIndex.ts` owns index/archive/trash, `jsonl.ts` owns parsing/windowing/truncation, `liveSession.ts` owns child process/events/pending UI, `backend.ts` owns the spawn seam.
+- Tests: migrate every Hub/temp-dir test to one `test/helpers` harness.
+- Hygiene: add `dev.sh` to `.gitignore` (it contains a private VPN IP), make `docs/TUI-parity.md` canonical, and add the new module map to `ARCHITECTURE.md`.
+- CSS counts toward the module-size target and gets split into ordered files served as one asset set.
+- TypeScript `noUnusedLocals`/`noUnusedParameters` stay off; ESLint covers unused code.
+- Verification: `npm run check` plus `tools/shot.mjs` at 390 and 1280 for client work.
+
+### Outcome
+
+- Created `00-cleanup-foundation.md` with phases 0-4, acceptance and out-of-scope.
+- Execution continues on that ticket; this planning ticket is closed.
+```
+
+### fit/closed/00-questionnaire-background-lock.md
+```
+---
+grilled: true
+leg: dogfooding-test
+project: pi-harness
+---
+
+The questionnaire tool can leave the agent permanently busy when the browser/TUI is in the background: no question UI appears, the tool call never returns, and the session locks until interrupted. Make backgrounding either keep the questionnaire answerable when the UI returns or fail/cancel cleanly, so the agent is never left stuck busy.
+
+### Reproduction
+
+1. Start a pi session whose questionnaire UI is the browser (ACP/TUI) and put that browser in the background.
+2. Trigger the `questionnaire` tool from the agent.
+3. Bring the browser back to the foreground.
+4. Observed: no question tabs/sections are shown, the session stays "busy", and there is no way to answer or dismiss the pending questionnaire.
+
+### Expected
+
+- A questionnaire triggered while the UI is backgrounded appears when the UI is foregrounded, with the answers/partial state intact.
+- Backgrounding mid-questionnaire does not drop the request or the already-selected answers.
+- If the host genuinely cannot collect typed text or show the questionnaire, the tool returns an explicit error/cancel instead of hanging.
+- The tool call always settles: no session may stay busy because a questionnaire was raised in the background.
+
+### Investigation
+
+- Locate the questionnaire tool implementation and the UI/transport it uses (harness TUI, ACP adapter, or web host). Confirm whether the backgrounded browser is blocked on a render/focus event, a suspended timer, or an unanswered tool callback.
+- Reproduce with the actual host path, not only a unit mock.
+- Check adjacent tool behavior: any UI request that waits on a foreground browser should have the same cancellation/timeout guarantee.
+
+### Acceptance
+
+- Automated regression test covers "questionnaire requested while UI is backgrounded, then foregrounded" and asserts the tool either completes normally or returns a clear cancellation.
+- A second test covers a host that cannot render the questionnaire and asserts the agent returns to idle with an error, not a pending tool call.
+- Normal foreground questionnaires still submit all sections and partial answers as before.
+- Harness/package tests and `npm run check` (for the affected repo) are green.
+- Manual reproduction from the steps above no longer leaves the agent busy.
+
+### Notes
+
+- Discovered during the dogfooding leg while grilling `00-web-image-upload`: that ticket is paused/open until this is fixed.
+- Add findings and the affected checkout/package path here before editing code.
+
+### Decisions (grilled 2026-11-22)
+
+- Scope is **pixip only** for this ticket. The questionnaire plugin and ACP adapter are deliberately out of scope; the plugin will be replaced by a pixip-native question UI later.
+- Background/reconnect is handled by caching the current blocking `extension_ui_request` (`select`/`confirm`/`input`/`editor`) on the live session and replaying it to every new subscriber before the snapshot.
+- A pending request is not timed out while a client is attached. If the last subscriber detaches, a bounded grace timer settles it with `cancelled: true` so Pi can never wait forever; a reconnect inside the grace window cancels that timer and replays the request with its state intact.
+- No new questionnaire protocol or client layout change in this ticket. The existing pixip dialog sheet is reused.
+
+### Findings
+
+- Dogfooding session `tmp/trial/sessions/2026-11-22T02-06-44-900Z_...jsonl` shows the questionnaire waiting from `02:07:48` until the user aborted the turn at `02:13:28`; it was then reported as "user dismissed". A retry lost the dialog again.
+- Host is pixip (`pi --mode rpc`). Pi 1.5.2 has no `ctx.ui.panel`, so the plugin uses sequential RPC dialogs.
+- `src/hub.ts` caches only fire-and-forget addon UI (`setStatus`/`setWidget`). Blocking `extension_ui_request`s are forwarded once and forgotten, so a reloaded/backgrounded browser never sees them again while the child waits.
+- Affected checkout/package: `/home/sloppy/dev/sin/pixip` (`src/hub.ts`, server replay path, tests). No changes to `/home/sloppy/dev/sin/sloppys-pi-slop/plugins/pi_questionare` in this ticket.
+
+### Resolution
+
+- `src/hub.ts` now keeps a per-session `pendingUi` map of unanswered blocking dialogs. `subscribe()` adds the subscriber first and then replays every pending request synchronously, so there is no gap between attach and the live event stream and no duplicate delivery.
+- Answering through the existing `ui` frame clears the cached request. Stopping the child or the child exiting clears it too.
+- When the last subscriber detaches, each pending request gets the `pendingUiGraceMs` timer (default 120 s). A reconnect clears the timer and replays the request; if nobody returns, the hub sends `extension_ui_response {cancelled:true}` so the waiting extension tool settles.
+- `test/fixtures/fake-pi.mjs` records `extension_ui_response` commands for assertions.
+- New `test/pending-ui.test.ts` covers reconnect replay followed by an answer, no replay after an answer, and cancellation when no client reattaches.
+
+### Verification
+
+- `env -u PIXIP_INSIDE -u PIXIP_SESSION_ID npm run check` → 220/220 tests pass, typecheck clean.
+- The env override is required because this agent runs inside a pixip session: inherited `PIXIP_INSIDE=1` makes the daemon tests treat `pixip stop` as an inside restart, which is unrelated to this change.
+- `node --test test/pending-ui.test.ts` → 2/2 pass.
+- No client assets/layout changed, so no `tools/shot.mjs` run.
+```
+
+### fit/closed/00-reconnect-after-self-restart.md
+```
+---
+grilled: true
+commit: "3b49bdc"
+---
+
+A session that triggers `pixip restart` through its own bash tool loses its websocket and Pi child when the old daemon stops, so the browser drops mid-turn and cannot prove the session will come back. Make self-issued restarts reconnect the issuing session instead of ending it silently.
+
+### Problem
+
+`pixip restart` runs its stop/start in a detached helper so the CLI survives, but the old daemon still terminates the Pi child for the calling session. The browser sees a dead socket, backs off, and reconnects to the new daemon, yet nothing in the UI explains the restart or defines what happens to the in-flight turn. If the client reconnects after the child died mid-response, it can miss events, leave a half-rendered turn, or appear stuck.
+
+### Decisions
+
+- **In-flight turn:** abort it. The old child is stopped by the daemon shutdown; the transcript paints a visible system notice that the turn was interrupted by the restart. The composer returns ready after reconnect. Do not wait for the calling turn and do not silently continue.
+- **Signal:** the old daemon broadcasts an explicit `restarting` frame to live session sockets before shutting down. The client enters a `restarting` state and reconnects; it never has to infer the reason from a bare socket close.
+- **Reattach:** the new daemon auto-reattaches the same logical Pi session on reconnect (spawns its child), so the user lands back in the live session. Reconnect uses the durable entry cursor and must not duplicate transcript entries.
+- **Crash coverage:** the same client reconnect/restarting treatment covers unexpected daemon crashes too; the explicit frame is used when the restart is known, with the existing socket-close path as the fallback.
+- **Scope of state:** restarting is visible on the affected session view; the dashboard keeps its normal session list and recovers from the `sessions` snapshot after reconnect.
+- **Files:** `bin/pixip.ts`, `src/hub.ts`, `src/server.ts`, `src/client/app.js`, `src/client/style.css`, `test/daemon.test.ts`, and the daemon/restart section of `ARCHITECTURE.md`.
+
+### Acceptance
+
+- `pixip restart --force` issued from a session does not leave the browser on a dead socket.
+- The client shows `restarting`, reconnects to the new daemon, and reattaches the same logical session with no duplicated transcript entries.
+- An interrupted turn is visible and never silently continues as if nothing happened.
+- `npm run check` is green, with a daemon test that asserts the reconnect and reattach path; responsive behavior is checked at 390 and 1280.
+
+### Open Questions
+
+None after grilling.
+```
+
+### fit/closed/00-render-markdown.md
+```
+---
+grilled: true
+commit: "705a6e6da1f9d94a59ba55e9019590ab95640385"
+---
+
+### Verification
+
+- `npm run check` green: typecheck + 34 tests, including `markdownToHtml` coverage for GFM blocks, table wrapper, link target/rel, unsafe-scheme drop, raw-HTML escaping, verbatim fenced code, empty input, literal user messages and ANSI thinking blocks.
+- `tools/shot.mjs` at 390 and 1280 against a fixture session with a table, fenced block, lists, quote, links and literal user markdown: no console errors, `overflowX: false`, log width 390/1040.
+- streaming path unchanged: deltas stay in `.live-text` (now explicitly `pre-wrap`); `message_end` swaps in rendered markdown.
+
+### Implementation notes
+
+- `src/client/markdown.js` wraps the vendored `marked` build with three overrides: raw HTML tokens escaped, links limited to `http(s)`/`mailto`/`#` and opened with `rel="noopener noreferrer"`, tables wrapped in `.md-table`.
+- `render.js` imports `escapeHtml`/`markdownToHtml` from it and re-exports `escapeHtml`, so existing tests and callers are unchanged.
+- Table cells use `overflow-wrap: normal` so inline code keeps its token and the wrapper scrolls instead of breaking mid-word on a phone.
+- `ARCHITECTURE.md` untouched: no wire or latency change.
+
+commit: 705a6e6
+```
+
+### fit/closed/00-status-bar-is-incomplete.md
+```
+---
+grilled: true
+commit: "6d565f28d5dfa661ce4c5308396de88804efce10"
+---
+
+Surface Pi extension `setStatus` and `setWidget` requests in pixip so addon status entries and input-area widgets are visible. The hub caches the current addon UI per live child and replays it after attach, so reconnecting clients see the same state.
+
+### Scope
+
+- Handle `extension_ui_request` methods `setStatus` and `setWidget`.
+- Ignore `setTitle` and `set_editor_text` for this ticket; `notify` keeps its existing toast behavior.
+- Keep the existing verbatim event forwarding for extension UI requests.
+
+### Decisions
+
+- All addon UI lives in the footer area, ordered: `aboveEditor` widgets, then status entries, then `belowEditor` widgets, then the built-in footer.
+- Status entries are keyed by `statusKey`, ordered by first appearance, updated in place, and cleared when `statusText` is undefined/omitted (or empty).
+- Widgets are keyed by `widgetKey`, ordered by first appearance within their placement, updated in place, and cleared when `widgetLines` is undefined/omitted (or empty).
+- Missing/unknown `widgetPlacement` defaults to `aboveEditor`.
+- Widget rows have a capped height (about 6 lines) with internal scrolling so a verbose addon cannot push the composer off-screen.
+- The hub keeps the latest status/widget state per live session and replays it after attach; state is dropped when the child detaches or exits.
+- Replayed frames use the existing `extension_ui_request` shape so the client has one rendering path.
+
+### Acceptance
+
+- A `setStatus` request shows text in the footer, an update replaces it, and a clear removes it.
+- A `setWidget` request shows its lines above or below the composer per placement, and a clear removes it.
+- Multiple keys appear in insertion order and never duplicate.
+- Reconnecting or opening a second tab for a live session shows the currently cached addon UI without waiting for the extension to re-emit.
+- Detaching the child clears its cached addon UI.
+- Long widgets scroll inside their capped row instead of expanding the footer indefinitely.
+
+### Files
+
+- `src/hub.ts` (per-live-session addon UI cache, attach replay, detach cleanup)
+- `src/client/app.js` (`handleUiRequest`, footer render path)
+- `src/client/style.css` (footer status rows and capped widget rows)
+- `test/` for hub cache and client rendering helpers
+
+### Tests
+
+- Hub test: set/update/clear status and widgets are forwarded and replayed on a second attach; detach clears them.
+- Client/pure render test: footer row order, insertion ordering, and clear semantics.
+- `npm run check` green, plus `tools/shot.mjs` at 390 and 1280 with statuses and both widget placements visible.
+
+### Constraints
+
+- No Pi extension or plugin changes; consume only the documented RPC extension UI methods.
+- Do not re-encode normal Pi events on the hot path; caching is limited to the small current-status map.
+- Cache only current keys, not a history.
+```
+
+### fit/closed/00-steer-idle-latch.md
+```
+---
+grilled: true
+commit: "15ed5fc"
+---
+
+A steer that reaches Pi while it is idle is only queued and never starts a turn, and `Hub.touch()` marked the session busy anyway, so no `agent_settled` ever cleared it; from then on every composer message was sent as a steer and sat forever. The clear button also failed with `unknown frame "clear_queue"` because the running daemon predated that server frame (`--dev` reloads client assets only).
+
+### Symptom
+
+- Messages sent to the agent during/after a batch run never reached it; the queue chips showed them pending and `/api/sessions` reported the session `busy` long after its last record, so the idle-detach never fired.
+- The chips' `×` answered `{"t":"error","message":"unknown frame \"clear_queue\""}` and did not clear.
+
+### Root cause
+
+- `src/hub.ts` `steer()` called `touch()`, which set `info.state = "busy"` and cancelled the idle timer. RPC `steer` only queues, so when Pi was idle no `agent_start`/`agent_settled` followed: a permanent busy latch. The client picks `steer` vs `prompt` from that same flag, so the latch fed itself.
+- The `:8137` daemon started at 17:37:02; the `clear_queue` server case landed at 18:15:37 (`95b1f6d`). `--dev` serves client files from disk but never reloads hub/server code, so the new button hit an old server.
+
+### Fix
+
+- `Hub.steer()` is now `prompt` + `streamingBehavior: "steer"`. Pi ignores the behavior when idle (a normal turn starts) and steers when busy; it also keeps extension commands working. The client still sends `t:"steer"`, so the wire protocol is unchanged.
+- `Hub.touch()` only updates `lastActivity` and clears the idle timer; run state comes from `agent_start`/`agent_settled` alone. `prompt()` reschedules the idle timer when no run started.
+- `ARCHITECTURE.md` and `docs/parity.md` now say the `steer` frame maps to `prompt` + steer and why RPC `steer` is avoided.
+- `test/fixtures/fake-pi.mjs` models `prompt` + `streamingBehavior` as a queued message, and `test/builtin.test.ts` asserts an idle `hub.steer` sends one `prompt` with `streamingBehavior: "steer"` and leaves the session `idle`.
+- The clear button needs only the daemon restart; no code change.
+
+### Verification
+
+- `npm run check` green (157 tests).
+- Fresh daemon + real `pi`: idle steer produced `agent_start`, a `user:Now reply…`/`assistant:SECOND` turn, final state `idle`, and `clear_queue` answered `{"t":"queue","steering":[],"followUp":[]}`.
+- Restart `:8137` with `./dev.sh` after copying any queued chips (they live in the old child's memory).
+```
+
+### fit/closed/00-title-call-stdin-hang.md
+```
+---
+grilled: true
+leg: follow-up
+project: pixip
+---
+
+Automatic session titles still fell back to the first prompt words because the one-shot `pi --print` title child waited forever for stdin EOF. `execFile` left the pipe open, so every title call hit the 15 s timeout even after switching to the session model.
+
+### Root cause
+
+- `runTitlePi` used promisified `execFile`, whose child stdin is an open pipe.
+- Pi's print mode waits for stdin EOF before starting, so the title child produced no output and was killed at the timeout.
+- Manual shell runs and `spawn(..., stdio: ["ignore", ...])` succeeded, which hid the problem from the earlier investigation.
+
+### Fix
+
+- Close the title child's stdin immediately after spawning it.
+- Keep the existing timeout and stderr capture.
+- Add a fake-Pi regression mode that only answers a print-mode call after stdin EOF, so leaving the pipe open fails the title test.
+
+### Verification
+
+- `node --test test/titles.test.ts test/title-hub.test.ts` passes.
+- A direct `execFile` reproduction without `stdin.end()` times out; with it, the same prompt returns a label in ~2.5 s.
+- `env -u PIXIP_INSIDE -u PIXIP_SESSION_ID npm run check` → 221/221 pass, typecheck clean.
+```
+
+### fit/closed/00-title-with-current-model.md
+```
+---
+grilled: true
+leg: owner-request
+project: pixip
+---
+
+Automatic session labels should summarize the first prompt with a separate one-shot call on the session's current model, unless `--title-model` / `PIXIP_TITLE_MODEL` explicitly overrides it. Manual renames must continue to win.
+
+### Scope
+
+- Change the default title-model resolution from the cheap `deepseek-v4.1-flash` preference to the live session model.
+- Keep the configured override as the first choice.
+- Keep the existing one-shot `pi --print --no-session` path and local fallback for now; hanging/timeout hardening is split into a backlog ticket.
+- No questionnaire/plugin changes.
+
+### Acceptance
+
+- A new session with no override asks the session model to name it.
+- `--title-model` / `PIXIP_TITLE_MODEL` still wins when set.
+- `/name <name>` still renames manually and the auto label never overwrites it.
+- `npm run check` is green.
+
+### Resolution
+
+- `resolveTitleModel` now picks the live session model by default; `--title-model` / `PIXIP_TITLE_MODEL` remains the first choice, and an override that no longer resolves falls back to the session model.
+- When the first title call loses the race with the first turn, the prompt is held and retried once on `agent_settled` with the session model before the local first-words fallback.
+- Title-call failures now log the one-shot child's stderr (truncated).
+- Manual renaming through `/name <name>` still works and always wins; the existing tests cover renaming before and after the auto label.
+- Follow-up hardening is boarded as `backlog/05-harden-title-call.md`.
+
+### Verification
+
+- `env -u PIXIP_INSIDE -u PIXIP_SESSION_ID npm run check` → 221/221 pass, typecheck clean.
+- New regression test covers the session-model default and the settle retry; existing manual-rename and configured-override tests still pass.
+- Daemon restart needed to load the hub change; no client assets or layout changed.
+```
+
+### fit/closed/00-web-image-upload.md
+```
+---
+grilled: true
+leg: dogfooding-test
+project: pixip
+---
+
+Add an image-upload affordance to the composer so a phone can attach a photo/screenshot to a prompt, with a thumbnail preview and a way to remove it before sending. This closes the "Image paste/attachments" row in `docs/parity.md`.
+
+### Result
+
+Implemented end to end: one pending image or arbitrary file, a `+` menu with photo/camera and file inputs, clipboard paste, inline preview/removal, image downscale, hub validation, a raw upload endpoint for files, prompt path injection, transcript image thumbnails with an enlarge sheet, and upload cleanup. `docs/parity.md`, `README.md` and `ARCHITECTURE.md` are updated.
+
+### RPC findings (Pi 1.5.2)
+
+`pi --mode rpc` accepts `images` on `prompt`, `steer`, and `follow_up`. Each image is `{ "type": "image", "data": "<base64>", "mimeType": "image/png" }`. Pi persists the normalized image in the session JSONL, so reattach/replay renders it without re-uploading.
+
+### Decisions
+
+- Sources: `+` menu with "Photo or camera" (`accept="image/*"`, no `capture`) and "Choose file" (`*/*`), plus desktop clipboard paste. The menu is extensible.
+- Count: exactly one pending attachment total; picking another replaces it.
+- Images: client decodes, downscales to at most 1600 px on the longest edge, encodes JPEG/PNG, rejects originals over 20 MB. Hub rejects non PNG/JPEG/GIF/WebP, decoded data over 8 MB, base64 over ~11 MB, or more than one image.
+- Non-image files: `POST /api/sessions/<id>/uploads?name=<filename>` raw bytes, 100 MB cap; stored at `<data-dir>/uploads/<logical-session>/<uuid>-<safe-name>`. Prompt gets a blank line plus `Attached file: <absolute path>`, or just that line for an attachment-only send.
+- Lifetime: uploads survive stop/reattach; cleared on `/new`, archive, and trash/delete.
+- Image-only prompts are allowed. Builtin commands and `!`/`!!` are blocked while an attachment is pending; plain prompts and passthrough extension commands carry it.
+- Busy sends use the existing `prompt` + `streamingBehavior: "steer"` path, so images are not silently dropped.
+- Upload UX: "uploading…" chip plus inline error/size text; no progress bar or cancel.
+
+### Implementation
+
+- `src/attachments.ts`: shared image validation, limits and safe upload names.
+- `src/hub.ts`: image-aware `prompt`/`steer`, `uploadFile`, upload-dir cleanup on `/new` and store/archive/trash.
+- `src/server.ts`: `POST /api/sessions/:id/uploads`, 100 MB streaming cap, images on prompt/steer frames.
+- `src/client/attachments.js`: limits, size labels, path-prompt shaping, image detection.
+- `src/client/app.js`, `index.html`, `style.css`, `render.js`: `+` menu, paste, preview/error chips, image prepare/upload, send-state, transcript thumbnails and enlarge sheet.
+- Tests: `test/attachments.test.ts`, `test/attachments-client.test.js`, `test/render.test.js`; fake Pi logs images on prompt/steer.
+- Docs: `docs/parity.md`, `README.md`, `ARCHITECTURE.md`.
+
+### Verification
+
+- `env -u PIXIP_INSIDE -u PIXIP_SESSION_ID -u PI_SESSION_FILE npm run check`: **232 pass, 0 fail**. (Without unsetting the outer session markers, the two daemon stop tests correctly take the inside-pixip restart path.)
+- Fake Pi: socket `prompt` with an image reaches the child, hub/steer images preserve `streamingBehavior`, malformed/oversized/multiple images never reach the child, upload route writes the file, stop keeps it, `/new` and archive remove it.
+- Real child: an image-only prompt to real `pi` settled normally; the session JSONL user message contained one image block of 52,163 bytes and no text.
+- Visual: Playwright Firefox at 390 and 1280 (Chrome is not installed) with the preview visible, image loaded, send enabled, no horizontal overflow, and a generic file chip reaching “ready”. Firefox deps were loaded from `/tmp/ffdeps`.
+
+### Notes
+
+- The two daemon test failures seen when running inside pixip are environmental (`PIXIP_INSIDE`/`PIXIP_SESSION_ID`/`PI_SESSION_FILE`), not caused by this ticket.
+- No commit was made; the working tree also contains unrelated pre-existing changes.
+```
+
+### fit/closed/00-when-opening-back-up-a-hot.md
+```
+---
+grilled: true
+commit: cf103a178222e844af4af6c0ea78a372c2c6f509
+---
+
+Reopening a session the SPA has already viewed should paint its transcript immediately from an in-memory per-session cache, restoring the previous scroll position instead of flashing an empty “connecting…” view. Cache up to eight recently viewed sessions; a new tab or full reload keeps today’s provisional path.
+
+### Scope
+
+- Client-only, in-memory cache keyed by session id (and logical id where available).
+- Populated whenever a session transcript is painted; used by `openSession` before the websocket snapshot arrives.
+- LRU bound of 8 sessions, dropped on archive/delete and on page reload.
+
+### Decisions
+
+- “Hot” means a session with a live child or any session this SPA has recently viewed in this page.
+- Preserve the transcript window plus scroll position; if the user was pinned to the bottom, stay pinned and let live deltas append normally.
+- Keep the per-session composer text and queued chips when returning to a cached session.
+- New tab/full reload is out of scope: it falls back to the existing JSONL provisional path, and a live session may briefly show the connecting state.
+- No hub-side transcript cache and no protocol change.
+
+### Acceptance
+
+- Reopening a cached session shows its entries before the socket snapshot, with no empty transcript flash.
+- A scrolled-up user returns to the same reading position; a bottom-pinned user remains pinned.
+- Composer draft and queued chips for that session are restored.
+- The cache never exceeds 8 sessions and evicts the least recently viewed.
+- Archive/delete invalidates the session’s cache entry.
+- Unseen sessions and new-session creation behave exactly as today.
+- Authoritative snapshots and live deltas still dedupe by entry id, so cached entries are never painted twice or lost.
+
+### Files
+
+- `src/client/app.js` (`openSession`, `showList`, snapshot/event paths, cache helper)
+- `test/` for the pure cache/LRU helper if extracted
+
+### Tests
+
+- Pure test: LRU eviction, cache hit/miss, and invalidation on archive/delete.
+- Client regression: cached open paints entries and restores scroll; snapshot/delta merge does not duplicate.
+- `npm run check` green, plus `tools/shot.mjs` at 390 and 1280 reopening a cached session.
+
+### Edge cases
+
+- Session re-keyed by `/new`, fork, clone, or import: invalidate or migrate the old cache entry so the old transcript never appears under the new id.
+- Cached while streaming: the snapshot and buffered deltas must reconcile with cached entries without duplication.
+- Cached session that has since stopped: paint the cache, then let the normal status/snapshot path correct it.
+- Provisional entries with truncated text: a later authoritative snapshot must replace them correctly.
+- Loaded `history` windows and the `more` flag remain consistent after a cached repaint.
+
+### Constraints
+
+- Bounded client memory: one current window per cached session, at most 8 sessions.
+- Keep `src/client/render.js` pure; cache logic should be testable without a DOM where practical.
+- No bundler, no framework, no server/hub changes.
+```
+
+### fit/closed/00-when-the-agent-begins-thining.md
+```
+---
+grilled: true
+commit: "629929142e56685666f3580ec6edef57ef4040b4"
+---
+
+when the agent begins thining, a little "agent is thinking..." message should appear that is replaced with the actual thinking box when done
+
+### Decisions
+
+- Placement: a muted meta block at the bottom of the transcript, like the existing `starting pi…` / wake blocks.
+- Copy: `agent is thinking…` with a subtle pulse animation.
+- Lifecycle: show at `agent_start`; remove when the first assistant `message_end` renders a thinking box; also remove on `agent_settled` or error if nothing arrived.
+- Multi-step turns: show again after each tool result until assistant text/thinking arrives, not only once per turn.
+- The placeholder is transient UI only; it must not be persisted or confused with a real thinking entry.
+
+### Acceptance
+
+- Starting a turn shows the indicator immediately.
+- Completing the turn replaces it with the real `details.think` box (or removes it if there was no thinking).
+- `npm run check` green and `tools/shot.mjs` at 390 and 1280.
+```
+
+### fit/closed/01-daemon-refresh.md
+```
+---
+grilled: true
+leg: tui-parity-1
+commit: "91c2e62"
+---
+
+pixip can run as a managed background daemon and refresh itself: a soft reload of assets, command policy and the session index without touching live children, and a hard restart that survives via JSONL. This is what lets the agent edit pixip and pick up its own changes mid-session, and lets the user keep pixip up across shells.
+
+### Why now
+
+Dogfooding prep (slice 2 of the TUI-parity leg, right after `00-prefix-commands`). Once development moves into pixip, the hub must outlive the shell that started it, pick up code/config changes the agent makes, and not lose sessions when it restarts. Without this, every hub change means killing the process by hand mid-session.
+
+### Done when
+
+- `pixip start|stop|status|logs|refresh|restart` subcommands; bare `pixip` keeps serving in the foreground exactly as today. Pid, log and control state live under `<data-dir>` (`pixip.pid`, `pixip.log`), so `--data-dir` stays the isolation boundary and tests never touch a real daemon.
+- `start` detaches (new session), writes the pid, refuses when one is already running for that data dir, validates port/data dir before detaching, and prints the URL; `stop` sends SIGTERM, waits, and cleans a stale pid; `status` reports pid/URL/uptime/session count and exits non-zero when not running; `logs` tails `<data-dir>/pixip.log`.
+- Soft refresh (`pixip refresh`, `SIGHUP`, or `POST /api/refresh`): re-read client assets, `pixip.json` + per-project command policy, the session index and the command catalog; keep children and sockets; the response says what was reloaded.
+- Hard refresh (`pixip restart [--force] [--when-idle]`): replaces the process. Sessions survive as JSONL and reattach on open; refuse while any session is busy unless `--force`; `--when-idle` waits (bounded, default ~5 min) for all sessions to be idle and exits non-zero on timeout. A short port gap is fine: the client already reconnects with backoff.
+- UI: a small "reload" action (list and session header) calls the soft-refresh endpoint, then reloads the page and reconnects. No UI restart button.
+- The refresh endpoint is loopback-only (the UI has no auth): non-loopback peers are rejected; the existing non-loopback bind warning stays.
+- `/health` reports `startedAt` and a `reloads` counter so the client/agent can verify a refresh happened.
+- `npm run check` green; tests for pid handling (stale pid, second start refused), soft refresh (asset cache dropped, policy re-read, live child survives), and the `--when-idle` decision with fakes; README gets a daemon section and ARCHITECTURE the startup/refresh path if it changes.
+
+### Decisions (grilled 2026-11-21)
+
+- Subcommands plus the current foreground default; no systemd/nix unit dependency in this slice (a unit example may be documented, but the CLI owns lifecycle).
+- Soft refresh is the default: children and sockets are untouched, so a running turn is never disturbed. It re-reads the asset map, both `pixip.json` layers, the session index and the command catalog, and re-sends the per-session policy frame to live sockets.
+- Hard restart is explicit: `--force` kills live children (the in-flight turn is lost, the JSONL remains); `--when-idle` is the agent's safe self-refresh path after changing hub code (wait for all sessions idle, then replace the process).
+- Pid/log under the data dir rather than `/run` or `/var`, so parallel instances on other `--port`/`--data-dir` never collide.
+- `status` exits non-zero when not running (scriptable); `refresh` exits non-zero if no daemon is running.
+- Control endpoints stay loopback-only; no auth posture change.
+- Refresh is idempotent and must not drop live sockets; repeated refreshes are safe.
+- The soft-refresh endpoint returns `{reloaded: ["assets","config","index","commands"], reloads}`.
+
+### Files
+
+`bin/pixip.ts` (subcommands, pid/log, detach, signals), `src/server.ts` (refresh endpoint, loopback guard, `/health` fields, mutable asset map), `src/hub.ts` (reload hooks: index cache, policy cache, catalog; re-resolve policy for live sessions), `src/client/app.js`, `src/client/index.html`, `src/client/style.css` (reload action), `test/`, `README.md`, `ARCHITECTURE.md`.
+
+### Tests
+
+- CLI: start/status/stop on an ephemeral data dir + port; stale pid cleanup; second `start` refused; `status` non-zero when down.
+- Soft refresh: with `--dev` off, change a client asset, refresh, assert the new bytes are served; change `pixip.json`, refresh, assert the new policy; assert a live fake-Pi child is still running.
+- Hard restart: `--when-idle` with a busy fake session waits/exits non-zero; idle restart reattaches the same JSONL and the session list still shows it.
+- Integration: `POST /api/refresh` from a loopback socket succeeds, and a request marked as non-loopback (or a bound non-loopback host) is rejected.
+- Browser: reload action at 390/1280 is the owner's screenshot step.
+
+### Notes
+
+- `.pixip.json`/`pixip.json` policy is per session and is resolved at attach; soft refresh must re-resolve it for live sessions before claiming success.
+- The daemon does not proxy or restart Pi children on soft refresh; that is the whole point of the split.
+- Do not couple this to the transcript `resnapshot` frame from `05-builtin-commands`: that one re-requests a snapshot, this one reloads the hub's own caches.
+
+### Remaining gaps (grilled 2026-11-21)
+
+The `### Decisions` section above already covered scope, signals and the soft/hard
+split. These are the gaps that were still open, now answered:
+
+- **Restart owner: the CLI orchestrates.** `pixip restart` runs in the foreground:
+  read the state file, SIGTERM the old daemon, wait for that pid to exit (and the
+  port to free), spawn the new detached daemon with the same args, print the URL,
+  exit. No daemon self-exec/re-exec trick; the daemon only reacts to SIGTERM and
+  SIGHUP.
+- **Catalog on soft refresh:** the command catalog is the static client asset
+  `src/client/commands.js` (`00-prefix-commands`), so `commands` in `reloaded`
+  reports that the asset re-read happened. No hub-side catalog, no new frame; the
+  four-name contract (`assets`, `config`, `index`, `commands`) stays.
+- **`logs` / `status` shape:** `logs` prints the last 200 lines, `-f`/`--follow`
+  tails. `status` prints human text, `--json` prints pid/host/port/url/startedAt/
+  uptime/session count for scripts. Both read the state file first, then `/health`
+  or `/api/sessions` when the daemon answers.
+- **`restart` with nothing running** starts a daemon and exits 0 (idempotent);
+  `--when-idle`/`--force` are no-ops in that case.
+- **Restart UX:** no new wire frame. The existing `reconnecting… (Nms)` toast and
+  the durable cursor cover the port gap; `--when-idle` waits in the CLI process,
+  so the old daemon keeps serving until it is actually idle.
+- **Pid/state files:** `pixip.pid` stays a bare pid; a separate
+  `<data-dir>/pixip.state.json` holds `{pid, host, port, url, startedAt, dataDir}`.
+  Both live under the data dir, are written by `start` and removed on shutdown.
+  Stale detection = missing/dead pid (or a pid that no longer matches the state
+  file); `start`, `status` and `stop` clean stale files rather than fail.
+- **`--when-idle` mechanics:** the CLI polls `GET /api/sessions` every 1 s; all
+  sessions `idle`/`stopped`/`error` means proceed. Bounded by
+  `--timeout <seconds>` (default 300). On timeout it names the still-busy sessions
+  and exits 2; other failures exit 1.
+- **Loopback guard scope:** `POST /api/refresh` only. `POST /api/sessions` and the
+  stop route keep today's posture (the UI has no auth either way; this is not an
+  auth change).
+- **New modules are allowed** where they keep `bin/pixip.ts` thin: a
+  `src/daemon.ts` for pid/state/detach/control helpers plus test helpers, and
+  client changes stay in `app.js`/`index.html`/`style.css`.
+- **Assumption:** soft refresh re-reads the session index *and* broadcasts a fresh
+  `sessions` frame to list sockets, so the list is correct even before the page
+  reload; the UI reload action still reloads the page afterwards.
+```
+
+### fit/closed/01-jsonl-first-paint.md
+```
+---
+grilled: true
+commit: faf665f9e94adedbb1563115f963c50a592cc435
+---
+
+### Verification
+
+- **Socket row**: attach → provisional snapshot frame on a synthetic 17 MB session (1,900 entries, 400 KB tool outputs): 110 / 140 / 251 ms (cold daemon, cold child). 105 entries in the 256 KB tail, `more: true`, `state: "starting"`.
+- **Paint row**: tap a stopped session from the loaded list (puppeteer-core, 390 px): first block 115–153 ms, painted 143–185 ms across three cold runs. `starting pi…` hint visible, no console errors, `overflowX: false`.
+- **"load earlier"**: 54–77 ms for the preceding 200 entries, served from the JSONL while the child keeps running; button stays until `more: false`; windows kept across the authoritative snapshot (dedupe by entry id); scroll held via `scrollHeight - scrollTop` so prepends do not move the view (verified: 40,656 px before → 42,275 px after, same content).
+- **Full cold page load** (browser navigation, empty session) → painted: ~230 ms; with a 200-entry window: ~430–550 ms. That row is the browser's own asset load (170–240 ms before any socket), recorded separately in ARCHITECTURE.md; the budget row is the tap-to-paint one.
+- `npm run check` green: typecheck + 43 tests (`test/window.test.ts` covers partial first line, truncated final line, corrupt records, header filtering, 200/800-entry windows, full-window growth behind a 400 KB entry, unknown anchor).
+- `tools/shot.mjs` at 390 and 1280 on the markdown session (no regression) and on a 600-entry session (load earlier visible): no console errors, no horizontal overflow.
+
+### Implementation notes
+
+- `hub.provisional()` reads the JSONL tail before spawning; `readFromEnd` + `parseEntries` never throw, drop the partial first line when the read starts mid-file, skip unparsable records and filter the `session` header.
+- `hub.snapshot()` windows `get_entries` to the newest 200 and reports `more`; `hub.earlier()` reads backwards in growing bounded budgets (256 KB → 1 MB → 4 MB cap) until a full 200-entry window fits behind the anchor.
+- `header()` now reads a bounded 8 KB head instead of the whole file, so listing a 17 MB session no longer reads 17 MB.
+- Client: `snapshot.more` drives the button; `history` prepends; first paint lays out only the newest ~24 KB and fills the rest in 32 KB chunks, one `innerHTML` per chunk.
+- `earlier` commands are accepted while the child boots (message handler bound before the attach await).
+- `ARCHITECTURE.md`: provisional flow, `more`/`history`/`earlier` frames, `starting` state, measured rows and the startup note updated.
+
+commit: faf665f
+```
+
+### fit/closed/01-jump-to-newest.md
+```
+---
+grilled: true
+commit: "60eccbdaa34982382cb0e66249f37e6b45da313c"
+---
+
+jump to newest. A button like in the tui.
+
+### Decisions
+
+- Placement: floating pill above the composer at bottom-right, only over the session transcript, safe-area aware.
+- Visibility: hidden while within ~80 px of the bottom; shown when the user scrolls up.
+- Label: `↓ jump to newest` with an accessible aria-label; compact on phone.
+- Behaviour: click smooth-scrolls to newest and sets `stick = true` so live entries follow again.
+- Hidden on the dashboard and on session switch until the user scrolls away from the bottom.
+
+### Acceptance
+
+- Scrolling up reveals the pill; tapping it returns to the newest entry and re-enables auto-follow.
+- New entries keep the pill visible until the user jumps.
+- `npm run check` green and `tools/shot.mjs` at 390 and 1280.
+```
+
+### fit/closed/01-the-top-bar-when-in-a-session.md
+```
+---
+grilled: true
+commit: e1865cb843b82401cb13de06384ed6a76d36cff3
+---
+
+the top bar when in a session should have the text size and reload buttons inside a little "..." menu on the far right side. This should clear up room so that the session name is fully visible.
+
+### Decisions
+
+- Scope: every screen, including the dashboard, not just sessions.
+- Form: far-right `…` button opens an anchored dropdown popover; closes on outside click and Escape.
+- Contents: A− / percentage / A+ and reload move inside the menu. The status dot, settings, and stop stay outside in the header.
+- The freed header width goes to `#titles`, so long session names are fully visible.
+- Keep accessibility: `aria-haspopup`/`aria-expanded` on the trigger, focusable menu controls, existing labels.
+
+### Acceptance
+
+- Text size and reload are only reachable through the `…` menu; header room is visibly reclaimed.
+- Menu opens/closes correctly at 390 and 1280 px and does not clip off-screen.
+- `npm run check` green and `tools/shot.mjs` at 390 and 1280.
+```
+
+### fit/closed/02-builtin-commands.md
+```
+---
+grilled: true
+leg: tui-parity-1
+commit: "527b3a4"
+---
+
+pixip owns the Pi built-in slash commands that the RPC surface can drive, so `/compact`, `/name`, `/session`, `/copy`, `/model`, `/thinking`, `/new`, `/resume` and `/quit` work from the composer like they do in the TUI. Handlers consume the catalog, policy and classifier from `00-prefix-commands`; this ticket only adds the behaviour behind those names.
+
+### Why now
+
+Slice 3 of the TUI-parity leg for dogfooding: a pixip session has to be manageable without a terminal (compact, rename, switch model/thinking, start/resume/quit) before development moves into pixip. Runs after `01-daemon-refresh`, so a hub restart is not the only way to reload.
+
+### Done when
+
+- `/compact [instructions]` calls RPC `compact` with `customInstructions`; after `compaction_end` the client requests a fresh full snapshot with a new additive `resnapshot` client frame (`resnapshot` so it does not collide with the daemon's `refresh`), so the shrunken context is what is shown.
+- `/name` toasts the current name; `/name foo` calls `set_session_name` and the header updates from the existing status frame.
+- `/session` renders a local meta block: Pi id, pixip logical id, session file, name, message count, model/thinking, token totals and cost (from the footer data the hub already fetches).
+- `/copy` copies the last assistant message text; on clipboard failure it opens a sheet with the text and a copy button.
+- `/model` with no argument opens the model sheet; `/model provider/model` or a model id resolves against `get_available_models` and sets it, with a toast on unknown/ambiguous matches. `/thinking [level]` behaves the same against `get_available_thinking_levels`.
+- `/new` calls RPC `new_session`, re-keys the live session to the new Pi id, updates the index `piIds`, sends `opened` + a fresh snapshot. `/resume` returns to the session list. `/quit` detaches the session and returns to the list.
+- Denied commands and the TUI-only list from `00` still produce the local notice; every handler respects the per-session policy (including after a soft refresh re-resolves it).
+- `npm run check` green; `docs/parity.md` marks these commands done.
+
+### Decisions (grilled 2026-11-21)
+
+- `/new` uses `new_session` in the same child (TUI behaviour), not a new process; the id re-key helper introduced here is reused by `08-session-commands` (fork/clone/switch).
+- `/quit` cannot quit a terminal from the browser; it stops/detaches the child and returns to the list (soft quit).
+- `/session` is client-side formatting of data the hub already has; no new RPC.
+- `/compact` gets a transcript refresh because a compaction entry (`type: "compaction"`) is not rendered by the live event path and the context window shrinks. The `resnapshot` client frame makes the hub send a normal full snapshot (not a resume delta).
+- `/copy` uses `navigator.clipboard` (localhost is a secure context) with the sheet fallback for older mobile browsers.
+- Model/thinking argument matching is a pure helper: exact `provider/id`, exact id, then unique suffix; ambiguous or unknown -> toast with the closest matches.
+- All handlers are available while idle and while busy unless the RPC command itself refuses; errors surface as a toast, never as a silent failure.
+
+### Files
+
+`src/client/app.js`, `src/client/commands.js` (argument helpers if they belong there), `src/client/sessionInfo.js` (pure `/session` formatter, tested), `src/server.ts` (`compact`, `set_session_name`, `new_session`, `resnapshot`, `copy` data), `src/hub.ts` (command handlers + re-key helper + index `piIds` update), `src/wire.ts` (`resnapshot`/meta frames), `test/fixtures/fake-pi.mjs`, `test/`.
+
+### Tests
+
+- Fake Pi: `compact` (with instructions), `set_session_name`, `new_session` changing the id on the next `get_state`; integration asserts the resnapshot, the new `opened` id, and the index `piIds` update.
+- Pure: `/session` formatting, model/thinking argument resolution, `/copy` text extraction from entries.
+
+### Notes
+
+- Do not round-trip through `get_entries` for `/session`; use the footer + `get_state` the hub already serves.
+- Keep the policy/notice behaviour from `00`; this ticket must not bypass it.
+- Screenshots (390/1280) are the owner's step; note the gap in the ticket when closing.
+
+### Addendum (grilled 2026-11-21)
+
+- `/session` renders its meta block in the existing bottom sheet (`sheet()`), not
+  in the transcript: it is local UI, scrolls nowhere, and adds nothing to model
+  context. Same for the no-argument `/name` readout (toast stays as decided).
+
+### Closed (2026-11-21)
+
+Implemented and verified:
+
+- `/compact [instructions]` -> RPC `compact` (no response timeout); on
+  `compaction_end` the client sends `resnapshot` and the hub answers a full
+  snapshot with `replace: true`, so windows loaded before the compaction are
+  dropped and the shrunken context is what is shown.
+- `/name` toasts the current name; `/name foo` calls `set_session_name` and the
+  header follows the status frame.
+- `/session` opens the meta sheet (id, logical id, name, file, message count,
+  model/thinking, tokens, cost, context) from data the hub already sends; no RPC.
+- `/copy` fetches Pi's `get_last_assistant_text`, writes it with
+  `navigator.clipboard`, and falls back to a sheet with the text and a copy
+  button. Deviation from the test sketch: this uses the documented RPC instead of
+  extracting from `state.entries`, because live messages never enter the client's
+  entry window and extraction would copy a stale message. The wire test covers
+  the text; pure tests cover `/session` and the resolvers.
+- `/model` / `/thinking` open the existing sheets with no argument, or resolve
+  the argument server-side (exact provider/id, exact id, unique suffix; exact
+  level, unique prefix) and toast unknown/ambiguous answers with the matches.
+- `/new` calls `new_session` in the same child: the hub mutates the live session
+  in place (the event closure keeps working), moves it to the new Pi id, appends
+  the id to the index `piIds`, and sends `opened` with `rekey` to every socket;
+  each tab then requests a replacement snapshot. `/resume` returns to the list.
+- `/quit` sends `stop` (soft quit: detach) and returns to the list once the
+  status frame says `stopped`, with a short timer as the fallback.
+- Handlers stay behind the `00` classifier, so the per-session policy and the
+  TUI-only notices still apply unchanged.
+
+Verification: browser smoke with headless Chromium at 390 and 1280 (session
+sheet, rename, model/thinking, copy fallback sheet, compaction resnapshot,
+`/new` URL re-key + cleared transcript, `/resume`, `/quit` -> stopped + list; no
+console or page errors), and `npm run check` green with 121 tests.
+```
+
+### fit/closed/02-persist-session-names.md
+```
+---
+grilled: true
+commit: "9ca46647233cf29a17c8e489046d22d9b794a23b"
+---
+
+### Verification
+
+- `npm run check` green: typecheck + 49 tests; new `test/names.test.ts` covers header-only (no name), a name near the top, a rename later in a long file (tail name wins), an empty/null later `session_info` (previous name kept), a truncated final line (name still found) and mtime cache invalidation.
+- Six 18 MB fixture sessions: `GET /api/sessions` 17 ms cold, 3–4 ms warm on this 1 vCPU box; only 8 KB head + 16 KB tail per file are read, never the whole JSONL.
+- UI at 390 and 1280: stopped sessions list `big session` instead of the id prefix; the header-only fixture still shows `01a1fb3f`; opening a stopped session shows the name while `state: "starting"` (before the child reports `sessionName`). No console errors, no horizontal overflow.
+
+### Implementation notes
+
+- `header()` now derives `name` in the same mtime-cached entry as id/cwd/timestamp: a head pass over the first 20 lines plus a bounded 16 KB tail pass, both parsed with `nameFromLines()` (last non-empty `session_info` wins, unparsable lines skipped).
+- `list()` includes `header.name` for stopped sessions; the client already renders `name ?? id.slice(0, 8)`, so header-only sessions are unchanged.
+- The provisional snapshot from ticket 01 already carried `header.name`, so the title is right during `starting` too.
+- `ARCHITECTURE.md`: one paragraph documenting the bounded name scan and the shared mtime cache.
+
+commit: 9ca4664
+```
+
+### fit/closed/03-add-font-size-control.md
+```
+---
+grilled: true
+leg: dogfooding-test
+commit: "6dcfe1af0b67a8c0c246489960c680844173cfa9"
+---
+
+Add a transcript text-size control: a compact `A−`/`A+` pair in the header with a 50–150 % range, persisted per device, scaling only the transcript so the composer and the rest of the chrome stay fixed. This is the first ticket pixip is meant to work on itself, as a test of the dogfooding setup.
+
+### Goal
+
+Readability/width trade-off on phone and desktop: shrink the transcript to fit more on screen, grow it when reading. Transcript only; the control, composer, footer and session list keep their size. Supersedes the original "per session or for all new sessions" wording: the size is a device-wide transcript preference, not session state.
+
+### Done when
+
+- The session view header shows a compact `A−`/`A+` pair with a clear gap from `stop`; `stop` stays the last, visually distinct, one-tap action (no accidental stop).
+- Seven steps: 50, 65, 80, 100, 115, 130, 150 %; default 100 %. Long-press either button resets to 100 %; `Ctrl/Cmd` `-`, `+`, `0` work on desktop; the buttons disable at the ends.
+- Persisted per device in `localStorage` (`pixip.transcriptScale`), restored on load, clamped to the step list; missing or malformed values fall back to 100 %.
+- Scaling is transcript-scoped: `#log` gets `font-size: calc(1rem * var(--transcript-scale))` and transcript text uses `em`; header, composer, footer, tool-card chrome and safe areas stay in px, and the root font size is untouched.
+- Applying a size keeps the reading position (pinned bottom stays pinned; otherwise the distance from the bottom and the "load earlier" anchor stay), with no composer layout shift.
+- `npm run check` green, including a pure helper test; the owner runs `tools/shot.mjs` at 360/390/1280 with 50 %, 100 % and 150 % (no horizontal overflow, stop reachable, composer unchanged).
+- `docs/parity.md` marks transcript sizing done and `README.md` lists the control.
+
+### Decisions (grilled 2026-11-21)
+
+- Scope: transcript only. The composer deliberately stays 16 px (iOS zooms inputs below that).
+- Storage: device-local `localStorage`; no hub state and no per-session record, so "all new sessions" is automatic and phone/desktop can differ.
+- Control: header `A−`/`A+` (chosen over a sheet), placed after the title and before the connection dot/stop, with a 16 px+ gap and a distinct `stop` style; long-press either button resets; desktop shortcuts included; end states disabled with an accessible label.
+- Range: the chosen 5-step idea extended down to 50 % as requested — seven steps 50/65/80/100/115/130/150 %.
+- Technique: the rem-root approach would scale the composer too, so the transcript gets its own `em` scale through a CSS variable on `#log`; no `zoom`/`transform`; browser zoom still compounds on top.
+- Layout: text-only scaling (glyphs + line-height); spacing, control sizes and safe-area insets stay px.
+- Default 100 %, clamp on read, reset on long-press.
+
+### Files
+
+`src/client/index.html` (header buttons), `src/client/style.css` (`#log` scale, header layout), `src/client/transcriptScale.js` (new pure helper: steps, next/prev/clamp, storage parsing, labels), `src/client/app.js` (apply + wire buttons/keys), `test/transcriptScale.test.js`, `docs/parity.md`, `README.md`.
+
+### Tests
+
+- Pure: step order, clamp, next/prev at both ends, reset, parse null/garbage/out-of-range storage, label text.
+- No DOM harness: owner screenshots at 360/390/1280 with 50/100/150, long-press reset, reload persistence, private window default, no horizontal overflow, stop still one tap away.
+- Manual: change size with a long transcript and confirm the reading position (pinned and scrolled) does not jump.
+
+### Notes
+
+- Keep the control out of `#footer`; ticket `06-command-menu` moves the footer below the composer and must not move these buttons.
+- Tool cards keep px padding/borders and scale only their text; check markdown tables/code blocks at 50 % and 150 % for overflow.
+- Buttons stay 16 px themselves so 50 % does not make the control too small to tap.
+- `aria-label` includes the current percentage; visible focus ring; long-press must not trigger a click as well.
+
+### Result
+
+Implemented as grilled. `transcriptScale.js` holds the steps, clamp/parse, step
+and label helpers; `app.js` applies the CSS variable, wire buttons, long-press
+reset and `Ctrl/Cmd` shortcuts while preserving the scroll distance;
+`style.css` scales `#log` with `calc(1rem * var(--transcript-scale))` and moves
+transcript text to `em`, keeping chrome, padding and safe areas in px; the header
+gets the `A−`/`A+` group and a distinct, 16 px-separated `stop`. `npm run check`
+is green (128 tests, including 7 new pure tests). No Chromium on the work box, so
+`tools/shot.mjs` at 360/390/1280 with 50/100/150 % remains owner-run.
+```
+
+### fit/closed/03-session-index-empty.md
+```
+---
+grilled: true
+commit: b7093d6af39072526b170f7ef09ed6e22901de1f
+---
+
+Pi writes the session JSONL on the first message, so a session created and detached without a prompt disappears from the list. Keep a small merged index beside the session dir, and give every spawned session a stable pixip logical id.
+
+### Goal
+
+A session that has never been prompted still appears in the list after it is detached or after the hub restarts. Every spawned session also keeps a stable pixip logical id that survives Pi allocating a new session id.
+
+### Done when
+
+- `<data-dir>/sessions.json` (explicit `HubOptions.indexPath`; `bin/pixip.ts` passes it) is a plain JSON array, written atomically (temp file + rename) and merged by logical id, never overwritten.
+- Every spawn generates a `logicalId` (`crypto.randomUUID()`), passes it to the child as `PIXIP_SESSION_ID`, and persists `{logicalId, piId, piIds, cwd, name?, sessionFile?, createdAt}` right after `get_state`.
+- `list()` reads the index; JSONL wins for state, name and last activity when both exist, and the record's `logicalId` is merged onto the JSONL entry by Pi id.
+- An index-only record lists as `state: "stopped"`, `lastActivity = createdAt`, `sessionFile` from the record, plus the additive `SessionInfo.logicalId`.
+- Opening an index-only session reattaches at the recorded `sessionFile`: Pi allocates a new Pi id, the record's `piId`/`piIds` are updated, and the socket tells the client the new id with `opened`.
+- Renames of a session with no JSONL are persisted.
+- Deleting the index loses only empty-session listings; JSONL sessions, live sessions and the rest of the hub keep working.
+- `npm run check` passes; `test/` covers index-only, JSONL-only, both, corrupt index, merge preservation, reattach-with-new-id, and `PIXIP_SESSION_ID`.
+
+### Decisions (grilled 2026-11-21)
+
+- Path wiring: explicit `indexPath` in `HubOptions`; `bin/pixip.ts` passes `<data-dir>/sessions.json`. No `dirname(sessionsDir)` guessing.
+- Record shape: `{logicalId, piId, piIds: string[], cwd, name?, sessionFile?, createdAt}`; newest Pi id last in `piIds`. Records are keyed by `logicalId`; lookup accepts any `piId` or a `logicalId`.
+- Logical id: `crypto.randomUUID()`, generated at spawn, passed as `PIXIP_SESSION_ID` (needs an `env` field on `RpcChildOptions`). Wire/URL routing stays on Pi's id.
+- Retention: logical records are kept after the JSONL appears (supersedes the earlier "prune when JSONL exists" answer) so the logical -> Pi id mapping survives restarts. No pruning in this ticket.
+- Index-only open: spawn `pi --session <recorded sessionFile>` in the recorded cwd. Verified: Pi allocates a *new* session id at that path and writes the file on the first prompt, so the hub follows the new id and replaces the record. The client adopts the new id from `opened` and rewrites the hash without re-clearing the view.
+- Missing `sessionFile` in a record: fall back to a fresh spawn in the recorded cwd with the recorded name and replace the old record.
+- Renames: `session_info_changed` updates the index name only while `info.sessionFile` does not exist; the JSONL keeps winning afterwards.
+- Provisional paint for an index-only id: return an empty `starting` snapshot built from the index record instead of throwing, so the phone paints before the child boots.
+
+### Files
+
+`src/hub.ts` (index read/write, spawn, list, scan, provisional/attach), `src/rpc.ts` (env passthrough), `src/wire.ts` (`logicalId`), `src/server.ts` (`opened` on id change), `src/client/app.js` (adopt id), `bin/pixip.ts` (`indexPath`), `test/` (`test/fixtures/fake-pi.mjs` plus index/list/reattach tests).
+
+### Notes
+
+- Writes are serialized in-process and atomic (temp file + rename); no lock file at prototype scale.
+- Corrupt or missing index: log and continue with an empty index; list still serves JSONL and live sessions.
+- Tests use `test/fixtures/fake-pi.mjs` (JSONL RPC over stdio) as `piBin`, never the real Pi.
+
+### Verification
+
+- `npm run check` green: `tsc --noEmit` plus 56 tests (7 new in `test/index.test.ts`).
+- New tests cover index-only after detach + restart, JSONL-only, both (JSONL wins for name/activity, index adds `logicalId`), corrupt index, merge without clobbering, reattach-at-path under a new Pi id, rename persistence and `PIXIP_SESSION_ID`.
+- Real-Pi smoke on a scratch `--data-dir`: create → index record written (`logicalId`, `piId`, `piIds`, `sessionFile`); stop; restart; the empty session still lists as `stopped` with its name; opening it over the socket produced `snapshot(starting, 0 entries)` → `opened(<new piId>, same logicalId)` → `snapshot(idle, 4 entries)` and the record's `piIds` gained the new id. No JSONL was created by Pi, confirming the premise.
+- Client screenshots could not be taken: this box has no working Chromium (both headless shells under `/tmp` fail on missing `libatk`/`libgbm` and there is no sudo), so `tools/shot.mjs` at 390/1280 was skipped. The client change is the `opened` branch only (adopt the new id with `history.replaceState`, no layout), and `node --check src/client/app.js` passes. Please re-run the shots where Chromium is available.
+
+### Implementation notes
+
+- `HubOptions` gained `indexPath` (required, passed by `bin/pixip.ts`) and an optional `env` for test seams; `RpcChildOptions` gained `env`, merged after `process.env`.
+- Index writes go through one serialized read-modify-write chain (`mutateIndex`), so concurrent spawns cannot drop each other; writes are temp-file + rename. A corrupt index is logged and treated as empty.
+- `list()` keeps the JSONL first and only merges `logicalId`; index-only records use `createdAt` as `lastActivity` and are skipped when any of their Pi ids is already live or on disk.
+- `provisional()` returns an empty `starting` window for an index-only id (instead of throwing), so the phone paints before the child boots.
+- `src/server.ts` tracks the resolved id per socket (`activeId`) and sends `opened` when attach lands on a different Pi id; every later command (prompt/stop/earlier) uses the new id.
+- Renames persist only while the JSONL does not exist (`exists` check before the index write); the JSONL keeps winning afterwards.
+```
+
+### fit/closed/04-snapshot-live-cursor.md
+```
+---
+grilled: true
+commit: "920082c1520522ec03a54d48a85d8570d8804f9c"
+---
+
+Entries that arrive between `get_entries` and the subscription are lost, so a client connecting mid-turn can miss the start of a message. Subscribe first, buffer, and reconcile with Pi's durable entry cursor.
+
+### Goal
+
+No lost or duplicated entries across the snapshot/live boundary, using Pi's durable entry cursor.
+
+### Done when
+
+- The socket subscribes before requesting the snapshot and buffers live frames meanwhile.
+- After the snapshot, buffered frames are flushed; anything already covered by the snapshot is dropped by comparing against `leafId` and message identity.
+- On reconnect, an existing transcript can resume with `get_entries` and `since: <leafId>` instead of a full re-send (server side), proven by a test with a fake RPC peer.
+- `npm run check` passes; no change to the wire version unless the frame shape actually changes.
+
+### Decisions (grilled 2026-11-21)
+
+- Order: `attach` -> `hub.subscribe` (server buffers) -> `hub.snapshot`; flush after the snapshot frame. Per-socket buffer, so a second phone connecting mid-turn gets the same guarantee.
+- Identity: RPC events carry no entry id, so the hub (which already parses each record for status) stamps a coverage key and the server filters on it:
+  - `message_start` / `message_end` -> `msg:<role>:<message.timestamp>`;
+  - `message_update` -> `msg:assistant:<tracked assistant timestamp>`;
+  - `tool_execution_*` and `turn_end` -> `msg:assistant:<last assistant timestamp>` (the tool call belongs to that assistant message);
+  - everything else (`agent_*`, `session_info_changed`, `thinking_level_changed`, `extension_ui_request`, compaction/retry, errors) has no key and always flushes.
+- Coverage: one `msg:<role>:<message.timestamp>` per snapshot entry that has a `message`; a buffered frame whose key is covered is dropped. Consequence: a covered assistant message's buffered `tool_execution_start` is dropped too, so its tool block appears when the toolResult entry arrives rather than at execution start. No duplicate, no data loss.
+- Buffer cap: 2 MB or 2000 frames, whichever comes first. On overflow, entry-bearing buffered frames are discarded and, after the snapshot, `get_entries {since: snapshot.leafId}` (windowed to the usual 200) is sent as a second snapshot; non-entry buffered frames still flush.
+- Resume: the WS URL gains `&since=<lastEntryId>`; the server replies with a normal `snapshot` carrying only the delta plus additive `resume: true`; an unknown cursor (`Entry not found`) falls back to a full snapshot. `WIRE_VERSION` stays 1.
+- Client: sends the cursor only when entries for that session are already in memory (wake/network reconnect), never on a fresh open. On `resume: true` it appends entries missing by id, keeps the current `more`, and repaints from `state.entries`; live-painted DOM is replaced by entries, so nothing duplicates and nothing is lost.
+- Tests: WS integration only (fake pi + real `ws` client) - a record emitted between `get_entries` and subscribe appears exactly once; a `since` resume sends only the delta; an unknown cursor falls back to a full snapshot.
+- The provisional pre-attach snapshot is unchanged; the authoritative snapshot still replaces it.
+
+### Files
+
+`src/server.ts` (subscribe/buffer/snapshot order, `since` parsing, `opened`-style id handling untouched), `src/hub.ts` (coverage keys, `get_entries` with `since`), `src/wire.ts` (`resume` flag), `src/client/app.js` (cursor + reconcile path), `test/` (fake pi fixture and live-cursor integration test).
+
+### Notes
+
+- Never parse and re-encode an event on the path to the socket: keep forwarding the original string, and read identity fields only for the coverage key (the hub already parses the record for state bookkeeping).
+- Pi appends an entry before/with emitting its event, so every entry whose event was emitted before `get_entries` is in the snapshot; coverage keys are therefore sufficient.
+- No ARCHITECTURE.md change in this ticket (the open question stays for a later docs pass).
+
+### Verification
+
+- `npm run check` green: `tsc --noEmit` plus 60 tests (4 new in `test/live-cursor.test.ts`, real `ws` client against `startServer` on port 0 with the fake Pi peer).
+- New tests: a record emitted inside the `get_entries` window whose entry is in the response is dropped exactly once (the snapshot is the only copy); a record emitted inside the window whose entry is *not* in the response is flushed exactly once; `?since=e1` returns a `resume: true` snapshot containing only `e2`/`e3` and skips the provisional paint; an unknown cursor logs a rejection and falls back to a full snapshot with no error frame.
+- Real-Pi smoke on a copied session: `?session=<id>&since=<entry>` produced `resume: true` with only the 3 entries after the cursor, and `since=deadbeef` produced a full 9-entry snapshot after `resume cursor deadbeef rejected (Entry not found: deadbeef)`. No wire version bump.
+- Client screenshots could not be taken: no working Chromium on this box (both `/tmp` headless shells fail on `libatk`/`libgbm`, no sudo), so `tools/shot.mjs` at 390/1280 was skipped; `node --check src/client/app.js` passes. The client change is the cursor in the WS URL plus `renderResume` (append + repaint, no layout/CSS). Please re-run the shots where Chromium is available.
+
+### Implementation notes
+
+- `hub.subscribe()` now hands subscribers `(frame, key?)`; the hub stamps the key in `onRecord` (it already parsed the record for status) and forwards the original string untouched. `LiveSession.assistantTs` tracks the current/last assistant message so `message_update`/`tool_execution_*`/`turn_end` can be attributed.
+- `hub.snapshot(id, limit, since?)` sends `get_entries` with the cursor and returns `covered` computed over the **full** response (not the 200-entry window), so a buffered record for an older entry is still dropped.
+- `src/server.ts` buffers entry-bearing frames per socket while `get_entries` is in flight, sends the snapshot, then flushes non-covered frames. Records without a key (status, `session_info_changed`, extension UI, errors) are sent immediately, so dialogs are never delayed by the buffer.
+- Overflow (>2 MB or >2000 buffered frames) discards the entry frames and closes the gap with `get_entries {since: leafId}` as a `resume: true` snapshot; the loop is bounded to three passes, after which live frames simply continue. Non-overflowing buffers are flushed with exact coverage.
+- `requestSnapshot()` treats a rejected cursor as "forked/compacted/bogus" and falls back to a full window; `WIRE_VERSION` stays 1 because the `resume` field is additive.
+- Client: `socketUrl()` adds `&since=<last entry id>` only when `state.sessionId` already matches and `state.entries` is non-empty (wake/auto-reconnect, never a fresh open); `renderResume()` appends entries missing by id, keeps `state.more`, and repaints from `state.entries`, so live-painted blocks are replaced by their entries.
+```
+
+### fit/closed/06-command-menu.md
+```
+---
+grilled: true
+leg: tui-parity-1
+commit: "01426d7143fcd22518bcdbf8db5c23901486dd13"
+---
+
+Typing `/` opens a filtered command list above the composer, and the status line moves below the input so the menu owns the space above the text field. This is the interaction half of the command surface from `00`; it shows built-ins, extension commands, templates and skills, and honours the per-session policy.
+
+### Why now
+
+Slice 4 of the TUI-parity leg: the owner cannot remember every command (and extension/skill names vary per project), and the footer currently competes with the menu for the space above the composer.
+
+### Done when
+
+- A `/`-prefixed composer line (no whitespace yet) shows a menu above the composer, capped at ~6 rows and scrollable, with name + description.
+- Sources: supported built-ins from the `00` catalog plus `get_commands` (extension, prompt, skill) for the live session; denied commands are filtered out; TUI-only commands are shown dimmed with a "TUI-only" hint (selecting one shows the notice).
+- Filtering is case-insensitive substring on name/description, prefix matches first; `↑`/`↓` move, `Enter`/`Tab` insert, `Esc` closes, tapping a row inserts; the menu closes when the line stops being a bare command or loses focus.
+- The status footer moves below the composer (both stay sticky at the bottom, safe-area aware); the list view is unchanged.
+- `npm run check` green and `docs/parity.md` marks the menu done; the owner runs `tools/shot.mjs` at 390 and 1280 (this box has no Chromium).
+
+### Decisions (grilled 2026-11-21)
+
+- Footer below input, composer above it; the menu sits directly above the composer. One asset set, CSS only, no user-agent branching.
+- Menu opens only in command position (starts with `/`, no whitespace before the cursor); arguments after the command hide the menu (no argument completion in this slice).
+- Built-ins come from the shared `src/client/commands.js` module (no second list); dynamic commands are fetched once per session and cached, refreshed on a reattach or a soft hub refresh (`01-daemon-refresh`).
+- TUI-only commands stay visible but dimmed so the menu teaches what exists; selecting one emits the same local notice as `00`.
+- No fuzzy search, no ranking beyond prefix-then-alphabetical, no icons: keep it small and testable.
+
+### Files
+
+`src/client/commands.js` (filter/sort module, tested), `src/client/app.js`, `src/client/index.html`, `src/client/style.css`, `src/server.ts` (`commands` frame from `get_commands`), `src/hub.ts`, `src/wire.ts`, `test/commands.test.js`, `test/` integration, `docs/parity.md`.
+
+### Tests
+
+- Pure: filtering/ordering, command-position detection, dimmed TUI-only rows, policy filtering.
+- Fake Pi: `get_commands` response surfaces in the client frame; integration asserts it is requested once per session.
+- Layout: `tools/shot.mjs` at 390/1280 by the owner (menu open + footer below input); no horizontal overflow.
+
+### Notes
+
+- Keep the composer usable with the physical keyboard on desktop and the on-screen keyboard on phones; the menu must not cover the input.
+- The footer move is a layout change only; formatting stays in `footer.js`.
+
+### Verified (2026-11-21)
+
+- `npm run check` green (137 tests): pure filter/order/command-position/policy tests in `test/commands.test.js`, and an integration test that `get_commands` reaches the client on a `commands` frame exactly once per attach.
+- Menu: opens only on a bare `/name`, prefix-first then alphabetical, static catalog + live extension/prompt/skill commands, denied rows removed, TUI-only rows dimmed with a hint and their local notice on select; `↑`/`↓`, `Enter`/`Tab`, `Esc`, tap, blur.
+- Layout: `#dock` holds menu → composer → footer, sticky and safe-area aware; the list view hides the dock.
+- Screenshot gap: this box has no Chromium, so `tools/shot.mjs` at 390/1280 (menu open, footer below the input) is still the owner's step.
+```
+
+### fit/closed/07-queue-display.md
+```
+---
+grilled: true
+leg: tui-parity-1
+commit: "95b1f6d1ba30ad925b84076c54de74ba33b12298"
+---
+
+Send-while-busy is silent today: the composer queues a steer but the transcript shows nothing. Mirror the TUI's pending queue as chips above the composer, fed by the `queue_update` event, with a clear action that restores the queued text.
+
+### Why now
+
+Slice 5 of the TUI-parity leg: dogfooding pixip means steering a running agent often, and losing track of what was queued leads to duplicate prompts.
+
+### Done when
+
+- `queue_update` (`steering`, `followUp` arrays) renders one chip per queued message above the composer with the queued text and a count; they clear when the queue empties.
+- An X on the chips sends a `clear_queue` frame; the hub returns `{steering, followUp}` texts and the client restores them into the composer (TUI Esc behaviour) with a toast.
+- Plain text while busy keeps sending `steer`; the chips are read-only besides the clear action.
+- `npm run check` green; `docs/parity.md` marks the queue done; owner runs the 390/1280 screenshots.
+
+### Decisions (grilled 2026-11-21)
+
+- Use the existing verbatim `queue_update` event; no new event shape and no polling.
+- One `clear_queue` call clears both steering and follow-up (RPC semantics); no per-item removal.
+- Restored text is joined with newlines in the composer, focused and resized; it is not sent automatically.
+- The chips live between the transcript and the composer, above the (moved) footer, and truncate long lines with an expand on tap.
+
+### Files
+
+`src/client/app.js`, `src/client/index.html`, `src/client/style.css`, `src/server.ts` (`clear_queue` frame), `src/hub.ts`, `src/wire.ts`, `test/fixtures/fake-pi.mjs` (emit `queue_update`), `test/`.
+
+### Tests
+
+- Fake Pi: emit `queue_update` with steering/follow-up texts; `clear_queue` returns them.
+- Pure: chip text/truncation helper if extracted.
+- Integration: a busy session queues a steer, receives the queue frame, clears it, and gets the texts back.
+
+### Notes
+
+- `queue_update` carries the complete current queue on every change; replace state rather than appending.
+- Do not add follow-up sending in this slice (plain text keeps steering while busy).
+
+### Verified (2026-11-21)
+
+- `npm run check` green (144 tests): pure replace/count/restore tests in `test/queue.test.js`, plus an integration test where a steer emits `queue_update`, `clear_queue` returns both lists, and a fresh empty `queue_update` clears the chips.
+- Chips render steering before follow-up with a `N queued` label; long text truncates and expands on tap; the only action is the X, which restores texts into the composer (joined with newlines, appended to a draft, focused, not sent) with a toast.
+- The optimistic user echo is dropped when `queue_update` reports queued text, so the chips are the single source of pending state.
+- Screenshot gap: no Chromium on this box, so `tools/shot.mjs` at 390/1280 (chips visible + cleared) is still the owner's step.
+```
+
+### fit/closed/08-session-commands.md
+```
+---
+grilled: true
+leg: tui-parity-1
+commit: "44a3ab61014da3f4936b31537b4012bc32977cd8"
+---
+
+Bring Pi's branch and session commands to the web UI: a read-only tree sheet with a tap-to-fork action on user messages, plus `/fork`, `/clone`, `/import` and `/export`. These commands change the child's session id, so the hub must re-key the live session and the client must follow it.
+
+### Why now
+
+Slice 6 of the TUI-parity leg and the last one needed to develop pixip inside pixip: exploring alternatives and keeping the good branch is the core TUI workflow that AoE users expect. Re-scoped from `backlog/70-session-commands` to the decisions below.
+
+### Done when
+
+- `/tree` opens a sheet built from RPC `get_tree`: indented branch points (user messages first), labels when present, the current branch marked, and per-entry actions "fork from here" and "copy prompt".
+- Tapping a user message in the transcript offers the same fork action (a small affordance on the block, not a full hover menu).
+- `/fork <entryId>` and the tap action call RPC `fork`; `/clone` calls `clone`; `/import <path>` imports a JSONL into `<data-dir>/sessions/` (copy, preserving the header id and cwd), indexes it and opens it; `/export` calls `export_html` (and offers the JSONL) and the hub serves a download over a new HTTP route.
+- After fork/clone/switch, the hub re-reads `get_state`, re-keys the live map, updates the index `piIds`/`piId`, sends `opened` with the new session and a fresh snapshot; the client follows the id without reconnecting (same path as index-only reattach).
+- In-session leaf navigation (the TUI `/tree` move) is documented as **TUI-only**: RPC exposes `get_tree` read-only and no navigate command.
+- `npm run check` green; `docs/parity.md` marks /tree, /fork, /clone, /import and /export (with the leaf-navigation caveat).
+
+### Decisions (grilled 2026-11-21)
+
+- Tap a user message to fork, plus the tree sheet; no in-place leaf switching (not exposed by RPC).
+- Re-key + `opened` + refresh after fork/clone/switch; reuse the re-key helper introduced by `05-builtin-commands` (`/new`).
+- `/import` copies into the data dir rather than pointing Pi at a foreign file, so the isolation boundary and the session index stay intact; the source file is never modified.
+- `/export` writes the HTML under the data dir and serves it as an attachment; JSONL export is a straight download of the session file.
+- Fork/clone cancellation (`cancelled: true`) is a toast, not an error.
+
+### Files
+
+`src/client/app.js`, `src/client/index.html`, `src/client/style.css`, `src/server.ts` (tree/fork/clone/import/export frames + export route), `src/hub.ts` (`tree()`, `fork()`, `clone()`, `import()`, `export()`, re-key), `src/wire.ts`, `bin/pixip.ts` if a CLI flag is needed, `test/fixtures/fake-pi.mjs`, `test/`.
+
+### Tests
+
+- Fake Pi: `get_tree` fixture, `fork`/`clone` changing the id on the next `get_state`, `export_html` writing a temp file, `switch_session`.
+- Integration: fork re-keys and emits `opened` + a fresh snapshot; export route returns the file with an attachment header; import copies a JSONL into the data dir and lists it.
+- Pure: tree flattening/labeling for the sheet; export filename helper.
+
+### Notes
+
+- `get_tree` returns an array of roots with nested children; orphaned entries can appear as roots — render them, do not drop them.
+- Fork returns only `{text, cancelled}`; the new id comes from a follow-up `get_state`, so the re-key sequence must be tested against a moving id.
+- Screenshots (390/1280) are the owner's step; note the gap when closing.
+
+### Queue renumbering (2026-11-21)
+
+`05-builtin-commands` is now `02-builtin-commands` (the re-key helper this ticket reuses). The next ticket after the 3-ticket batch is `03-add-font-size-control`; this slice stays at priority 08.
+
+### Verified (2026-11-21)
+
+- `npm run check` green (156 tests). Pure: `flattenTree` (nesting, labels, current branch, orphan roots) and `exportFileName` (slug + short id, no path separators).
+- Integration: `/tree` passes `get_tree` through; `/fork` re-keys to the new id, appends index `piIds` and answers with `{text, cancelled}`; `/clone` follows the same path; `/import` copies the JSONL into `<data-dir>/sessions/` byte-for-byte (header id/cwd intact, source unchanged), indexes it and switches; `/export` writes under `<data-dir>/exports/` and both HTTP downloads return `Content-Disposition: attachment` (HTML + unmodified JSONL).
+- The `/new` re-key body is now one private `rekeyFromState()` used by new/fork/clone/import; every re-key sends `opened` with `rekey`, and the client resnapshots without reconnecting.
+- Leaf navigation is documented as TUI-only in `docs/parity.md`; the catalog now treats tree/fork/clone/import/export as built-ins.
+- Screenshot gap: no Chromium on this box, so `tools/shot.mjs` at 390/1280 (tree sheet, fork affordance, export sheet) is still the owner's step.
+```
+
+### fit/closed/15-session-model-thinking.md
+```
+Each chat needs its own model and thinking level, switchable from the web UI instead of the terminal.
+
+### Implementation
+
+- Hub passes through `get_available_models`, `set_model`, `get_available_thinking_levels`, `set_thinking_level` over RPC.
+- Client: tapping the footer opens a session sheet, then a model list (current marked `✓`) or a thinking-level list.
+- Footer updates after a switch; `thinking_level_changed` events keep it in sync when changed elsewhere.
+
+### Verified
+
+Headless Chromium: `deepseek-v4.1-flash • low` → `claude-haiku-5-5 • low` after picking a model, and `high` → `low` after picking a level, no console errors.
+```
+
+### fit/closed/16-tui-status-line.md
+```
+The web view needs the TUI footer line, not a custom summary bar.
+
+### Format (from pi's own footer component)
+
+- line 1: `~/cwd (branch) • session name`, dim;
+- line 2 left: `↑in ↓out R<cacheRead> W<cacheWrite> $cost` then `percent%/window (auto)`, colored by threshold (>70 warning, >90 error);
+- line 2 right: `model • thinkingLevel` (or `model • thinking off`), provider prefix only when it fits.
+
+### Implementation
+
+Hub sends raw numbers (`get_session_stats` + `get_state`, git branch via `git -C cwd branch --show-current`); the client formats using the same rules, so the hub stays thin. Formatting is unit tested in `test/footer.test.js`.
+```
+

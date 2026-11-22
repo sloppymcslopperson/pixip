@@ -1,0 +1,1 @@
+show the session namer the result of any slash commands that the user uses as first prompt. Currently only the prompt text is shown, which doesn't work well for stuff like /fit work (which causes relevant stuff to be shown to the agent)
