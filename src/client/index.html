@@ -40,10 +40,20 @@
 
 		<div id="dock">
 			<div id="menu" hidden role="listbox" aria-label="Commands"></div>
+			<div id="attach-menu" hidden role="menu" aria-label="Add attachment">
+				<button type="button" role="menuitem" data-attach="image">Photo or camera</button>
+				<button type="button" role="menuitem" data-attach="file">Choose file</button>
+			</div>
 			<div id="queue" hidden aria-live="polite"></div>
 			<form id="composer" hidden>
-				<textarea id="input" rows="1" placeholder="message pi…" autocomplete="off" autocapitalize="sentences" spellcheck="false"></textarea>
-				<button id="send" type="submit" aria-label="Send">↑</button>
+				<div id="attachment" hidden></div>
+				<div id="compose-row">
+					<button id="attach" type="button" aria-label="Add attachment" aria-haspopup="menu" aria-expanded="false" aria-controls="attach-menu">+</button>
+					<textarea id="input" rows="1" placeholder="message pi…" autocomplete="off" autocapitalize="sentences" spellcheck="false"></textarea>
+					<button id="send" type="submit" aria-label="Send">↑</button>
+				</div>
+				<input id="image-input" type="file" accept="image/*" hidden />
+				<input id="file-input" type="file" hidden />
 			</form>
 			<footer id="footer" hidden>
 				<div class="addon-widgets above" hidden></div>

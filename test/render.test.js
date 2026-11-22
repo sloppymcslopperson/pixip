@@ -44,6 +44,33 @@ describe("rendering", () => {
 		assert.equal(textOf([{ type: "text", text: "a" }, { type: "thinking", thinking: "b" }]), "ab");
 	});
 
+	it("renders recorded user images as thumbnails without losing text or the fork action", () => {
+		const html = renderMessage(
+			{
+				role: "user",
+				content: [
+					{ type: "text", text: "look at this" },
+					{ type: "image", data: "aGVsbG8=", mimeType: "image/png" },
+				],
+			},
+			"entry-1",
+		);
+		assert.match(html, /look at this/);
+		assert.match(html, /class="msg-images"/);
+		assert.match(html, /src="data:image\/png;base64,aGVsbG8="/);
+		assert.match(html, /data-fork="entry-1"/);
+	});
+
+	it("renders an image-only user message and falls back to [image] when empty", () => {
+		const imageOnly = renderMessage({
+			role: "user",
+			content: [{ type: "image", data: "aGVsbG8=", mimeType: "image/jpeg" }],
+		});
+		assert.match(imageOnly, /class="msg-images"/);
+		assert.doesNotMatch(imageOnly, /\[image\]/);
+		assert.match(renderMessage({ role: "user", content: [] }), /\[image\]/);
+	});
+
 	it("marks error tool blocks without losing the call id", () => {
 		const html = toolBlock("bash", "false", "boom", " error", 12, "call_1");
 		assert.match(html, /class="tool error"/);

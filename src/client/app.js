@@ -6,6 +6,7 @@ import {
 	renderAssistant,
 	renderAssistantBody,
 	renderEntry,
+	renderUserBody,
 	pendingErrorHtml,
 	pendingSessionHtml,
 	summarizeArgs,
@@ -14,6 +15,7 @@ import {
 	toolCallsOf,
 } from "./render.js";
 import { classifyInput, commandQuery, filterCommands, isAllowed, menuCatalog, menuInsertText } from "./commands.js";
+import { MAX_IMAGE_BYTES, MAX_IMAGE_EDGE, MAX_IMAGE_SOURCE_BYTES, MAX_UPLOAD_BYTES, attachmentPrompt, looksLikeImage, sizeLabel } from "./attachments.js";
 import { crumbTrail, filterDirEntries, initialDirectory, parentDirectory } from "./directoryPicker.js";
 import { queueCount, queueFromEvent, queueTexts, restoreText } from "./queue.js";
 import { flattenTree } from "./tree.js";
@@ -75,6 +77,11 @@ const ui = {
 	menu: $("#menu"),
 	queue: $("#queue"),
 	composer: $("#composer"),
+	attachment: $("#attachment"),
+	attach: $("#attach"),
+	attachMenu: $("#attach-menu"),
+	imageInput: $("#image-input"),
+	fileInput: $("#file-input"),
 	input: $("#input"),
 	send: $("#send"),
 	footer: $("#footer"),
@@ -94,6 +101,8 @@ const state = {
 	stick: true,
 	streaming: null, // { section, text }
 	pendingUser: null,
+	pendingAttachment: null, // one image or file, never both: { kind, name, size, ... }
+	attachmentSeq: 0, // invalidates an in-flight image prepare/upload after replace/clear
 	restarting: false, // old daemon announced a restart; socket is about to close
 	restartWasBusy: false, // a turn was in flight when the restart was announced
 	restartNoticePending: false, // paint the interruption notice after the reconnect snapshot
@@ -209,6 +218,7 @@ async function showList() {
 	state.tools.clear();
 	state.streaming = null;
 	state.pendingUser = null;
+	clearPendingAttachment();
 	state.restarting = false;
 	state.restartWasBusy = false;
 	state.restartNoticePending = false;
@@ -883,6 +893,7 @@ function showPendingSession() {
 	state.tools.clear();
 	state.streaming = null;
 	state.pendingUser = null;
+	clearPendingAttachment();
 	state.entries = [];
 	state.more = false;
 	state.loadingEarlier = false;
@@ -910,6 +921,7 @@ function showPendingSession() {
 	ui.dot.className = "dot busy";
 	ui.input.value = "";
 	ui.input.disabled = true;
+	ui.attach.disabled = true;
 	ui.send.disabled = true;
 	document.title = "new session · pixip";
 }
@@ -929,6 +941,7 @@ function failPendingSession(message) {
 	ui.sub.textContent = "failed";
 	ui.dot.className = "dot error";
 	ui.input.disabled = true;
+	ui.attach.disabled = true;
 	ui.send.disabled = true;
 	document.title = "new session · pixip";
 }
@@ -944,6 +957,7 @@ function openSession(id) {
 	state.tools.clear();
 	state.streaming = null;
 	state.pendingUser = null;
+	clearPendingAttachment();
 	state.policy = null;
 	state.dynamicCommands = [];
 	state.queue = { steering: [], followUp: [] };
@@ -1122,6 +1136,7 @@ function handleFrame(frame) {
 					state.tools.clear();
 					state.streaming = null;
 					state.pendingUser = null;
+					clearPendingAttachment();
 					state.bashRunning = false;
 					state.bash.clear();
 					ui.log.textContent = "";
@@ -1218,7 +1233,8 @@ function applyInfo() {
 	const starting = !restarting && info.state === "starting";
 	if (stopped || starting) hideThinkingIndicator();
 	ui.input.disabled = restarting || stopped || starting;
-	ui.send.disabled = restarting || stopped || starting;
+	ui.attach.disabled = restarting || stopped || starting;
+	refreshSendState();
 	// The provisional transcript is already readable; this only says the child
 	// is still booting and live events have not started yet.
 	let startingHint = ui.log.querySelector(".starting");
@@ -1470,7 +1486,7 @@ function handleEvent(event) {
 			if (message.role === "user") {
 				state.pendingUser?.remove();
 				state.pendingUser = null;
-				appendBlock("user", `<div class="who">you</div><div class="text">${ansiToHtml(textOf(message.content))}</div>`, true);
+				appendBlock("user", `<div class="who">you</div>${renderUserBody(message)}`, true);
 				if (state.info?.state === "busy") showThinkingIndicator();
 			} else if (message.role === "assistant") {
 				// Lazy: the block is created by the first text delta, so a turn that
@@ -2025,15 +2041,275 @@ const builtinHandlers = {
 	},
 };
 
+// --------------------------------------------------------------- attachments
+
+function setAttachMenu(open) {
+	ui.attachMenu.hidden = !open;
+	ui.attach.setAttribute("aria-expanded", String(open));
+}
+
+function refreshSendState() {
+	ui.send.disabled = !canSend();
+}
+
+function canSend() {
+	const info = state.info;
+	if (!info) return false;
+	if (state.restarting || info.state === "stopped" || info.state === "error" || info.state === "starting") return false;
+	const attachment = state.pendingAttachment;
+	if (attachment) {
+		if (attachment.kind === "image") return true;
+		if (attachment.kind === "file") return !attachment.uploading && Boolean(attachment.path);
+		return false;
+	}
+	return ui.input.value.trim().length > 0;
+}
+
+function clearPendingAttachment() {
+	state.attachmentSeq += 1;
+	state.pendingAttachment = null;
+	renderAttachment();
+}
+
+function removeAttachment() {
+	clearPendingAttachment();
+}
+
+function renderAttachment() {
+	const attachment = state.pendingAttachment;
+	ui.attachment.textContent = "";
+	if (!attachment) {
+		ui.attachment.hidden = true;
+		refreshSendState();
+		return;
+	}
+	ui.attachment.hidden = false;
+	const card = document.createElement("div");
+	card.className = "attachment-card";
+	if (attachment.kind === "image") {
+		const img = document.createElement("img");
+		img.src = attachment.dataUrl;
+		img.alt = "";
+		card.append(img);
+	} else {
+		const icon = document.createElement("div");
+		icon.className = "attachment-icon";
+		icon.textContent = attachment.kind === "file" ? "file" : attachment.kind === "error" ? "!" : "…";
+		card.append(icon);
+	}
+	const meta = document.createElement("div");
+	meta.className = "attachment-meta";
+	const name = document.createElement("span");
+	name.className = "attachment-name";
+	name.textContent = attachment.name;
+	const sub = document.createElement("span");
+	sub.className = "attachment-sub";
+	if (attachment.kind === "image") sub.textContent = `${sizeLabel(attachment.size)} · ${attachment.width}×${attachment.height}`;
+	else if (attachment.kind === "file") sub.textContent = `${sizeLabel(attachment.size)} · ${attachment.uploading ? "uploading…" : "ready"}`;
+	else if (attachment.kind === "busy") sub.textContent = attachment.label;
+	else {
+		card.classList.add("error");
+		sub.textContent = attachment.error;
+	}
+	meta.append(name, sub);
+	const remove = document.createElement("button");
+	remove.type = "button";
+	remove.className = "attachment-remove";
+	remove.setAttribute("aria-label", "Remove attachment");
+	remove.textContent = "×";
+	remove.addEventListener("click", removeAttachment);
+	card.append(meta, remove);
+	ui.attachment.append(card);
+	refreshSendState();
+}
+
+async function chooseAttachment(file, imageSource) {
+	const seq = ++state.attachmentSeq;
+	if (imageSource || looksLikeImage(file)) {
+		state.pendingAttachment = { kind: "busy", name: file.name || "image", size: file.size, label: "preparing image…" };
+		renderAttachment();
+		try {
+			const prepared = await prepareImage(file);
+			if (seq !== state.attachmentSeq) return;
+			state.pendingAttachment = prepared;
+			renderAttachment();
+		} catch (error) {
+			if (seq !== state.attachmentSeq) return;
+			if (!imageSource) {
+				// The generic picker may choose an image the browser cannot decode;
+				// hand it to the file path instead of rejecting it outright.
+				await uploadAttachment(file, seq);
+				return;
+			}
+			state.pendingAttachment = { kind: "error", name: file.name || "image", error: error.message };
+			renderAttachment();
+		}
+		return;
+	}
+	await uploadAttachment(file, seq);
+}
+
+function loadImageFile(file) {
+	return new Promise((resolve, reject) => {
+		const url = URL.createObjectURL(file);
+		const image = new Image();
+		image.onload = () => resolve(image);
+		image.onerror = () => {
+			URL.revokeObjectURL(url);
+			reject(new Error("could not decode image"));
+		};
+		image.src = url;
+	});
+}
+
+function canvasToBlob(canvas, type, quality) {
+	return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+}
+
+async function blobToBase64(blob) {
+	const bytes = new Uint8Array(await blob.arrayBuffer());
+	let binary = "";
+	for (let index = 0; index < bytes.length; index += 0x8000) {
+		binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+	}
+	return btoa(binary);
+}
+
+async function prepareImage(file) {
+	if (file.size > MAX_IMAGE_SOURCE_BYTES) {
+		throw new Error(`image is ${sizeLabel(file.size)}; max 20 MB`);
+	}
+	const image = await loadImageFile(file);
+	try {
+		const sourceWidth = image.naturalWidth || image.width;
+		const sourceHeight = image.naturalHeight || image.height;
+		if (!sourceWidth || !sourceHeight) throw new Error("image has no dimensions");
+		const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(sourceWidth, sourceHeight));
+		const width = Math.max(1, Math.round(sourceWidth * scale));
+		const height = Math.max(1, Math.round(sourceHeight * scale));
+		const canvas = document.createElement("canvas");
+		canvas.width = width;
+		canvas.height = height;
+		const context = canvas.getContext("2d");
+		if (!context) throw new Error("canvas is unavailable");
+		context.fillStyle = "#ffffff";
+		context.fillRect(0, 0, width, height);
+		context.drawImage(image, 0, 0, width, height);
+		const blob = (await canvasToBlob(canvas, "image/jpeg", 0.85)) ?? (await canvasToBlob(canvas, "image/png"));
+		if (!blob) throw new Error("could not encode image");
+		if (blob.size > MAX_IMAGE_BYTES) throw new Error(`encoded image is ${sizeLabel(blob.size)}; max 8 MB`);
+		const data = await blobToBase64(blob);
+		const mimeType = blob.type || "image/jpeg";
+		return {
+			kind: "image",
+			name: file.name || "image",
+			mimeType,
+			data,
+			dataUrl: `data:${mimeType};base64,${data}`,
+			size: blob.size,
+			width,
+			height,
+		};
+	} finally {
+		if (image.src.startsWith("blob:")) URL.revokeObjectURL(image.src);
+	}
+}
+
+async function uploadAttachment(file, seq) {
+	if (file.size > MAX_UPLOAD_BYTES) {
+		state.pendingAttachment = { kind: "error", name: file.name || "file", error: `file is ${sizeLabel(file.size)}; max 100 MB` };
+		renderAttachment();
+		return;
+	}
+	if (!state.sessionId) {
+		state.pendingAttachment = { kind: "error", name: file.name || "file", error: "no active session" };
+		renderAttachment();
+		return;
+	}
+	state.pendingAttachment = { kind: "file", name: file.name || "file", size: file.size, uploading: true };
+	renderAttachment();
+	try {
+		const url = `/api/sessions/${encodeURIComponent(state.sessionId)}/uploads?name=${encodeURIComponent(file.name || "file")}`;
+		const response = await fetch(url, {
+			method: "POST",
+			headers: { "content-type": file.type || "application/octet-stream" },
+			body: file,
+		});
+		const data = await response.json().catch(() => ({}));
+		if (!response.ok) throw new Error(data.error || `upload failed (${response.status})`);
+		if (seq !== state.attachmentSeq) return;
+		state.pendingAttachment = {
+			kind: "file",
+			name: data.name ?? file.name ?? "file",
+			size: Number(data.size) || file.size,
+			path: String(data.path ?? ""),
+			uploading: false,
+		};
+		renderAttachment();
+	} catch (error) {
+		if (seq !== state.attachmentSeq) return;
+		state.pendingAttachment = { kind: "error", name: file.name || "file", error: error.message };
+		renderAttachment();
+	}
+}
+
+ui.attach.addEventListener("click", (event) => {
+	event.stopPropagation();
+	setAttachMenu(ui.attachMenu.hidden);
+});
+ui.attachMenu.addEventListener("click", (event) => {
+	const button = event.target.closest("[data-attach]");
+	if (!button) return;
+	setAttachMenu(false);
+	if (button.dataset.attach === "image") ui.imageInput.click();
+	else if (button.dataset.attach === "file") ui.fileInput.click();
+});
+ui.imageInput.addEventListener("change", () => {
+	const file = ui.imageInput.files?.[0];
+	ui.imageInput.value = "";
+	if (file) void chooseAttachment(file, true);
+});
+ui.fileInput.addEventListener("change", () => {
+	const file = ui.fileInput.files?.[0];
+	ui.fileInput.value = "";
+	if (file) void chooseAttachment(file, false);
+});
+ui.composer.addEventListener("paste", (event) => {
+	const file = event.clipboardData?.files?.[0];
+	if (!file) return;
+	event.preventDefault();
+	void chooseAttachment(file, looksLikeImage(file));
+});
+
 function clearInput() {
 	ui.input.value = "";
 	closeMenu();
 	resize();
+	refreshSendState();
+}
+
+function attachmentBlocksCommand(label) {
+	if (!state.pendingAttachment) return false;
+	notice(`remove or send the attachment before ${label}`);
+	return true;
 }
 
 function submit() {
 	const text = ui.input.value.trim();
-	if (!text) return;
+	const attachment = state.pendingAttachment;
+	if (attachment?.kind === "busy" || (attachment?.kind === "file" && attachment.uploading)) {
+		toast("attachment is still uploading");
+		return;
+	}
+	if (attachment?.kind === "error") {
+		toast("remove the failed attachment first");
+		return;
+	}
+	if (!text && !attachment) return;
+	if (!text) {
+		submitText("", attachment);
+		return;
+	}
 	const action = classifyInput(text);
 	switch (action.kind) {
 		case "empty":
@@ -2042,9 +2318,11 @@ function submit() {
 			// `/` opens the suggestion menu in 06-command-menu; keep the text until then.
 			return;
 		case "bash":
+			if (attachmentBlocksCommand("running a bash command")) return;
 			submitBash(action);
 			return;
 		case "tui":
+			if (attachmentBlocksCommand("using a TUI command")) return;
 			if (!allowed(action)) return;
 			notice(
 				`/${action.name} is a Pi TUI-only command${action.command?.ticket ? ` (planned in ${action.command.ticket})` : ""} — use a terminal`,
@@ -2052,6 +2330,7 @@ function submit() {
 			clearInput();
 			return;
 		case "builtin": {
+			if (attachmentBlocksCommand("using a builtin command")) return;
 			if (!allowed(action)) return;
 			const handler = builtinHandlers[action.name];
 			if (!handler) {
@@ -2068,10 +2347,10 @@ function submit() {
 			// verbatim. While busy that must be `prompt` + steer: RPC `steer` would
 			// queue the text instead of executing the extension command.
 			if (!allowed(action)) return;
-			submitSlash(action.text);
+			submitSlash(action.text, attachment);
 			return;
 		default:
-			submitText(action.text);
+			submitText(action.text, attachment);
 	}
 }
 
@@ -2157,19 +2436,32 @@ function copySheet(text) {
 	target.append(heading, body, actions);
 }
 
-function submitSlash(text) {
+function submitSlash(text, attachment) {
 	const busy = state.info?.state === "busy";
-	send({ t: "prompt", text, ...(busy ? { streamingBehavior: "steer" } : {}) });
+	const images = attachment?.kind === "image"
+		? [{ type: "image", data: attachment.data, mimeType: attachment.mimeType }]
+		: undefined;
+	const outgoing = attachment?.kind === "file" && attachment.path ? attachmentPrompt(text, attachment.path) : text;
+	send({ t: "prompt", text: outgoing, ...(busy ? { streamingBehavior: "steer" } : {}), ...(images ? { images } : {}) });
 	// No optimistic user echo: an extension command may consume the prompt, and
 	// Pi's own message_start paints templates/skills when they produce a message.
 	clearInput();
+	clearPendingAttachment();
 }
 
-function submitText(text) {
+function submitText(text, attachment) {
 	const busy = state.info?.state === "busy";
-	send({ t: busy ? "steer" : "prompt", text });
-	state.pendingUser = appendBlock("user", `<div class="who">you</div><div class="text">${escapeHtml(text)}</div>`, true);
+	const images = attachment?.kind === "image"
+		? [{ type: "image", data: attachment.data, mimeType: attachment.mimeType }]
+		: undefined;
+	const outgoing = attachment?.kind === "file" && attachment.path ? attachmentPrompt(text, attachment.path) : text;
+	send({ t: busy ? "steer" : "prompt", text: outgoing, ...(images ? { images } : {}) });
+	const content = [];
+	if (outgoing) content.push({ type: "text", text: outgoing });
+	if (images) content.push(...images);
+	state.pendingUser = appendBlock("user", `<div class="who">you</div>${renderUserBody({ content })}`, true);
 	clearInput();
+	clearPendingAttachment();
 	scrollToEnd(true);
 }
 
@@ -2269,6 +2561,7 @@ ui.input.addEventListener("keydown", (event) => {
 ui.input.addEventListener("input", () => {
 	resize();
 	renderMenu();
+	refreshSendState();
 });
 ui.input.addEventListener("focus", renderMenu);
 ui.input.addEventListener("blur", () => closeMenu());
@@ -2596,6 +2889,13 @@ ui.more.addEventListener("click", (event) => {
 ui.barMenu.addEventListener("click", (event) => event.stopPropagation());
 document.addEventListener("click", () => {
 	if (!ui.barMenu.hidden) setBarMenu(false);
+	if (!ui.attachMenu.hidden) setAttachMenu(false);
+});
+window.addEventListener("keydown", (event) => {
+	if (event.key === "Escape" && !ui.attachMenu.hidden) {
+		event.preventDefault();
+		setAttachMenu(false);
+	}
 });
 
 window.addEventListener("hashchange", route);
@@ -2682,6 +2982,11 @@ ui.jump.addEventListener("click", () => {
 /** The small "fork" affordance on user blocks (08) is delegated: the transcript
  *  is repainted in chunks, so per-button listeners would be lost. */
 ui.log.addEventListener("click", (event) => {
+	const image = event.target.closest(".msg-image img");
+	if (image) {
+		openImageSheet(image.src);
+		return;
+	}
 	const button = event.target.closest("[data-fork]");
 	if (!button) return;
 	const entryId = button.dataset.fork;
@@ -2749,6 +3054,23 @@ function textSheet(title, text) {
 	close.addEventListener("click", closeSheet);
 	actions.append(close);
 	target.append(heading, body, actions);
+}
+
+function openImageSheet(src) {
+	const target = ui.sheet;
+	target.hidden = false;
+	target.textContent = "";
+	const image = document.createElement("img");
+	image.className = "sheet-image";
+	image.src = src;
+	image.alt = "attached image";
+	const actions = document.createElement("div");
+	actions.className = "sheet-actions";
+	const close = document.createElement("button");
+	close.textContent = "close";
+	close.addEventListener("click", closeSheet);
+	actions.append(close);
+	target.append(sheetHeader("image"), image, actions);
 }
 
 route();

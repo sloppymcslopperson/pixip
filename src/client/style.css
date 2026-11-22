@@ -170,6 +170,19 @@ main { flex: 1; min-height: 0; }
 .block.user { border-left-color: var(--user); }
 .block.user .who { display: flex; align-items: baseline; gap: 8px; }
 .block.user .who { color: var(--user); }
+/* Recorded user-message images: tap to enlarge. */
+.msg-images { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
+.msg-image {
+	padding: 0;
+	border: 1px solid var(--line);
+	border-radius: 10px;
+	background: var(--bg-soft);
+	overflow: hidden;
+	max-width: min(100%, 240px);
+}
+.msg-image img { display: block; width: 100%; max-height: 220px; object-fit: cover; }
+.msg-image:hover { border-color: var(--accent); }
+.sheet-image { display: block; max-width: 100%; max-height: 70dvh; object-fit: contain; margin: 0 auto; border-radius: 10px; }
 /* Small fork affordance on snapshot user blocks (08); live-painted blocks gain
    it on the next snapshot, when their entry id is known. */
 .fork-action {
@@ -655,17 +668,61 @@ details.tool.empty > summary { color: var(--fg-faint); }
 }
 
 /* ---- composer ---- */
+#attach-menu {
+	width: 100%;
+	max-width: 104ch;
+	margin-inline: auto;
+	padding: 4px var(--pad) 0;
+}
+#attach-menu[hidden] { display: none; }
+#attach-menu button {
+	width: 100%;
+	min-height: 42px;
+	text-align: left;
+	background: var(--bg-raised);
+	border: 1px solid var(--line);
+	border-bottom: 0;
+	padding: 9px var(--pad);
+	color: var(--fg);
+}
+#attach-menu button:first-child { border-radius: 10px 10px 0 0; }
+#attach-menu button:last-child { border-bottom: 1px solid var(--line); border-radius: 0 0 10px 10px; }
+#attach-menu button:hover { color: var(--accent); border-color: var(--accent); }
 #composer {
 	width: 100%;
 	max-width: 104ch;
 	margin-inline: auto;
 	display: flex;
-	gap: 8px;
-	align-items: flex-end;
+	flex-direction: column;
+	gap: 6px;
 	padding: 8px var(--pad);
 }
+#compose-row {
+	width: 100%;
+	display: flex;
+	gap: 8px;
+	align-items: flex-end;
+}
+#attachment {
+	width: 100%;
+	min-width: 0;
+}
+#attachment[hidden] { display: none; }
+#attach {
+	width: 40px;
+	height: 40px;
+	flex: none;
+	border-radius: 12px;
+	border: 1px solid var(--line);
+	background: var(--bg-soft);
+	color: var(--fg-dim);
+	font-size: 22px;
+	line-height: 1;
+}
+#attach:hover { color: var(--accent); border-color: var(--accent); }
 #input {
 	flex: 1;
+	min-width: 0;
 	resize: none;
 	max-height: 40dvh;
 	min-height: 40px;
@@ -690,6 +747,55 @@ details.tool.empty > summary { color: var(--fg-faint); }
 	font-weight: 700;
 }
 #send:disabled { opacity: 0.4; }
+
+/* Pending attachment: one thumbnail or file chip, always removable. */
+.attachment-card {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	max-width: 100%;
+	background: var(--bg-soft);
+	border: 1px solid var(--line);
+	border-radius: 12px;
+	padding: 6px 8px;
+}
+.attachment-card.error { border-color: color-mix(in srgb, var(--err) 55%, var(--line)); }
+.attachment-card img {
+	width: 44px;
+	height: 44px;
+	object-fit: cover;
+	border-radius: 8px;
+	flex: none;
+	background: var(--bg-raised);
+}
+.attachment-icon {
+	width: 44px;
+	height: 44px;
+	border-radius: 8px;
+	background: var(--bg-raised);
+	color: var(--fg-faint);
+	display: grid;
+	place-items: center;
+	font-size: 10px;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	flex: none;
+}
+.attachment-meta { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.attachment-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.attachment-sub { color: var(--fg-faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-card.error .attachment-sub { color: var(--err); }
+.attachment-remove {
+	flex: none;
+	width: 32px;
+	height: 32px;
+	border: 0;
+	border-radius: 8px;
+	background: none;
+	color: var(--fg-dim);
+	font-size: 20px;
+}
+.attachment-remove:hover { color: var(--err); background: var(--bg-raised); }
 
 /* ---- sheet / toast ---- */
 #sheet {

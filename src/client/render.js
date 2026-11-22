@@ -173,16 +173,34 @@ export function toolCallsOf(content) {
 	return content.filter((block) => block && block.type === "toolCall");
 }
 
+/** Inside a user block: text plus any recorded image thumbnails. */
+export function renderUserBody(message) {
+	const content = message?.content;
+	const text = escapeHtml(textOf(content));
+	const images = Array.isArray(content)
+		? content.filter(
+				(block) => block && block.type === "image" && typeof block.data === "string" && typeof block.mimeType === "string",
+			)
+		: [];
+	const thumbs = images
+		.map(
+			(block) =>
+				`<button type="button" class="msg-image" aria-label="Open attached image"><img src="data:${escapeHtml(block.mimeType)};base64,${block.data}" alt="attached image" loading="lazy" /></button>`,
+		)
+		.join("");
+	const textHtml = text ? `<div class="text">${text}</div>` : images.length === 0 ? '<div class="text">[image]</div>' : "";
+	return `${textHtml}${thumbs ? `<div class="msg-images">${thumbs}</div>` : ""}`;
+}
+
 export function renderMessage(message, entryId) {
 	if (!message || typeof message !== "object") return "";
 	if (message.role === "user") {
-		const text = escapeHtml(textOf(message.content) || "[image]");
 		// Snapshot entries carry their id; live `message_start` records do not, so
 		// the affordance appears once the message is part of the loaded window.
 		const fork = typeof entryId === "string" && entryId
 			? ` <button type="button" class="fork-action" data-fork="${escapeHtml(entryId)}" aria-label="Fork from this message" title="Fork from this message">fork</button>`
 			: "";
-		return `<section class="block user"><div class="who">you${fork}</div><div class="text">${text}</div></section>`;
+		return `<section class="block user"><div class="who">you${fork}</div>${renderUserBody(message)}</section>`;
 	}
 	if (message.role === "assistant") {
 		return renderAssistant(message.content ?? []);
