@@ -1,6 +1,7 @@
 ---
 project: pixip
 grilled: true
+commit: f99fd18b9468243c6f8e1a75fc6d77fd8a7de3fd
 ---
 
 Extract the shared mutable state and DOM element map out of `app.js` into kernel modules with state slices and selectors, preserving behaviour and layout. This is the first step of the post-A2UI client normalization.
