@@ -344,9 +344,10 @@ model context are untouched, and the call runs beside the prompt rather than on
 its path.
 
 Labels are normalized to sentence case, 3-5 words and 40 characters. The model
-is `--title-model` / `PIXIP_TITLE_MODEL`, defaulting to the cheap
-`deepseek-v4.1-flash` when available, then the session's own model. A failed,
-slow or empty call falls back to the first meaningful words of the prompt.
+is the session's current model; `--title-model` / `PIXIP_TITLE_MODEL` overrides
+it. A failed, slow or empty call falls back to the first meaningful words of the
+prompt. A configured override that no longer resolves falls back to the session
+model.
 
 `sessions.json` records `nameSource: "auto" | "manual"`. Any name already present
 at first prompt skips labeling, and a manual rename always wins; the automatic

@@ -13,7 +13,6 @@ import { frameError, frameEvent, frameFooter, frameModels, framePolicy, frameRes
 import type { BashResult, CommandPolicy, DynamicCommand, FooterData, ModelSummary, SessionInfo, SessionState } from "./wire.ts";
 
 const run = promisify(execFile);
-const DEFAULT_TITLE_MODEL = "deepseek-v4.1-flash";
 
 /**
  * The supervisor. One `pi --mode rpc` child per live session, nothing else.
@@ -53,7 +52,7 @@ interface HubOptions {
 	env?: Record<string, string | undefined>;
 	/** How long deleted sessions stay restorable in the trash. Default 60 s. */
 	trashGraceMs?: number;
-	/** Model for automatic session labels (`provider/id`); falls back to a cheap default. */
+	/** Model for automatic session labels (`provider/id`); defaults to the session's model. */
 	titleModel?: string;
 	/** One-shot title call timeout. Default 15 s. */
 	titleTimeoutMs?: number;
@@ -141,6 +140,8 @@ interface LiveSession {
 	assistantTs?: number;
 	/** The automatic title has already been attempted for this session. */
 	titleAttempted?: boolean;
+	/** First prompt whose title call lost the provider race; retried at settle. */
+	titlePending?: string;
 	nameSource?: NameSource;
 }
 
@@ -782,13 +783,23 @@ export class Hub {
 	 * then set the name only if the session is still unnamed. The real prompt has
 	 * already been dispatched; nothing here is on its critical path.
 	 */
-	private async autoLabel(live: LiveSession, prompt: string): Promise<void> {
+	private async autoLabel(live: LiveSession, prompt: string, retry = false): Promise<void> {
 		let title = "";
 		try {
 			const model = await this.resolveTitleModel(live);
 			title = normalizeTitle(await this.runTitlePi(live, prompt, model));
 		} catch (error) {
-			this.options.log(`auto title failed for ${live.info.id}: ${(error as Error).message}`);
+			const stderr = (error as { stderr?: unknown }).stderr;
+			const detail = typeof stderr === "string" ? stderr.trim().slice(0, 500) : "";
+			this.options.log(
+				`auto title failed for ${live.info.id}: ${(error as Error).message}${detail ? ` (${detail})` : ""}`,
+			);
+		}
+		// The title call shares the provider with the first turn. If it loses that
+		// race, wait for `agent_settled` and try once more before using local words.
+		if (!title && !retry && live.info.state === "busy" && !live.info.name) {
+			live.titlePending = prompt;
+			return;
 		}
 		if (!title) title = fallbackTitle(prompt);
 		if (!title || this.live.get(live.info.id) !== live || live.info.name) return;
@@ -799,24 +810,22 @@ export class Hub {
 		}
 	}
 
-	/** Configured model, then the cheap default, then the session's own model. */
+	/** Configured override, then the live session's own model. */
 	private async resolveTitleModel(live: LiveSession): Promise<string | undefined> {
 		const requested = this.options.titleModel?.trim();
 		let models: ModelSummary[] = [];
 		try {
 			models = (await this.models(live.info.id)).models;
 		} catch {
-			// A session with no model discovery still gets the configured/default id.
+			// A session with no model discovery still gets the configured id.
 		}
 		const resolve = (query: string): ModelSummary | undefined => {
 			const result = resolveModelArgument(models, query) as { model?: ModelSummary };
 			return result.model;
 		};
 		const sessionModel = models.find((model) => model.id === live.info.model) ?? (models.length === 1 ? models[0] : undefined);
-		const chosen = requested
-			? resolve(requested) ?? sessionModel
-			: resolve(DEFAULT_TITLE_MODEL) ?? sessionModel;
-		if (!chosen) return requested || undefined;
+		const chosen = requested ? resolve(requested) ?? sessionModel : sessionModel;
+		if (!chosen) return requested || live.info.model || undefined;
 		return chosen.provider ? `${chosen.provider}/${chosen.id}` : chosen.id;
 	}
 
@@ -1267,6 +1276,11 @@ export class Hub {
 				this.emitStatus(target);
 				this.scheduleFooter(target);
 				this.scheduleIdle(target);
+				if (target.titlePending) {
+					const prompt = target.titlePending;
+					target.titlePending = undefined;
+					if (!target.info.name) void this.autoLabel(target, prompt, true);
+				}
 				break;
 			case "session_info_changed":
 				if (target.info.name !== typed.name) target.nameSource = "manual";

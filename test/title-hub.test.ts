@@ -79,7 +79,7 @@ after(async () => {
 });
 
 describe("first-prompt session labels", () => {
-	it("labels a new session from a separate one-shot call using the cheap default", async () => {
+	it("labels a new session from a separate one-shot call using the session model", async () => {
 		const paths = await fixtureRoot();
 		const hub = hubFor(paths, { FAKE_PI_TITLE: "Refactor auth module" });
 		const created = await hub.create(paths.dir);
@@ -99,7 +99,25 @@ describe("first-prompt session labels", () => {
 		assert.ok(args.includes("--no-session"));
 		assert.ok(args.includes("--no-tools"));
 		assert.ok(args.includes("--model"));
-		assert.ok(args.includes("fake/deepseek-v4.1-flash"));
+		assert.ok(args.includes("fake/fake-model"));
+		await hub.shutdown();
+	});
+
+	it("retries the session model after the first turn when the title call loses the race", async () => {
+		const paths = await fixtureRoot();
+		const hub = hubFor(paths, {
+			FAKE_PI_TITLE: "Retried model title",
+			FAKE_PI_TITLE_FAIL_ONCE: join(paths.dir, "title-failed-once"),
+			FAKE_PI_ON_PROMPT: JSON.stringify([{ type: "agent_start" }]),
+			FAKE_PI_SETTLE: JSON.stringify([{ type: "agent_settled" }]),
+			FAKE_PI_SETTLE_DELAY_MS: "300",
+		});
+		const created = await hub.create(paths.dir);
+		await hub.prompt(created.id, "Please refactor the authentication module.");
+		await waitFor(async () => (await hub.list()).find((session) => session.id === created.id)?.name === "Retried model title");
+		const titles = (await events(paths)).filter((event) => event["type"] === "title");
+		assert.equal(titles.length, 2);
+		assert.deepEqual((titles[1]?.["args"] as string[]).slice(-3, -1), ["--model", "fake/fake-model"]);
 		await hub.shutdown();
 	});
 

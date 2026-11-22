@@ -31,6 +31,12 @@ if (argv.includes("--print") || argv.includes("-p")) {
 		logTitle();
 		process.exit(1);
 	}
+	const failOnce = env.FAKE_PI_TITLE_FAIL_ONCE;
+	if (failOnce && !existsSync(failOnce)) {
+		writeFileSync(failOnce, "1");
+		logTitle();
+		process.exit(1);
+	}
 	const titleDelay = Number(env.FAKE_PI_TITLE_DELAY_MS ?? 0);
 	if (titleDelay > 0) await new Promise((resolve) => setTimeout(resolve, titleDelay));
 	logTitle();
@@ -263,6 +269,12 @@ function handle(line) {
 			});
 			// Fire-and-forget records a test wants to arrive while a subscriber is live.
 			for (const event of JSON.parse(env.FAKE_PI_ON_PROMPT ?? "[]")) send(event);
+			const settle = JSON.parse(env.FAKE_PI_SETTLE ?? "[]");
+			if (settle.length) {
+				setTimeout(() => {
+					for (const event of settle) send(event);
+				}, Number(env.FAKE_PI_SETTLE_DELAY_MS ?? 100));
+			}
 			// `prompt` with a streaming behavior models a busy run: the text joins
 			// the pending queue (real Pi would also start a turn when idle, which the
 			// fixture cannot model; tests assert the command and the queue, not a run).
