@@ -1,6 +1,7 @@
 ---
 project: pixip
 grilled: true
+commit: "77b5eea76ee5fc5cc4b9d2c7a8c4a27a29ce999d"
 ---
 
 Add a per-question "I need more information" button to the A2UI questionnaire surface. Pressing it ends the tool with a non-error result that tells the model to explain the question and its options in plain text, then ask the questionnaire again.
@@ -37,3 +38,14 @@ The owner also likes ending a questionnaire with a free-text notes question; kee
 - The model explains the question and its options in chat, then **waits for the user's reply**; it re-asks only if still needed after that reply. No auto re-ask in the same turn.
 - Parity: A2UI panel button, a "More information" row in the TUI custom UI, and a "More information" option in the dialog fallback.
 - Action: `{name:"more_info", context:{questionId, answers:{"@path":"/answers"}}}`. The tool result is non-error, non-cancelled, names the question and its prompt, tells the model to explain in plain text and wait, and lists the other answers already collected.
+
+### Verification
+
+- `extensions/pixip-questionnaire/src/ask.ts` decodes `name: "more_info"`, resolves `context.questionId`, and returns only the other collected answers. Unknown question ids are `lost`, not a dismissal.
+- `surface.ts` puts an "I need more information" borderless button on a prompt Row for every question (choice and text), with `{name:"more_info", context:{questionId, answers:{"@path":"/answers"}}}`.
+- `index.ts` adds the non-error, non-cancelled `more_info` result text: names the label, prompt and options, tells the model to explain in chat and wait, and lists the other collected answers. TUI and dialog fallbacks return the same result kind.
+- `tui.ts` adds a "More information" row; `askWithDialogs` adds a "More information" option for choice and text questions (text asks "Answer here" vs "More information" first when typed input is available).
+- Tests: decode/filtering, unknown id, result text, dialog fallback, TUI row, surface action shape and real A2UI processor validation (40 package tests).
+- `test/fixtures/a2ui-questionnaire.json` is generated from `buildSurface` and keeps the free-text notes question; dev route opens it with `/?panel=questionnaire`.
+- Shots: 390x844 and 1280x900 show the button next to the prompt, panel content-sized, no page scroll.
+- `npm run typecheck`, `npm run lint`, `npm run format:check`, root `node --test` (259 pass), and both workspace checks pass.
