@@ -155,10 +155,11 @@ relative input is resolved against home.
 
 ## Instant new-session window
 
-The dashboard's `new` button does not wait for the child. It pushes a synthetic
-`#new` route, paints the session shell with `starting session…` in the history
-and a disabled composer, then sends the existing `create` frame on the dashboard
-socket. When the hub answers `opened`, the client replaces the URL with the real
+Every dashboard new-session affordance (the `new` form button and a group's `+`)
+does not wait for the child. It pushes a synthetic `#new` route, paints the
+session shell with `starting session…` in the history and a disabled composer,
+then sends the existing `create` frame on the dashboard socket. When the hub
+answers `opened`, the client replaces the URL with the real
 session id and opens a normal session socket; a failed create paints the error
 and a back action instead of a dead id. The `#new` route only survives while the
 create is in flight: a reload falls back to the dashboard. No protocol or hub

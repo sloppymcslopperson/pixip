@@ -580,7 +580,7 @@ function renderGroup(group) {
 		add.textContent = "+";
 		add.title = "new session here";
 		add.setAttribute("aria-label", `New session in ${groupLabel(group, state.home)}`);
-		add.addEventListener("click", () => send({ t: "create", cwd: group.cwd }));
+		add.addEventListener("click", () => beginNewSession(group.cwd));
 		head.append(add);
 	}
 	section.append(head);
