@@ -5,7 +5,16 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
 	{
-		ignores: ["fit/", "pi-host/", "tmp/", "node_modules/", "docs/*.png", "src/client/vendor/", "package-lock.json"],
+		ignores: [
+			"fit/",
+			"pi-host/",
+			"extensions/",
+			"tmp/",
+			"node_modules/",
+			"docs/*.png",
+			"src/client/vendor/",
+			"package-lock.json",
+		],
 	},
 	js.configs.recommended,
 	...tseslint.configs.recommendedTypeChecked,

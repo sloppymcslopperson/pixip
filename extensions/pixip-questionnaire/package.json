@@ -1,0 +1,48 @@
+{
+	"name": "pixip-questionnaire",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Questionnaire tool for Pi: A2UI panel in pixip, TUI custom UI, dialog fallback",
+	"type": "module",
+	"license": "Unlicense",
+	"keywords": [
+		"pi-package",
+		"pi",
+		"questionnaire",
+		"a2ui",
+		"pixip"
+	],
+	"pi": {
+		"extensions": [
+			"./src/index.ts"
+		]
+	},
+	"files": [
+		"src",
+		"README.md",
+		"UNLICENSE"
+	],
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"scripts": {
+		"test": "node --test test/*.test.ts",
+		"typecheck": "tsc --noEmit",
+		"lint": "eslint .",
+		"format:check": "prettier --check .",
+		"check": "npm run typecheck && npm run lint && npm run format:check && npm test"
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-tui": "*",
+		"typebox": "*"
+	},
+	"devDependencies": {
+		"@a2ui/web_core": "0.15.0",
+		"@earendil-works/pi-coding-agent": "1.5.2",
+		"@earendil-works/pi-tui": "*",
+		"@types/node": "^22.19.0",
+		"typebox": "*",
+		"typescript": "^5.9.0"
+	}
+}
