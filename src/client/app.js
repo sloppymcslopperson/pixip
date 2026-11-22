@@ -68,6 +68,7 @@ const ui = {
 	list: $("#list"),
 	session: $("#session"),
 	log: $("#log"),
+	jump: $("#jump"),
 	dock: $("#dock"),
 	menu: $("#menu"),
 	queue: $("#queue"),
@@ -200,6 +201,7 @@ function route() {
 async function showList() {
 	cacheCurrentSession();
 	state.sessionId = null;
+	ui.jump.hidden = true;
 	state.info = null;
 	state.pendingCreate = null;
 	state.tools.clear();
@@ -874,6 +876,7 @@ function beginNewSession(cwd) {
 
 function showPendingSession() {
 	state.sessionId = null;
+	ui.jump.hidden = true;
 	state.info = null;
 	state.tools.clear();
 	state.streaming = null;
@@ -961,6 +964,7 @@ function openSession(id) {
 	state.loadingEarlier = false;
 	state.addon = createAddonUi();
 	state.stick = true;
+	updateJump();
 	ui.title.textContent = "connecting…";
 	ui.sub.textContent = id.slice(0, 8);
 	ui.dot.className = "dot busy";
@@ -2074,6 +2078,7 @@ function renderReplace(entries, more) {
 	state.entries = [];
 	state.more = false;
 	state.stick = true;
+	updateJump();
 	renderSnapshot(entries, more);
 }
 
@@ -2613,7 +2618,14 @@ function setBusy(busy) {
 
 function scrollToEnd(force = false) {
 	if (force) state.stick = true;
+	updateJump();
 	scheduleScroll();
+}
+
+/** Floating jump control: visible only while the reader is scrolled away from
+ *  the newest entry and the transcript is on screen. */
+function updateJump() {
+	ui.jump.hidden = state.stick || ui.session.hidden;
 }
 
 let scrollQueued = false;
@@ -2630,6 +2642,15 @@ function scheduleScroll() {
 ui.log.addEventListener("scroll", () => {
 	const distance = ui.log.scrollHeight - ui.log.scrollTop - ui.log.clientHeight;
 	state.stick = distance < 80;
+	updateJump();
+});
+
+ui.jump.addEventListener("click", () => {
+	// Resume following live entries, then glide to the newest one. The button
+	// hides immediately even if the smooth scroll is still in flight.
+	state.stick = true;
+	updateJump();
+	ui.log.scrollTo({ top: ui.log.scrollHeight, behavior: "smooth" });
 });
 
 /** The small "fork" affordance on user blocks (08) is delegated: the transcript

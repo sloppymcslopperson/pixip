@@ -90,7 +90,7 @@ button, input, textarea { font: inherit; color: inherit; }
 @keyframes pulse { 50% { opacity: 0.35; } }
 
 main { flex: 1; min-height: 0; }
-#session { display: flex; flex-direction: column; }
+#session { display: flex; flex-direction: column; position: relative; }
 #log {
 	flex: 1;
 	width: 100%;
@@ -112,6 +112,27 @@ main { flex: 1; min-height: 0; }
    overflows invisibly. */
 #log > * { flex: 0 0 auto; }
 #list > * { flex: 0 0 auto; }
+
+/* Floating "jump to newest" pill over the transcript, aligned with the log
+   column. Hidden by default; `updateJump()` reveals it when scrolled up. */
+#jump {
+	position: absolute;
+	right: max(var(--pad), calc((100% - 104ch) / 2 + var(--pad)));
+	bottom: 12px;
+	z-index: 4;
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 7px 12px;
+	border-radius: 999px;
+	border: 1px solid var(--line);
+	background: var(--bg-raised);
+	color: var(--fg-dim);
+	font-size: 12px;
+	box-shadow: 0 6px 18px #0007;
+}
+#jump[hidden] { display: none; }
+#jump:hover { color: var(--accent); border-color: var(--accent); }
 
 /* ---- transcript blocks ---- */
 .block { border-left: 2px solid transparent; padding-left: 10px; }
