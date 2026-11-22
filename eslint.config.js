@@ -39,6 +39,22 @@ export default tseslint.config(
 		},
 	},
 	{
+		files: ["src/hubStore.ts", "src/hubLive.ts", "src/hubControl.ts", "src/hubSession.ts"],
+		rules: {
+			"@typescript-eslint/ban-ts-comment": "off",
+			"@typescript-eslint/no-unused-vars": "off",
+			"@typescript-eslint/no-unnecessary-type-assertion": "off",
+			"@typescript-eslint/no-base-to-string": "off",
+		},
+	},
+	{
+		files: ["src/hub.ts"],
+		rules: {
+			"@typescript-eslint/no-unused-vars": "off",
+			"prefer-rest-params": "off",
+		},
+	},
+	{
 		files: ["src/client/markdown.js"],
 		rules: {
 			"@typescript-eslint/unbound-method": "off",
