@@ -104,6 +104,10 @@ interface LiveSession {
 	titleAttempted?: boolean;
 	/** First prompt whose title call lost the provider race; retried at settle. */
 	titlePending?: string;
+	/** A first slash-command prompt: label from the expanded user message. */
+	titleAwaitingMessage?: boolean;
+	/** Raw slash-command prompt, used only when no expanded message arrives. */
+	titlePrompt?: string;
 	nameSource?: NameSource;
 }
 

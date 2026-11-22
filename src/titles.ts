@@ -36,6 +36,29 @@ export function normalizeTitle(raw: string): string {
 	return sentenceCase(text);
 }
 
+/** True when a first prompt is a slash command rather than plain text. */
+export function isSlashPrompt(text: string): boolean {
+	return /^\s*\//.test(String(text ?? ""));
+}
+
+/**
+ * Text of a Pi message. `content` is a string or an array of text/image parts;
+ * only text parts reach the title call. A slash command's expanded user message
+ * is the same text the model sees, which is what the label should describe.
+ */
+export function messageText(message: unknown): string {
+	const content = (message as { content?: unknown } | null)?.content;
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	const parts: string[] = [];
+	for (const part of content) {
+		if (!part || typeof part !== "object") continue;
+		const { type, text } = part as { type?: unknown; text?: unknown };
+		if (type === "text" && typeof text === "string" && text.trim()) parts.push(text);
+	}
+	return parts.join("\n");
+}
+
 /** Never let a missing/failed model leave the session unnamed. */
 export function fallbackTitle(prompt: string): string {
 	const text = String(prompt ?? "")

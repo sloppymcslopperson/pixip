@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { fallbackTitle, normalizeTitle, titlePrompt } from "../src/titles.ts";
+import { fallbackTitle, isSlashPrompt, messageText, normalizeTitle, titlePrompt } from "../src/titles.ts";
 
 describe("session titles", () => {
 	it("normalizes model output to sentence case, 3-5 words and 40 chars", () => {
@@ -24,5 +24,26 @@ describe("session titles", () => {
 		assert.match(prompt, /3 to 5 words/);
 		assert.match(prompt, /at most 40 characters/);
 		assert.ok(prompt.length < 5_000);
+	});
+
+	it("recognises slash commands and reads message text parts", () => {
+		assert.equal(isSlashPrompt("/fit work"), true);
+		assert.equal(isSlashPrompt("  /skill:review the diff"), true);
+		assert.equal(isSlashPrompt("fix the login redirect"), false);
+		assert.equal(isSlashPrompt(""), false);
+
+		assert.equal(messageText({ content: "plain text" }), "plain text");
+		assert.equal(
+			messageText({
+				content: [
+					{ type: "text", text: "expanded prompt" },
+					{ type: "image", data: "ignored" },
+					{ type: "text", text: "with instructions" },
+				],
+			}),
+			"expanded prompt\nwith instructions",
+		);
+		assert.equal(messageText({ content: [] }), "");
+		assert.equal(messageText(null), "");
 	});
 });

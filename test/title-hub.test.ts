@@ -105,6 +105,31 @@ describe("first-prompt session labels", () => {
 		await hub.shutdown();
 	});
 
+	it("labels a slash command from its expanded user message, not the alias", async () => {
+		const paths = await fixtureRoot("pixip-title-");
+		const expanded = "### Work ticket\nGrill the ticket, implement it, close it and commit.";
+		const hub = hubFor(paths, {
+			FAKE_PI_TITLE: "Grill and close ticket",
+			FAKE_PI_ON_PROMPT: JSON.stringify([
+				{
+					type: "message_start",
+					message: { role: "user", timestamp: 1, content: [{ type: "text", text: expanded }] },
+				},
+			]),
+		});
+		const created = await hub.create(paths.dir);
+		await hub.prompt(created.id, "/fit work");
+		await waitFor(
+			async () => (await hub.list()).find((session) => session.id === created.id)?.name === "Grill and close ticket",
+		);
+		const title = (await events(paths)).find((event) => event["type"] === "title");
+		const args = title?.["args"] as string[];
+		const sent = args.at(-1) ?? "";
+		assert.ok(sent.includes(expanded));
+		assert.equal(sent.includes("/fit work"), false);
+		await hub.shutdown();
+	});
+
 	it("falls back locally when the one-shot call fails", async () => {
 		const paths = await fixtureRoot("pixip-title-");
 		const hub = hubFor(paths, { FAKE_PI_TITLE_FAIL: "1" });
