@@ -16,15 +16,20 @@
 				<div id="title">sessions</div>
 				<div id="sub"></div>
 			</div>
-			<div id="scale" role="group" aria-label="Transcript text size">
-				<button id="scale-down" class="ghost scale-btn" type="button" aria-label="Decrease transcript text size">A−</button>
-				<output id="scale-value" class="scale-value" aria-live="polite">100%</output>
-				<button id="scale-up" class="ghost scale-btn" type="button" aria-label="Increase transcript text size">A+</button>
-			</div>
 			<span id="dot" class="dot idle"></span>
 			<button id="settings" class="ghost settings-btn" aria-label="Settings" title="Settings" hidden>⚙</button>
-			<button id="reload" class="ghost" aria-label="Reload assets and config">reload</button>
 			<button id="stop" class="ghost" hidden aria-label="Stop">stop</button>
+			<div id="more-wrap" class="bar-more">
+				<div id="bar-menu" class="bar-menu" role="group" aria-label="Display options" hidden>
+					<div id="scale" role="group" aria-label="Transcript text size">
+						<button id="scale-down" class="ghost scale-btn" type="button" aria-label="Decrease transcript text size">A−</button>
+						<output id="scale-value" class="scale-value" aria-live="polite">100%</output>
+						<button id="scale-up" class="ghost scale-btn" type="button" aria-label="Increase transcript text size">A+</button>
+					</div>
+					<button id="reload" class="ghost" aria-label="Reload assets and config">reload</button>
+				</div>
+				<button id="more" class="ghost more-btn" type="button" aria-label="More options" aria-haspopup="true" aria-expanded="false" aria-controls="bar-menu">…</button>
+			</div>
 		</header>
 
 		<main id="list" hidden></main>

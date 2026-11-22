@@ -61,6 +61,8 @@ const ui = {
 	dot: $("#dot"),
 	settings: $("#settings"),
 	reload: $("#reload"),
+	more: $("#more"),
+	barMenu: $("#bar-menu"),
 	stop: $("#stop"),
 	scaleDown: $("#scale-down"),
 	scaleUp: $("#scale-up"),
@@ -2520,9 +2522,17 @@ bindScaleButton(ui.scaleUp, "up");
 setScale(readScale(), { persist: false });
 
 // Escape is the keyboard half of the modal x: cancel Pi's dialog once, or
-// close a local sheet. Backdrop clicks deliberately do nothing.
+// close a local sheet. Backdrop clicks deliberately do nothing. The header
+// menu is the innermost popover, so it closes first.
 window.addEventListener("keydown", (event) => {
-	if (event.key !== "Escape" || ui.sheet.hidden) return;
+	if (event.key !== "Escape") return;
+	if (!ui.barMenu.hidden) {
+		event.preventDefault();
+		setBarMenu(false);
+		ui.more.focus();
+		return;
+	}
+	if (ui.sheet.hidden) return;
 	event.preventDefault();
 	dismissSheet();
 });
@@ -2571,6 +2581,22 @@ async function softRefresh() {
 
 ui.reload.addEventListener("click", () => void softRefresh());
 ui.settings.addEventListener("click", openSettingsSheet);
+
+/** Far-right `…` popover: text size and reload live here so the session name
+ *  keeps the header width. Closed by an outside click or Escape. */
+function setBarMenu(open) {
+	ui.barMenu.hidden = !open;
+	ui.more.setAttribute("aria-expanded", String(open));
+}
+
+ui.more.addEventListener("click", (event) => {
+	event.stopPropagation();
+	setBarMenu(ui.barMenu.hidden);
+});
+ui.barMenu.addEventListener("click", (event) => event.stopPropagation());
+document.addEventListener("click", () => {
+	if (!ui.barMenu.hidden) setBarMenu(false);
+});
 
 window.addEventListener("hashchange", route);
 
