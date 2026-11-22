@@ -1,5 +1,7 @@
 ---
 project: pixip
+grilled: true
+commit: "6e795e0e3deddc01935c7dd7ac9e4719d53ff92b"
 ---
 
 Render A2UI v1.0 surfaces from an opaque `panel` request into the inline panel host added by `03-panel-host`, and send the user's action back as the panel response. Vendor the official `@a2ui/lit` + `@a2ui/web_core` v1.0 renderer as one lazy-loaded browser asset; keep the hub a passthrough. This ticket does not add A2UI history or transcript rendering.
@@ -32,3 +34,15 @@ Render A2UI v1.0 surfaces from an opaque `panel` request into the inline panel h
 ### Out of scope
 
 - Model-generated A2UI, custom catalogs, `callRendererFunction`/`callAgentFunction`, A2UI in the transcript or session history, and the questionnaire extension. This ticket is the client renderer plus panel registration.
+
+### Grilled decisions
+
+- Seam: `src/client/a2ui.js` is the only module that imports the vendored bundle. It registers through `registerPanelRenderer({ modes: ["a2ui"], mount(payload, api) })` and returns `{snapshot, restore, destroy}`; no Lit, `SurfaceModel` or element references escape it, so `surface.js`, `panelHost.js` and `app.js` stay renderer-agnostic.
+- Bundle: pin `@a2ui/web_core@0.15.0` and `@a2ui/lit@0.15.0`. Protocol is `1.0`, the catalog comes from `@a2ui/web_core/catalogs/basic/v1`, and the surface element is `A2uiSurface` from `@a2ui/lit`. Commit one asset under `src/client/vendor/` built by a dev-only `tools/build-a2ui.mjs` using a pinned `npx --yes esbuild@…`; CI needs no bundler. Provenance and license sit beside the asset.
+- Payload: `{messages: [...], surfaceId?, title?, mode}`; `mode` defaults to `"a2ui"`; when `surfaceId` is absent it is derived from the `createSurface` message.
+- Drafts: reuse the panel host's existing `sessionStorage` keying by request id. No session prefix and no `panelHost.js` change.
+- Tests: injectable processor/surface factories in `a2ui.js`, so node tests use fakes for create/update/delete/action/fallback/draft paths. The real bundle is exercised by the dev fixture and `tools/shot.mjs`.
+- Fixture: only under `--dev`, opened by `GET /?panel=fixture`, delivered through the normal `extension_ui_request` path so it exercises surface, host and renderer together.
+- Unknown components: pre-scan message component types against the v1.0 Basic catalog set and render a visible fallback card listing the unknown types with a cancel action; processor exceptions also fall back instead of blanking the surface.
+- Styling: target our own `.a2ui-*` wrapper classes, never vendor element tag names, so a future replacement renderer keeps the CSS.
+- Component coverage: ship the official Basic catalog, so the acceptance fixture (Text, Column, Tabs, ChoicePicker, TextField, Button) is a subset.

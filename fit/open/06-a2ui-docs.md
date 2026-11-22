@@ -1,5 +1,6 @@
 ---
 project: pixip
+grilled: true
 ---
 
 Document the inline panel surface, the A2UI renderer, and the custom host panel transport once the renderer and questionnaire are working, and update the TUI-parity map so the replacement of the questionnaire path is discoverable. Keep the protocol and latency sources of truth in `ARCHITECTURE.md` and the user-facing install notes in `README.md`.
@@ -19,3 +20,11 @@ Document the inline panel surface, the A2UI renderer, and the custom host panel 
 - A new contributor can see where an A2UI payload enters the client, how an action leaves it, how the inline surface collapses/expands, and that the host (not upstream Pi) provides `panel`.
 - `npm run check` stays green; no screenshot is required unless layout changes.
 - The docs do not claim the old plugin is removed before the new one is verified, and do not claim historical A2UI exists.
+
+### Grilled decisions
+
+- Posture B: `pixip-questionnaire` is the documented pixip path. It is local-checkout only and not yet side-by-side verified. Removing `pi_questionare` (`pi list`, then `pi remove <source>`) is the documented migration step; never claim removal is automatic or already done.
+- Add the no-reference guard test: `src/` and `pi-host/src/` must not mention `pi_questionare` or `pi-questions`.
+- The startup legacy-plugin warning and the read-only plugin inventory plus per-pixip disable toggle are a separate backlog ticket, not part of this one.
+- `ARCHITECTURE.md` stays the source of truth for the panel slot, host boundary, A2UI message/action path, lazy bundle and read-only/history posture; `README.md` carries install and migration notes; `docs/TUI-parity.md` carries the fallback order.
+- Rewrite only the parts of `ARCHITECTURE.md`/`README.md` that concern this work. The pending auto-titling edits are committed separately first, so ticket commits contain only ticket files.

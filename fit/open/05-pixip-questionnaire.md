@@ -1,5 +1,6 @@
 ---
 project: pi-harness
+grilled: true
 ---
 
 Create a new Pi extension package that registers the same `questionnaire` tool but builds an A2UI v1.0 surface for the inline pixip panel, while keeping the existing TUI custom UI and dialog fallbacks. It supersedes `pi_questionare` only after the A2UI path is verified; do not modify existing extensions in place.
@@ -34,3 +35,15 @@ Create a new Pi extension package that registers the same `questionnaire` tool b
 
 - Prefer a new package name such as `pixip-questionnaire`; keep the tool name `questionnaire` for model compatibility.
 - Do not put A2UI construction in pixip itself; the extension owns the surface and the answers.
+
+### Grilled decisions
+
+- Home and build: new package at `extensions/pixip-questionnaire`, added to the root `workspaces` so `npm run check` runs its check/test/typecheck. Written from scratch for pixip; `pi_questionare` is reference reading only, with no copied TUI code and no runtime dependency.
+- Tool: still named `questionnaire`. Input is a widget union: `questions[]` entries of `{id, label?, prompt, widget?, options?, multiple?}`. Defaults: `options` present → `choice`, otherwise `text`. An unknown widget or an option-less choice is a validation error; genuinely ambiguous input errors instead of guessing.
+- Legacy entries: an entry without `widget` is accepted as deprecated and defaulted as above. Backlog ticket `questionnaire-legacy-schema` removes that shape later.
+- Fallback tiers: A2UI panel when `ctx.ui.panel` exists → reimplemented TUI custom UI → sequential dialogs with the full ACP typed-text detection and "Answer this in chat"/"Add an item in chat" hand-off.
+- Surface construction: plain A2UI v1.0 JSON messages by hand; `@a2ui/web_core` is a devDependency used with `import type` only, so the shipped extension has no A2UI runtime dependency.
+- Results: a new pixip result format for model-facing text and `details`, not byte-compatible with `pi_questionare`. Input compatibility is preserved through the widget defaults above.
+- Panel lifetime: pass a 15-minute timeout; on timeout or a missing/failed panel return an error result asking the model to use plain text. Only an explicit cancel counts as a dismissal.
+- Verification: no real side-by-side session this leg. Evidence is package tests, a fake-host integration test and 390/1280 shots; the README documents the manual side-by-side and uninstall steps.
+- Persistence: live surface only; no A2UI surfaces in session history.
