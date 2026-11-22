@@ -143,6 +143,31 @@ guarantees make that usable (implemented in `00-prefix-commands`):
 The command policy can allow/deny `fit` by name like any other command; it is not
 in the built-in or TUI-only catalog.
 
+## Extension panels and questionnaires
+
+Blocking `panel` requests render in the inline surface between `#log` and the
+composer. The panel host (`03-panel-host`) knows nothing about A2UI: a renderer
+registers a mount function, and the host owns the frame, collapse/expand,
+queue/Replace and draft replay. `04-a2ui-panel-renderer` registers the A2UI v1.0
+adapter; its vendored bundle is fetched only for the first A2UI panel.
+
+| Surface                                    | pixip                                                    | TUI parity                                                                         |
+| ------------------------------------------ | -------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| A2UI panel (`03`, `04`)                    | done: collapsible inline panel, lazy bundle, action JSON | TUI-only: no inline panel                                                          |
+| `questionnaire` (`05-pixip-questionnaire`) | done: A2UI inline panel with choice/text widgets         | same tool renders with `ctx.ui.custom`; other RPC/ACP hosts use sequential dialogs |
+
+Fallback order is **A2UI inline panel → TUI custom UI → sequential dialogs**. The
+panel path needs `--pi-host`; the legacy `pi --mode rpc` backend has no `panel`
+and therefore uses dialogs even in pixip. On hosts that cannot collect typed
+text (stock `pi-acp`), the free-form row becomes "Answer this in chat" and
+multi-select gets "Add an item in chat" instead of a dead-end text prompt.
+
+The new package is local-checkout only and unpublished. `pi_questionare` is
+**not removed automatically** and stays the documented fallback until you remove
+it yourself; install `pixip-questionnaire`, try it in a pixip session, then
+`pi list` and `pi remove` the old source. A2UI answers are not persisted in the
+session transcript; only a pending panel is replayed from the hub's cache.
+
 ## Checking a slice
 
 Definition of done is unchanged: `npm run check` green, plus `tools/shot.mjs` at

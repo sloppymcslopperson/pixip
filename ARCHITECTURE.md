@@ -38,11 +38,11 @@ remote terminal.
 ## Inline panel surface and A2UI
 
 The inline surface is a dedicated slot between the transcript and the composer,
-not a modal and not part of the append-only transcript. It collapses to its
-header, keeps `#log` as the only scroll container, queues a second blocking
-request behind a Replace banner, and is replayed from the hub's pending-UI cache
-when a client reattaches. Only unanswered requests replay; answered panels are
-dropped.
+not a modal and not part of the append-only transcript. It is expanded by
+default, collapses to its header, keeps `#log` as the only scroll container,
+queues a second blocking request behind a Replace banner, and is replayed from
+the hub's pending-UI cache when a client reattaches. Only unanswered requests
+replay; answered panels are dropped.
 
 `src/client/panelHost.js` is the transport boundary. A renderer registers with
 `registerPanelRenderer({ modes, mount })`; `mount(payload, api)` returns
@@ -60,12 +60,12 @@ client sends.
 `src/client/a2ui.js` is the only module that knows the renderer. It lazily
 imports `src/client/vendor/a2ui.esm.js` on the first A2UI panel, so page load
 never fetches it; the asset is 486 KB minified (~136 KB gzip) and committed with
-its license and rebuild note beside it. The bundle pins `@a2ui/web_core` and
-`@a2ui/lit` 0.15.0, protocol `1.0`, Basic catalog
-(`@a2ui/web_core/catalogs/basic/v1`); `tools/build-a2ui.mjs` rebuilds it with a
-pinned `npx esbuild`, and CI only reads the committed output. Component types
-are checked against the catalog before mounting, and unknown types or processor
-errors produce the fallback card.
+its license and rebuild note beside it (`vendor/a2ui.README.md`, Apache-2.0).
+The bundle pins `@a2ui/web_core` and `@a2ui/lit` 0.15.0, protocol `1.0`, Basic
+catalog (`@a2ui/web_core/catalogs/basic/v1`); `tools/build-a2ui.mjs` rebuilds it
+with a pinned `npx esbuild`, and CI only reads the committed output. Component
+types are checked against the catalog before mounting, and unknown types or
+processor errors produce the fallback card.
 
 The action sent back is a JSON string with `name`, `surfaceId`,
 `sourceComponentId`, `timestamp`, and a `context` whose `@path` bindings are

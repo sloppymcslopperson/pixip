@@ -32,6 +32,37 @@ PIXIP_PI_HOST=/path/to/pixip-pi-host node bin/pixip.ts --data-dir ./tmp/dev
 
 Without `--pi-host`/`PIXIP_PI_HOST`, pixip keeps using `pi --mode rpc`.
 
+The host embeds the project-local Pi SDK, shares the user's Pi agent dir and
+extension set for now, and is **not yet the default backend**. Plugin/config
+isolation is tracked in `90-pi-plugin-isolation` on the board.
+
+### Inline panels and questionnaires
+
+Blocking `panel` requests from the host render in a collapsible surface between
+the transcript and the composer, not as a modal. A2UI v1.0 surfaces use a
+vendored renderer that is fetched only when the first panel arrives; extension
+dialogs stay a bottom sheet. The hub never parses A2UI, and completed surfaces
+are not written to session history (a pending panel replays on reattach).
+
+`extensions/pixip-questionnaire` registers the `questionnaire` tool with a
+widget-shaped schema (`choice` or `text`). Transport order is A2UI inline panel
+(when the host has one) → TUI custom UI → sequential dialogs, with the ACP
+"Answer this in chat" hand-off on hosts that cannot collect typed text. It is a
+local checkout, unpublished:
+
+```bash
+pi install /path/to/pixip/extensions/pixip-questionnaire
+```
+
+It replaces `pi_questionare` for pixip sessions, but nothing uninstalls the old
+package for you. Once the new tool works for you, remove the old one; removal
+only affects that user's Pi settings (or the project settings for `-l`):
+
+```bash
+pi list
+pi remove /path/to/pi_questionare
+```
+
 ## Why
 
 Existing options are slow, shaped around terminals or editors, and some of them
