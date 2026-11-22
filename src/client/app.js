@@ -142,6 +142,7 @@ import {
 import {
 	cancelSurface,
 	finishSurface,
+	openFixturePanel,
 	openSurfaceRequest,
 	resetSurface,
 	surfaceOpen,
@@ -598,6 +599,7 @@ ui.log.addEventListener("click", (event) => {
  *  notices get a dismissible sheet instead. */
 
 route();
+void openFixturePanel();
 
 export {
 	$,

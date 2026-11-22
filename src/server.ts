@@ -176,6 +176,18 @@ async function handleHttp(
 	};
 
 	try {
+		// Dev-only fixture for the A2UI panel path: the client requests it from
+		// `/?panel=fixture`, and the payload then travels the normal
+		// extension_ui_request path. Production never exposes this route.
+		if (req.method === "GET" && options.dev && url.pathname === "/api/dev/panel-fixture") {
+			try {
+				const fixture = await readFile(join(options.clientDir, "..", "..", "test", "fixtures", "a2ui-panel.json"));
+				send(200, fixture, CONTENT_TYPES[".json"]);
+			} catch {
+				send(404, JSON.stringify({ error: "not found" }));
+			}
+			return;
+		}
 		if (req.method === "GET" && url.pathname === "/health") {
 			send(
 				200,

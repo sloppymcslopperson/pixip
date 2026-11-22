@@ -27,6 +27,8 @@
 		"ws": "^8.18.0"
 	},
 	"devDependencies": {
+		"@a2ui/lit": "0.15.0",
+		"@a2ui/web_core": "0.15.0",
 		"@eslint/js": "^9.39.5",
 		"@types/node": "^22.19.0",
 		"@types/ws": "^8.5.13",

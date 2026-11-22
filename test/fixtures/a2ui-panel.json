@@ -1,0 +1,88 @@
+{
+	"title": "A2UI fixture",
+	"mode": "a2ui",
+	"surfaceId": "fixture",
+	"messages": [
+		{
+			"version": "1.0",
+			"createSurface": {
+				"surfaceId": "fixture",
+				"catalogId": "https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json",
+				"dataModel": {
+					"answers": {
+						"color": { "selected": [], "custom": "" },
+						"size": { "selected": [], "custom": "" }
+					},
+					"notes": ""
+				},
+				"components": [
+					{
+						"id": "root",
+						"component": "Column",
+						"children": ["title", "tabs", "notes_field", "footer"]
+					},
+					{ "id": "title", "component": "Text", "variant": "body", "text": "Fixture questionnaire" },
+					{
+						"id": "tabs",
+						"component": "Tabs",
+						"tabs": [
+							{ "title": "Color", "child": "color" },
+							{ "title": "Size", "child": "size" }
+						]
+					},
+					{
+						"id": "color",
+						"component": "ChoicePicker",
+						"label": "Pick a color",
+						"variant": "mutuallyExclusive",
+						"options": [
+							{ "value": "red", "label": "Red" },
+							{ "value": "blue", "label": "Blue" }
+						],
+						"value": { "@path": "/answers/color/selected" }
+					},
+					{
+						"id": "size",
+						"component": "ChoicePicker",
+						"label": "Pick sizes",
+						"variant": "multipleSelection",
+						"options": [
+							{ "value": "s", "label": "Small" },
+							{ "value": "m", "label": "Medium" }
+						],
+						"value": { "@path": "/answers/size/selected" }
+					},
+					{
+						"id": "notes_field",
+						"component": "TextField",
+						"label": "Notes",
+						"placeholder": "Anything else?",
+						"value": { "@path": "/notes" }
+					},
+					{ "id": "footer", "component": "Row", "children": ["cancel_btn", "submit_btn"] },
+					{ "id": "cancel_label", "component": "Text", "text": "Cancel" },
+					{
+						"id": "cancel_btn",
+						"component": "Button",
+						"variant": "borderless",
+						"child": "cancel_label",
+						"action": { "event": { "name": "cancel" } }
+					},
+					{ "id": "submit_label", "component": "Text", "text": "Submit" },
+					{
+						"id": "submit_btn",
+						"component": "Button",
+						"variant": "primary",
+						"child": "submit_label",
+						"action": {
+							"event": {
+								"name": "submit",
+								"context": { "answers": { "@path": "/answers" } }
+							}
+						}
+					}
+				]
+			}
+		}
+	]
+}

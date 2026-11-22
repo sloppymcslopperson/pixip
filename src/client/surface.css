@@ -163,3 +163,39 @@
 	border-color: color-mix(in srgb, var(--accent) 60%, var(--line));
 	color: var(--accent);
 }
+
+/* ---- A2UI panels ---- */
+/* The vendored renderer keeps its internals in shadow roots, so this styles the
+   wrapper we own and feeds the palette through theme variables. A future
+   renderer keeps these selectors. */
+.a2ui-root {
+	--a2ui-color-background: var(--bg-soft);
+	--a2ui-color-on-background: var(--fg);
+	--a2ui-color-surface: var(--bg-raised);
+	--a2ui-color-on-surface: var(--fg);
+	--a2ui-color-primary: var(--accent);
+	--a2ui-color-on-primary: var(--bg);
+	--a2ui-color-secondary: var(--bg-raised);
+	--a2ui-color-on-secondary: var(--fg);
+	--a2ui-color-border: var(--line);
+	--a2ui-color-input: var(--bg);
+	--a2ui-color-on-input: var(--fg);
+	--a2ui-border-radius: 9px;
+	color-scheme: dark;
+	padding: 4px 2px 2px;
+	font-size: 14px;
+	color: var(--fg);
+}
+.a2ui-root a2ui-surface {
+	display: block;
+}
+.a2ui-loading {
+	padding: 14px 2px;
+	font-size: 12.5px;
+	color: var(--fg-dim);
+}
+@media (min-width: 768px) {
+	.a2ui-root {
+		font-size: 14.5px;
+	}
+}

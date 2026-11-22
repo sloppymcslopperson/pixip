@@ -35,6 +35,49 @@ remote terminal.
 6. **Isolation for development.** `--data-dir` sets `--session-dir`; nothing in
    `~/.pi/agent/sessions` is read or written by tests.
 
+## Inline panel surface and A2UI
+
+The inline surface is a dedicated slot between the transcript and the composer,
+not a modal and not part of the append-only transcript. It collapses to its
+header, keeps `#log` as the only scroll container, queues a second blocking
+request behind a Replace banner, and is replayed from the hub's pending-UI cache
+when a client reattaches. Only unanswered requests replay; answered panels are
+dropped.
+
+`src/client/panelHost.js` is the transport boundary. A renderer registers with
+`registerPanelRenderer({ modes, mount })`; `mount(payload, api)` returns
+`{snapshot, restore, destroy}`, and the host owns the frame, collapse, draft
+`sessionStorage` (keyed by request id) and the fallback card. With no renderer,
+or a payload that throws, the user sees a visible fallback instead of a blank
+surface.
+
+A2UI panels use `mode: "a2ui"` and an opaque payload
+`{messages, surfaceId?, title?, mode}`. `messages` is the ordered A2UI v1.0
+array; the surface id comes from the payload or the `createSurface` message. The
+hub never parses A2UI: it forwards the payload and returns whatever action the
+client sends.
+
+`src/client/a2ui.js` is the only module that knows the renderer. It lazily
+imports `src/client/vendor/a2ui.esm.js` on the first A2UI panel, so page load
+never fetches it; the asset is 486 KB minified (~136 KB gzip) and committed with
+its license and rebuild note beside it. The bundle pins `@a2ui/web_core` and
+`@a2ui/lit` 0.15.0, protocol `1.0`, Basic catalog
+(`@a2ui/web_core/catalogs/basic/v1`); `tools/build-a2ui.mjs` rebuilds it with a
+pinned `npx esbuild`, and CI only reads the committed output. Component types
+are checked against the catalog before mounting, and unknown types or processor
+errors produce the fallback card.
+
+The action sent back is a JSON string with `name`, `surfaceId`,
+`sourceComponentId`, `timestamp`, and a `context` whose `@path` bindings are
+resolved from the data model, or `{cancelled: true}` for an explicit cancel. The
+extension parses it; the hub treats it like any other `extension_ui_response`.
+
+A2UI is data, not code: only catalog components render, strings are never
+injected as HTML, media URLs go through the catalog's sanitizer, and custom
+catalogs or model-generated surfaces are out of scope. Completed surfaces are
+not written to session history; only a pending panel replays from the hub's
+cache.
+
 ## Embedded host boundary
 
 `pi-host/` contains `pixip-pi-host`, an optional package that embeds the Pi SDK
@@ -527,6 +570,8 @@ protocol path is still one obvious place to start:
 | `src/client/surface.js`                         | inline blocking-request surface: queue, collapse, Replace banner, answer/cancel                                            |
 | `src/client/surfaceQueue.js`                    | DOM-free active/queued request queue used by `surface.js`                                                                  |
 | `src/client/panelHost.js`                       | generic `panel` renderer registry, fallback card, draft snapshot/restore in `sessionStorage`                               |
+| `src/client/a2ui.js`                            | A2UI adapter: lazy bundle import, v1.0 lifecycle, action JSON, fallback and draft hooks                                    |
+| `src/client/vendor/a2ui.esm.js`                 | prebuilt A2UI v1.0 Lit renderer + Basic catalog, lazy-loaded; license and rebuild note beside it                           |
 | `src/client/composer.js`                        | attachments, composer, built-in commands, bash cards                                                                       |
 | `src/client/{menu,controls,toast,transport}.js` | menus/queue, scale/refresh controls, notices, websocket                                                                    |
 

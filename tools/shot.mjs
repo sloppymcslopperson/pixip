@@ -63,9 +63,32 @@ const metrics = await page.evaluate(() => {
 		list: rect("#list"),
 		log: rect("#log"),
 		composer: rect("#composer"),
+		surface: rect("#surface"),
 	};
 });
 
 await page.screenshot({ path: out });
-console.log(JSON.stringify({ metrics, problems }, null, 2));
+
+// A live panel is part of the responsive contract: capture it collapsed too, so
+// the phone and desktop views can be checked in both states.
+const collapsed = out.replace(/\.png$/i, "-collapsed.png");
+const surfaceVisible = await page.evaluate(() => {
+	const element = document.querySelector("#surface");
+	return Boolean(element && !element.hidden && element.querySelector(".surface-collapse"));
+});
+let surfaceCollapsed = null;
+if (surfaceVisible) {
+	await page.click("#surface .surface-collapse");
+	await new Promise((resolve) => setTimeout(resolve, 250));
+	await page.screenshot({ path: collapsed });
+	surfaceCollapsed = await page.evaluate(() => {
+		const element = document.querySelector("#surface");
+		const box = element?.getBoundingClientRect();
+		return box ? { height: Math.round(box.height), collapsed: element.classList.contains("collapsed") } : null;
+	});
+}
+
+console.log(
+	JSON.stringify({ metrics, surfaceCollapsed, collapsed: surfaceVisible ? collapsed : null, problems }, null, 2),
+);
 await browser.close();

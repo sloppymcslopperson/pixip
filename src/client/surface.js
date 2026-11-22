@@ -1,9 +1,14 @@
 // Inline blocking-request surface. It is not a modal: #log remains the only
 // transcript scroll container, and the surface docks between the transcript and
 // the composer. App-owned sheets stay in sheets.js.
+import { registerA2uiPanel } from "./a2ui.js";
 import { send, state, ui } from "./app.js";
 import { createSurfaceQueue, enqueueSurface, settleSurface } from "./surfaceQueue.js";
 import { closeAllPanels, closePanel, openPanel, panelTitle } from "./panelHost.js";
+
+// Claim the "a2ui" mode at startup without loading the bundle: the lazy
+// adapter imports it when the first A2UI panel arrives.
+registerA2uiPanel();
 
 const queue = createSurfaceQueue();
 let collapsed = false;
@@ -279,6 +284,21 @@ export function resetSurface() {
 
 export function surfaceOpen() {
 	return queue.active !== null;
+}
+
+/** Dev-only: open the A2UI fixture panel when the page has `?panel=fixture`. */
+export async function openFixturePanel(search = location.search) {
+	const params = new URLSearchParams(search);
+	if (params.get("panel") !== "fixture") return false;
+	let payload;
+	try {
+		const response = await fetch("/api/dev/panel-fixture", { cache: "no-store" });
+		if (!response.ok) return false;
+		payload = await response.json();
+	} catch {
+		return false;
+	}
+	return openSurfaceRequest({ id: `fixture-${Date.now()}`, method: "panel", payload });
 }
 
 export function surfaceStatus() {
