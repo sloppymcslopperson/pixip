@@ -2,6 +2,7 @@
 import { VERSION } from "@earendil-works/pi-coding-agent";
 
 import { parseHostArgs } from "./args.ts";
+import { parsePrintArgs, printOnce } from "./print.ts";
 import { attachJsonlLineReader, PiHost, serializeJsonLine } from "./protocol.ts";
 import { createHostRuntime, startupExtensionErrors } from "./runtime.ts";
 
@@ -10,7 +11,13 @@ function write(record: unknown): void {
 }
 
 async function run(): Promise<void> {
-	const args = parseHostArgs(process.argv.slice(2));
+	const argv = process.argv.slice(2);
+	if (argv[0] === "--print" || argv[0] === "-p") {
+		const text = await printOnce(parsePrintArgs(argv));
+		process.stdout.write(text.endsWith("\n") ? text : `${text}\n`);
+		return;
+	}
+	const args = parseHostArgs(argv);
 	const runtime = await createHostRuntime(args);
 	const host = new PiHost({
 		runtime,

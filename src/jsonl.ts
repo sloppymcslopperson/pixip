@@ -127,7 +127,7 @@ export function coverageKeys(entries: unknown[]): string[] {
 }
 
 export function isBlockingUiMethod(method: string | undefined): boolean {
-	return method === "select" || method === "confirm" || method === "input" || method === "editor";
+	return method === "select" || method === "confirm" || method === "input" || method === "editor" || method === "panel";
 }
 
 /** Key used while a spawn is in flight, before `get_state` reports the real id. */

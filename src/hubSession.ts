@@ -33,6 +33,8 @@ const run = promisify(execFile);
 
 export interface HubOptions {
 	piBin: string;
+	/** `pixip-pi-host` bin; when set, new and reattached sessions spawn it instead of `pi`. */
+	piHostBin?: string;
 	sessionsDir: string;
 	/** `<data-dir>`: where `pixip.json`, the pid/log and the index live. */
 	dataDir?: string;
@@ -83,8 +85,10 @@ interface LiveSession {
 	subs: Set<Subscriber>;
 	/** Latest setStatus/setWidget records, replayed to a late subscriber. */
 	addonUi?: AddonUiCache;
-	/** Unanswered select/confirm/input/editor requests, replayed on reattach. */
+	/** Unanswered select/confirm/input/editor/panel requests, replayed on reattach. */
 	pendingUi?: Map<string, PendingUiRequest>;
+	/** Consumed `hello` from `pixip-pi-host`; never forwarded as a transcript event. */
+	host?: { protocol?: number; piVersion?: string; capabilities?: string[] };
 	idleTimer?: NodeJS.Timeout;
 	branch?: string;
 	footerTimer?: NodeJS.Timeout;
@@ -98,6 +102,10 @@ interface LiveSession {
 	titleAttempted?: boolean;
 	/** First prompt whose title call lost the provider race; retried at settle. */
 	titlePending?: string;
+	/** A first slash-command prompt: label from the expanded user message. */
+	titleAwaitingMessage?: boolean;
+	/** Raw slash-command prompt, used only when no expanded message arrives. */
+	titlePrompt?: string;
 	nameSource?: NameSource;
 }
 
@@ -261,23 +269,26 @@ export async function resolveTitleModel(this: any, live: LiveSession): Promise<s
 }
 
 export async function runTitlePi(this: any, live: LiveSession, prompt: string, model?: string): Promise<string> {
-	const args = [
-		"--print",
-		"--no-session",
-		"--no-tools",
-		"--no-extensions",
-		"--no-skills",
-		"--no-prompt-templates",
-		"--no-context-files",
-		"--no-mcp",
-		"--thinking",
-		"off",
-	];
-	if (model) args.push("--model", model);
-	args.push(titlePrompt(prompt));
+	const host = this.options.piHostBin;
+	const args = host
+		? ["--print", ...(model ? ["--model", model] : []), titlePrompt(prompt)]
+		: [
+				"--print",
+				"--no-session",
+				"--no-tools",
+				"--no-extensions",
+				"--no-skills",
+				"--no-prompt-templates",
+				"--no-context-files",
+				"--no-mcp",
+				"--thinking",
+				"off",
+				...(model ? ["--model", model] : []),
+				titlePrompt(prompt),
+			];
 	return await new Promise<string>((resolve, reject) => {
 		const child = execFile(
-			this.options.piBin,
+			host ?? this.options.piBin,
 			args,
 			{
 				cwd: live.info.cwd,

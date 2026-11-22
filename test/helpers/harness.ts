@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { Hub, type HubOptions } from "../../src/hub.ts";
 
 export const FIXTURE = fileURLToPath(new URL("../fixtures/fake-pi.mjs", import.meta.url));
+export const HOST_FIXTURE = fileURLToPath(new URL("../fixtures/fake-pi-host.mjs", import.meta.url));
 
 export interface TestPaths {
 	dir: string;
@@ -23,7 +24,9 @@ const roots: string[] = [];
 let fixtureReady: Promise<void> | undefined;
 
 async function readyFixture(): Promise<void> {
-	fixtureReady ??= chmod(FIXTURE, 0o755).catch(() => {});
+	fixtureReady ??= Promise.all([chmod(FIXTURE, 0o755), chmod(HOST_FIXTURE, 0o755)])
+		.then(() => {})
+		.catch(() => {});
 	await fixtureReady;
 }
 

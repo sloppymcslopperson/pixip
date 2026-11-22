@@ -10,6 +10,7 @@ import { piRpcBackend, type PiBackend } from "./backend.ts";
 import { type NameSource } from "./sessionIndex.ts";
 import { isBlockingUiMethod, SYMBOL_PENDING, coverageKey } from "./jsonl.ts";
 import { resolveSessionPolicy, type CommandLayer } from "./commands.ts";
+import { messageText } from "./titles.ts";
 import { frameError, frameEvent, frameFooter, frameRestarting, frameSessions, frameStatus } from "./wire.ts";
 import type { CommandPolicy, FooterData, SessionInfo } from "./wire.ts";
 
@@ -29,6 +30,8 @@ const run = promisify(execFile);
 
 export interface HubOptions {
 	piBin: string;
+	/** `pixip-pi-host` bin; when set, new and reattached sessions spawn it instead of `pi`. */
+	piHostBin?: string;
 	sessionsDir: string;
 	/** `<data-dir>`: where `pixip.json`, the pid/log and the index live. */
 	dataDir?: string;
@@ -79,8 +82,10 @@ interface LiveSession {
 	subs: Set<Subscriber>;
 	/** Latest setStatus/setWidget records, replayed to a late subscriber. */
 	addonUi?: AddonUiCache;
-	/** Unanswered select/confirm/input/editor requests, replayed on reattach. */
+	/** Unanswered select/confirm/input/editor/panel requests, replayed on reattach. */
 	pendingUi?: Map<string, PendingUiRequest>;
+	/** Consumed `hello` from `pixip-pi-host`; never forwarded as a transcript event. */
+	host?: { protocol?: number; piVersion?: string; capabilities?: string[] };
 	idleTimer?: NodeJS.Timeout;
 	branch?: string;
 	footerTimer?: NodeJS.Timeout;
@@ -94,6 +99,10 @@ interface LiveSession {
 	titleAttempted?: boolean;
 	/** First prompt whose title call lost the provider race; retried at settle. */
 	titlePending?: string;
+	/** A first slash-command prompt: label from the expanded user message. */
+	titleAwaitingMessage?: boolean;
+	/** Raw slash-command prompt, used only when no expanded message arrives. */
+	titlePrompt?: string;
 	nameSource?: NameSource;
 }
 
@@ -200,13 +209,16 @@ export async function spawn(
 		lastActivity: started,
 	};
 
+	const host = this.options.piHostBin;
 	const proc = (this.options.backend ?? piRpcBackend).create({
-		command: this.options.piBin,
-		args: [...input.args, ...this.options.extraPiArgs],
+		command: host ?? this.options.piBin,
+		// The host accepts the same session flags; extra Pi-only args belong to the
+		// legacy child and would be rejected by the host's strict parser.
+		args: host ? input.args : [...input.args, ...this.options.extraPiArgs],
 		cwd: input.cwd,
 		env: { ...this.options.env, PIXIP_SESSION_ID: logicalId, PIXIP_INSIDE: "1" },
 		onRecord: (raw, record) => this.onRecord(info, raw, record),
-		onStderr: (chunk) => this.options.log(`[pi ${input.cwd}] ${chunk.trimEnd()}`),
+		onStderr: (chunk) => this.options.log(`[${host ? "host" : "pi"} ${input.cwd}] ${chunk.trimEnd()}`),
 		onExit: (code, signal) => {
 			const live = this.live.get(info.id);
 			if (live?.proc === proc) {
@@ -309,11 +321,28 @@ export function onRecord(this: any, info: SessionInfo, raw: string, record: unkn
 		widgetKey?: string;
 		widgetLines?: unknown;
 		widgetPlacement?: string;
+		protocol?: number;
+		piVersion?: string;
+		capabilities?: unknown;
 	};
 	// Stamp the entry identity once, before the status bookkeeping below.
 	const key = coverageKey(target, typed);
 
 	switch (typed.type) {
+		case "hello":
+			// Protocol handshake, not transcript. Record it for diagnostics/replay tests
+			// and never hand it to the client as an event.
+			target.host = {
+				...(typeof typed.protocol === "number" ? { protocol: typed.protocol } : {}),
+				...(typeof typed.piVersion === "string" ? { piVersion: typed.piVersion } : {}),
+				capabilities: Array.isArray(typed.capabilities)
+					? typed.capabilities.filter((value): value is string => typeof value === "string")
+					: [],
+			};
+			this.options.log(
+				`pi host hello: protocol ${target.host.protocol ?? "?"} pi ${target.host.piVersion ?? "?"} [${target.host.capabilities?.join(", ") ?? ""}]`,
+			);
+			return;
 		case "agent_start":
 			target.info.state = "busy";
 			this.clearIdle(target);
@@ -325,6 +354,14 @@ export function onRecord(this: any, info: SessionInfo, raw: string, record: unkn
 			this.emitStatus(target);
 			this.scheduleFooter(target);
 			this.scheduleIdle(target);
+			if (target.titleAwaitingMessage) {
+				// No expanded user message (for example an extension command that
+				// only notified): fall back to the command text once the run settles.
+				const prompt = target.titlePrompt;
+				target.titleAwaitingMessage = false;
+				target.titlePrompt = undefined;
+				if (prompt && !target.info.name) void this.autoLabel(target, prompt, true);
+			}
 			if (target.titlePending) {
 				const prompt = target.titlePending;
 				target.titlePending = undefined;
@@ -337,6 +374,18 @@ export function onRecord(this: any, info: SessionInfo, raw: string, record: unkn
 			this.emitStatus(target);
 			void this.persistName(target);
 			break;
+		case "message_start": {
+			const message = typed.message as { role?: string } | undefined;
+			// A slash command's result arrives as the first user message, already
+			// expanded by Pi. Its text is the prompt the model sees, so label that.
+			if (message?.role === "user" && target.titleAwaitingMessage && !target.info.name) {
+				target.titleAwaitingMessage = false;
+				const prompt = messageText(message).trim() || target.titlePrompt || "";
+				target.titlePrompt = undefined;
+				if (prompt) void this.autoLabel(target, prompt);
+			}
+			break;
+		}
 		case "message_end": {
 			const message = typed.message as { role?: string } | undefined;
 			if (message?.role === "user") target.info.messageCount = (target.info.messageCount ?? 0) + 1;

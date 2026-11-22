@@ -22,7 +22,15 @@ node bin/pixip.ts --data-dir ./tmp/dev        # http://127.0.0.1:8137/
 `pi-host/` is an optional workspace package, `pixip-pi-host`: an embedded Pi RPC
 host that pixip can use instead of spawning `pi --mode rpc`. It adds a blocking
 `panel` UI request for A2UI while otherwise keeping Pi RPC v1. See
-[pi-host/README.md](pi-host/README.md); the hub does not use it yet.
+[pi-host/README.md](pi-host/README.md). It is opt-in:
+
+```bash
+node bin/pixip.ts --data-dir ./tmp/dev --pi-host  # resolve the workspace bin
+node bin/pixip.ts --data-dir ./tmp/dev --pi-host /path/to/pixip-pi-host
+PIXIP_PI_HOST=/path/to/pixip-pi-host node bin/pixip.ts --data-dir ./tmp/dev
+```
+
+Without `--pi-host`/`PIXIP_PI_HOST`, pixip keeps using `pi --mode rpc`.
 
 ## Why
 
@@ -72,7 +80,8 @@ do in the TUI.
   wake/reattach; collapsing keeps hot/warm sessions and each group's newest
   session visible by default, configurable from the header gear;
 - first-prompt session labels: a separate one-shot Pi call summarizes the first
-  prompt to 3-5 words (`--title-model` / `PIXIP_TITLE_MODEL` overrides the
+  prompt to 3-5 words (a slash command is labeled from the user message it expands
+  into; `--title-model` / `PIXIP_TITLE_MODEL` overrides the
   current session model; local fallback), while a manual rename always wins;
 - streamed transcript: user/assistant text, thinking collapsed, tool calls with
   ANSI output, error styling, durations;

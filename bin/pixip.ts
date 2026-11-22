@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { closeSync, openSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
 import { mkdir, open } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -49,6 +50,8 @@ interface Options {
 	port: number;
 	dataDir: string;
 	piBin: string;
+	/** `--pi-host [path]` / `PIXIP_PI_HOST`; `""` means resolve the installed host bin. */
+	piHost?: string;
 	idleMs: number;
 	titleModel: string;
 	dev: boolean;
@@ -77,6 +80,7 @@ function parseArgs(argv: string[]): Options {
 		port: 8137,
 		dataDir: resolve("tmp/dev"),
 		piBin: "pi",
+		piHost: undefined,
 		idleMs: 15 * 60_000,
 		titleModel: process.env["PIXIP_TITLE_MODEL"] ?? "",
 		dev: false,
@@ -98,6 +102,10 @@ function parseArgs(argv: string[]): Options {
 			if (value === undefined) throw new Error(`${arg} needs a value`);
 			return value;
 		};
+		if (arg !== undefined && arg.startsWith("--pi-host=")) {
+			options.piHost = arg.slice("--pi-host=".length);
+			continue;
+		}
 		switch (arg) {
 			case "--host":
 				options.host = next();
@@ -111,6 +119,17 @@ function parseArgs(argv: string[]): Options {
 			case "--pi":
 				options.piBin = next();
 				break;
+			case "--pi-host": {
+				// The value is optional: a bare flag means "resolve the installed host".
+				const value = argv[index + 1];
+				if (value !== undefined && !value.startsWith("-")) {
+					options.piHost = value;
+					index += 1;
+				} else {
+					options.piHost = "";
+				}
+				break;
+			}
 			case "--idle-ms":
 				options.idleMs = Number(next());
 				break;
@@ -167,6 +186,9 @@ function parseArgs(argv: string[]): Options {
 	if (!Number.isFinite(options.idleMs) || options.idleMs < 0) throw new Error("--idle-ms must be 0 or more");
 	if (!Number.isInteger(options.lines) || options.lines < 1) throw new Error("--lines must be 1 or more");
 	if (!Number.isFinite(options.timeoutS) || options.timeoutS < 0) throw new Error("--timeout must be 0 or more");
+	if (options.piHost === undefined && process.env["PIXIP_PI_HOST"]) {
+		options.piHost = process.env["PIXIP_PI_HOST"];
+	}
 	return options;
 }
 
@@ -177,6 +199,9 @@ function printHelp(): void {
                       and pixip.log live here (default ./tmp/dev), never
                       ~/.agent/sessions
   --pi <path>         pi executable (default: pi from PATH)
+  --pi-host [path]    spawn pixip-pi-host instead of pi; no value resolves the
+                      installed workspace bin, a value overrides it
+                      (env: PIXIP_PI_HOST). Legacy --pi stays the default.
   --idle-ms <ms>      detach an idle session after this long, keeping its JSONL
                       for resume (default 900000; 0 disables)
   --title-model <p/id> model for the automatic 3-5 word session label
@@ -235,6 +260,10 @@ function serveArgs(options: Options): string[] {
 		"--idle-ms",
 		String(options.idleMs),
 	];
+	if (options.piHost !== undefined) {
+		args.push("--pi-host");
+		if (options.piHost) args.push(options.piHost);
+	}
 	if (options.dev) args.push("--dev");
 	for (const name of options.allowCommands) args.push("--allow-command", name);
 	for (const name of options.denyCommands) args.push("--deny-command", name);
@@ -266,8 +295,33 @@ async function main(): Promise<void> {
 
 // -------------------------------------------------------------------- serve
 
+/** Resolve an explicit host bin or the installed `pixip-pi-host` package bin. */
+function resolvePiHost(value: string | undefined): string {
+	if (value) {
+		const path = resolve(value);
+		if (!existsSync(path)) throw new Error(`--pi-host not found: ${path}`);
+		return path;
+	}
+	const require = createRequire(import.meta.url);
+	let packagePath: string;
+	try {
+		packagePath = require.resolve("pixip-pi-host/package.json");
+	} catch {
+		throw new Error("pixip-pi-host is not installed; pass --pi-host <path> or install the workspace");
+	}
+	const pkg = JSON.parse(readFileSync(packagePath, "utf8")) as {
+		bin?: string | Record<string, string>;
+	};
+	const bin = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.["pixip-pi-host"];
+	if (!bin) throw new Error(`pixip-pi-host has no bin in ${packagePath}`);
+	const path = resolve(dirname(packagePath), bin);
+	if (!existsSync(path)) throw new Error(`pixip-pi-host bin not found: ${path}`);
+	return path;
+}
+
 async function serve(options: Options): Promise<void> {
 	const paths = daemonPaths(options.dataDir);
+	const piHostBin = options.piHost === undefined ? undefined : resolvePiHost(options.piHost || undefined);
 	await mkdir(join(options.dataDir, "sessions"), { recursive: true });
 
 	const existing = await runningDaemon(options.dataDir);
@@ -277,6 +331,7 @@ async function serve(options: Options): Promise<void> {
 
 	const hub = new Hub({
 		piBin: options.piBin,
+		piHostBin,
 		sessionsDir: join(options.dataDir, "sessions"),
 		dataDir: options.dataDir,
 		indexPath: join(options.dataDir, "sessions.json"),

@@ -24,11 +24,14 @@ remote terminal.
    extension that calls `ctx.ui.confirm` gets `extension_ui_request` on stdout,
    which the phone answers, which goes back as `extension_ui_response`. That path
    is exercised today (the smoke test observes extension UI requests arriving over
-   the socket). Blocking UI requests (`select`, `confirm`, `input`, `editor`) are
-   cached on the live session and replayed to a reattaching client before its
-   snapshot; if the last client has been gone for two minutes, the hub answers
-   the request with `cancelled: true` so a backgrounded browser cannot leave Pi
-   waiting forever.
+   the socket). Blocking UI requests (`select`, `confirm`, `input`, `editor`,
+   and `panel` when the host backend is active) are cached on the live session
+   and replayed to a reattaching client before its snapshot; if the last client
+   has been gone for two minutes, the hub answers the request with
+   `cancelled: true` so a backgrounded browser cannot leave Pi waiting forever.
+   The client renders these in a collapsible inline surface between `#log` and
+   the composer, not as a modal: history stays scrollable and a second pending
+   request is queued behind a Replace banner. App-owned sheets stay modal.
 6. **Isolation for development.** `--data-dir` sets `--session-dir`; nothing in
    `~/.pi/agent/sessions` is read or written by tests.
 
@@ -36,12 +39,33 @@ remote terminal.
 
 `pi-host/` contains `pixip-pi-host`, an optional package that embeds the Pi SDK
 and speaks Pi RPC v1 plus a `hello` record and a blocking `panel` UI request.
-It exists so a later integration can stop spawning `pi --mode rpc` without
-patching Pi. The host emits protocol records on stdout only, shares the user's
-Pi agent dir and extension set for now, and is isolated by its own
-`--session-dir`. The hub remains the only process that owns the browser
-protocol; nothing in the current hub path consumes the host yet, so the
-latency numbers above are unchanged.
+It exists so an integration can stop spawning `pi --mode rpc` without patching
+Pi. The host emits protocol records on stdout only, shares the user's Pi agent
+dir and extension set for now, and is isolated by its own `--session-dir`.
+
+It is opt-in: `--pi-host [path]` (or `PIXIP_PI_HOST`) makes the hub spawn the
+host for new and reattached sessions; `--pi` remains the default. The host is
+resolved from the installed workspace package when the flag has no value, and
+there is no silent fallback to a global `pi`. `hello` is consumed by the hub for
+diagnostics and never forwarded as a transcript event; `panel` joins
+`select`/`confirm`/`input`/`editor` in the pending-UI cache and replay path.
+Automatic titles use the host's `--print` one-shot mode when the host backend is
+active. The hub remains the only process that owns the browser protocol.
+
+Measured on this box (2026-11-21, Node 22.23.5, real Pi 1.5.2 vs workspace host,
+three cold/warm attaches per backend):
+
+| metric                         | legacy `pi --mode rpc` | `pixip-pi-host` | delta  |
+| ------------------------------ | ---------------------- | --------------- | ------ |
+| cold attach (create)           | 1239 ms                | 3745 ms         | +202%  |
+| warm attach (reattach)         | 1240-1331 ms           | 3487-3657 ms    | ~+180% |
+| child RSS                      | 108-110 MB             | 149-152 MB      | ~+37%  |
+| command round-trip (get_state) | 1.55 ms                | 1.59 ms         | ~equal |
+| event -> frame, median / p95   | 0.30 / 1.71 ms         | 0.30 / 1.30 ms  | ~equal |
+
+The host is slower to boot because it loads the SDK and the user's extension set
+in-process; once attached, command and event latency match the legacy child.
+That is why the host stays opt-in until boot cost is addressed.
 
 ## Data flow
 
@@ -377,7 +401,10 @@ never silently drops it.
 ## First-prompt session labels
 
 A new session with no messages and no name gets a label from its first user
-prompt. The hub starts a separate short-lived `pi --print --no-session` child
+prompt. When that prompt is a slash command, the hub waits for the expanded user
+message Pi actually runs (an extension command such as `/fit work` sends one
+itself) and labels that text, so the alias is never mistaken for the task. The
+hub starts a separate short-lived `pi --print --no-session` child
 with tools, extensions, skills, prompt templates, context files and MCP disabled,
 then applies the reply with `set_session_name`. The real session's transcript and
 model context are untouched, and the call runs beside the prompt rather than on
@@ -492,13 +519,16 @@ protocol path is still one obvious place to start:
 | `src/client/dashboard.js`                       | session list, groups, directory picker, settings/archive                                                                   |
 | `src/client/session.js`                         | open/cache/restore, frame routing, new-session shell                                                                       |
 | `src/client/transcript.js`                      | snapshot/windows, live events, footer, thinking state                                                                      |
-| `src/client/sheets.js`                          | shared sheet/dialog/confirm layer and extension-UI rendering                                                               |
+| `src/client/sheets.js`                          | app-owned modal sheets (settings/model/tree/export/directory/notices) and `notify` routing                                 |
+| `src/client/surface.js`                         | inline blocking-request surface: queue, collapse, Replace banner, answer/cancel                                            |
+| `src/client/surfaceQueue.js`                    | DOM-free active/queued request queue used by `surface.js`                                                                  |
+| `src/client/panelHost.js`                       | generic `panel` renderer registry, fallback card, draft snapshot/restore in `sessionStorage`                               |
 | `src/client/composer.js`                        | attachments, composer, built-in commands, bash cards                                                                       |
 | `src/client/{menu,controls,toast,transport}.js` | menus/queue, scale/refresh controls, notices, websocket                                                                    |
 
-CSS is split into `base`, `transcript`, `list`, `status`, `composer` and `sheets`
-files loaded in that order: one asset set, no bundler and no per-breakpoint
-markup. The hub modules are intentionally thin over the same shared state; the
+CSS is split into `base`, `transcript`, `list`, `status`, `composer`, `sheets` and
+`surface` files loaded in that order: one asset set, no bundler and no
+per-breakpoint markup. The hub modules are intentionally thin over the same shared state; the
 public `Hub` API and the wire protocol are unchanged by that split.
 
 ## Rust port map
