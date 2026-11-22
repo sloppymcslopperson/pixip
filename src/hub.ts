@@ -5,6 +5,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { RpcChild } from "./rpc.ts";
+import { MAX_UPLOAD_BYTES, normalizeImageAttachments, safeUploadName } from "./attachments.ts";
 import { resolveSessionPolicy, type CommandLayer } from "./commands.ts";
 import { resolveModelArgument, resolveThinkingArgument } from "./client/commands.js";
 import { exportFileName } from "./client/sessionInfo.js";
@@ -542,7 +543,8 @@ export class Hub {
 	 * means a message sent in the settle race starts a turn instead of sitting in
 	 * Pi's steering queue until some later prompt happens to drain it.
 	 */
-	async prompt(id: string, text: string, streamingBehavior?: "steer" | "followUp"): Promise<void> {
+	async prompt(id: string, text: string, streamingBehavior?: "steer" | "followUp", images?: unknown): Promise<void> {
+		const attachments = normalizeImageAttachments(images);
 		const live = this.require(id);
 		this.touch(live);
 		// The title call runs beside the real prompt; never wait for it here.
@@ -552,7 +554,12 @@ export class Hub {
 		}
 		try {
 			await live.proc.command(
-				{ type: "prompt", message: text, ...(streamingBehavior ? { streamingBehavior } : {}) },
+				{
+					type: "prompt",
+					message: text,
+					...(attachments.length > 0 ? { images: attachments } : {}),
+					...(streamingBehavior ? { streamingBehavior } : {}),
+				},
 				{ timeoutMs: this.options.promptTimeoutMs ?? 0 },
 			);
 		} catch (error) {
@@ -573,8 +580,24 @@ export class Hub {
 	 * would never run, and the hub would stay "busy" forever because no
 	 * `agent_start`/`agent_settled` ever follows.
 	 */
-	async steer(id: string, text: string): Promise<void> {
-		await this.prompt(id, text, "steer");
+	async steer(id: string, text: string, images?: unknown): Promise<void> {
+		await this.prompt(id, text, "steer", images);
+	}
+
+	/**
+	 * Write one non-image attachment under the logical session's upload dir and
+	 * return the absolute path the prompt should mention. Kept across stop/attach;
+	 * cleared on `/new`, archive and delete.
+	 */
+	async uploadFile(id: string, name: string, bytes: Buffer): Promise<{ path: string; name: string; size: number }> {
+		const live = this.require(id);
+		if (bytes.byteLength > MAX_UPLOAD_BYTES) throw new Error("file is too large (max 100 MB)");
+		const cleanName = safeUploadName(name);
+		const dir = this.uploadsDir(live.info.logicalId ?? live.info.id);
+		await mkdir(dir, { recursive: true });
+		const path = join(dir, `${randomUUID()}-${cleanName}`);
+		await writeFile(path, bytes);
+		return { path, name: cleanName, size: bytes.byteLength };
 	}
 
 	/**
@@ -996,6 +1019,22 @@ export class Hub {
 		return join(this.options.dataDir ?? dirname(this.options.sessionsDir), "exports");
 	}
 
+	private uploadsRoot(): string {
+		return join(this.options.dataDir ?? dirname(this.options.sessionsDir), "uploads");
+	}
+
+	private uploadsDir(logicalId: string): string {
+		return join(this.uploadsRoot(), safeName(logicalId));
+	}
+
+	/** Best-effort: a missing upload dir is the normal case, a failure is logged. */
+	private async clearUploads(logicalId?: string): Promise<void> {
+		if (!logicalId) return;
+		await rm(this.uploadsDir(logicalId), { recursive: true, force: true }).catch((error: unknown) => {
+			this.options.log(`upload cleanup failed for ${logicalId}: ${(error as Error).message}`);
+		});
+	}
+
 	/** `/export`: HTML under `<data-dir>/exports`, served by the HTTP route. */
 	async exportHtml(id: string): Promise<string> {
 		const live = this.require(id);
@@ -1030,6 +1069,7 @@ export class Hub {
 			{ timeoutMs: this.options.promptTimeoutMs ?? 0 },
 		) as { cancelled?: boolean } | null) ?? {};
 		if (result.cancelled) throw new Error("new session was cancelled by an extension");
+		await this.clearUploads(live.info.logicalId ?? live.info.id);
 		return await this.rekeyFromState(live);
 	}
 
@@ -1601,6 +1641,7 @@ export class Hub {
 			await this.rollbackFiles(files, dir);
 			throw error;
 		}
+		await this.clearUploads(target.record.logicalId);
 		await this.removeRecord(target.record);
 		this.files.clear();
 		for (const piId of target.record.piIds) this.exported.delete(piId);

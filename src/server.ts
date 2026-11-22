@@ -5,6 +5,7 @@ import { basename, extname, join, normalize } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 
 import { createDirectory, DirError, listDirectories } from "./dirs.ts";
+import { MAX_UPLOAD_BYTES } from "./attachments.ts";
 import { Hub } from "./hub.ts";
 import {
 	frameBash,
@@ -232,6 +233,15 @@ async function handleHttp(
 			send(200, JSON.stringify(info));
 			return;
 		}
+		const uploadMatch = /^\/api\/sessions\/([^/]+)\/uploads$/.exec(url.pathname);
+		if (req.method === "POST" && uploadMatch?.[1]) {
+			const id = decodeURIComponent(uploadMatch[1]);
+			const name = url.searchParams.get("name") ?? "file";
+			const bytes = await readBinaryBody(req, MAX_UPLOAD_BYTES);
+			const uploaded = await hub.uploadFile(id, name, bytes);
+			send(200, JSON.stringify({ ok: true, ...uploaded }));
+			return;
+		}
 		if (req.method === "POST" && url.pathname === "/api/sessions/archive-inactive") {
 			const result = await hub.archiveInactive();
 			send(200, JSON.stringify({ ok: true, archived: result.archived.length, failed: result.failed, sessions: result.archived }));
@@ -323,7 +333,7 @@ async function handleHttp(
 		}
 		send(200, asset, CONTENT_TYPES[extname(normalized)] ?? "application/octet-stream");
 	} catch (error) {
-		const status = error instanceof DirError ? error.status : 500;
+		const status = error instanceof DirError ? error.status : error instanceof PayloadTooLargeError ? 413 : 500;
 		log(`http error: ${(error as Error).message}`);
 		send(status, JSON.stringify({ error: (error as Error).message }));
 	}
@@ -502,11 +512,11 @@ async function handleCommand(
 		switch (type) {
 			case "prompt": {
 				const behavior = message["streamingBehavior"] === "steer" ? "steer" : message["streamingBehavior"] === "followUp" ? "followUp" : undefined;
-				await hub.prompt(sessionId, String(message["text"] ?? ""), behavior);
+				await hub.prompt(sessionId, String(message["text"] ?? ""), behavior, message["images"]);
 				break;
 			}
 			case "steer":
-				await hub.steer(sessionId, String(message["text"] ?? ""));
+				await hub.steer(sessionId, String(message["text"] ?? ""), message["images"]);
 				break;
 			case "clear_queue": {
 				const texts = await hub.clearQueue(sessionId);
@@ -655,4 +665,23 @@ async function readBody(req: IncomingMessage): Promise<string> {
 	const chunks: Buffer[] = [];
 	for await (const chunk of req) chunks.push(chunk as Buffer);
 	return Buffer.concat(chunks).toString("utf8");
+}
+
+class PayloadTooLargeError extends Error {}
+
+/** Raw upload body with a hard cap, checked before and during the stream. */
+async function readBinaryBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
+	const declared = Number(req.headers["content-length"] ?? 0);
+	if (Number.isFinite(declared) && declared > maxBytes) {
+		throw new PayloadTooLargeError("file is too large (max 100 MB)");
+	}
+	const chunks: Buffer[] = [];
+	let total = 0;
+	for await (const chunk of req) {
+		const buffer = chunk as Buffer;
+		total += buffer.length;
+		if (total > maxBytes) throw new PayloadTooLargeError("file is too large (max 100 MB)");
+		chunks.push(buffer);
+	}
+	return Buffer.concat(chunks, total);
 }

@@ -271,6 +271,7 @@ function handle(line) {
 				type: "prompt",
 				id: command.id,
 				text: command.message,
+				images: command.images ?? null,
 				streamingBehavior: command.streamingBehavior ?? null,
 			});
 			// Fire-and-forget records a test wants to arrive while a subscriber is live.
@@ -298,7 +299,7 @@ function handle(line) {
 			return prompt();
 		}
 		case "steer":
-			logRecord({ type: "steer", id: command.id, text: command.message });
+			logRecord({ type: "steer", id: command.id, text: command.message, images: command.images ?? null });
 			steering.push(command.message);
 			emitQueue();
 			return ok(command.id, "steer", {});
