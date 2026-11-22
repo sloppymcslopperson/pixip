@@ -21,7 +21,9 @@ const tabsLayoutStyles = css`
 	}
 	.a2ui-tab-bar {
 		overflow-x: auto;
-		overscroll-behavior-x: contain;
+		overflow-y: hidden;
+		touch-action: pan-x;
+		overscroll-behavior: contain;
 		scrollbar-width: thin;
 		position: sticky;
 		top: 0;

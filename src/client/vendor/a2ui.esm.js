@@ -969,32 +969,34 @@ Examples:
 - 'HH:mm' -> '14:30' (Military)
 - 'h:mm a' -> '2:30 PM'
 - 'EEEE, d MMMM' -> 'Friday, 16 January'`)}),{required:["format","value"],closure:"unevaluatedProperties"})},gh={name:"pluralize",returnType:"string",description:"Returns a localized string based on the Common Locale Data Repository (CLDR) plural category of the count (zero, one, two, few, many, other). Requires an 'other' fallback. For English, just use 'one' and 'other'.",schema:W(d.object({value:jt.describe("REF:#/$defs/DynamicNumber|The numeric value used to determine the plural category."),zero:Q.describe("REF:#/$defs/DynamicString|String for the 'zero' category (e.g., 0 items).").optional(),one:Q.describe("REF:#/$defs/DynamicString|String for the 'one' category (e.g., 1 item).").optional(),two:Q.describe("REF:#/$defs/DynamicString|String for the 'two' category (used in Arabic, Welsh, etc.).").optional(),few:Q.describe("REF:#/$defs/DynamicString|String for the 'few' category (e.g., small groups in Slavic languages).").optional(),many:Q.describe("REF:#/$defs/DynamicString|String for the 'many' category (e.g., large groups in various languages).").optional(),other:Q.describe("REF:#/$defs/DynamicString|The default/fallback string (used for general plural cases).")}),{closure:"unevaluatedProperties"})},yh={name:"openUrl",returnType:"void",requiresUserActivation:!0,description:"Opens the specified URL in a browser or handler (requires user activation). This function has no return value.",schema:W(d.object({url:d.union([W(d.string(),{keywords:{format:"uri"}}),wt.describe("REF:#/$defs/DataBinding"),ct.describe("REF:#/$defs/FunctionCall")]).describe("The URL to open.")}),{closure:"unevaluatedProperties"})},bh={name:"and",returnType:"boolean",description:"Performs a logical AND operation on a list of boolean values.",schema:W(d.object({values:d.array(Yt.describe("REF:#/$defs/DynamicBoolean")).min(2).describe("The list of boolean values to evaluate.")}),{closure:"unevaluatedProperties"})},vh={name:"or",returnType:"boolean",description:"Performs a logical OR operation on a list of boolean values.",schema:W(d.object({values:d.array(Yt.describe("REF:#/$defs/DynamicBoolean")).min(2).describe("The list of boolean values to evaluate.")}),{closure:"unevaluatedProperties"})},xh={name:"not",returnType:"boolean",description:"Performs a logical NOT operation on a boolean value.",schema:W(d.object({value:Yt.describe("REF:#/$defs/DynamicBoolean|The boolean value to negate.")}),{closure:"unevaluatedProperties"})};var Ah=ah,Dh=ch,Ch=uh,wh=lh,Eh=dh;var Qn="en-US";function ua(t){if(!t)return Qn;try{return Intl.NumberFormat.supportedLocalesOf(t).length>0?t:Qn}catch{return Qn}}function $x(t){if(t==null)return"";if(typeof t=="object")try{return JSON.stringify(t)??String(t)}catch{return String(t)}return String(t)}function $h(t){let e=!0;return(t==null||typeof t=="string"&&t===""||Array.isArray(t)&&t.length===0)&&(e=!1),{valid:e,...e?{}:{message:"This field is required."}}}function Rh(t,e){if(!Hf(e))throw new J(`Unsafe regex pattern (catastrophic backtracking risk): ${e}`,"regex");try{let r=new RegExp(e).test(String(t??""));return{valid:r,...r?{}:{message:"Value does not match required pattern."}}}catch(r){throw new J(`Invalid regex pattern: ${e}`,"regex",r)}}function Th(t,e,r){let n=0;(typeof t=="string"||Array.isArray(t))&&(n=t.length);let i=!0,o;return e!==void 0&&!isNaN(e)&&n<e?(i=!1,o=`Minimum length is ${e}.`):r!==void 0&&!isNaN(r)&&n>r&&(i=!1,o=`Maximum length is ${r}.`),{valid:i,...o?{message:o}:{}}}function Oh(t,e,r){let n=Number(t);if(isNaN(n))return{valid:!1,message:"Value must be a valid number."};let i=!0,o;return e!==void 0&&!isNaN(e)&&n<e?(i=!1,o=`Minimum value is ${e}.`):r!==void 0&&!isNaN(r)&&n>r&&(i=!1,o=`Maximum value is ${r}.`),{valid:i,...o?{message:o}:{}}}var Rx=/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;function Nh(t){let e=typeof t=="string"&&Rx.test(t);return{valid:e,...e?{}:{code:"INVALID_EMAIL",severity:"error",message:"Please enter a valid email address (e.g. user@example.com)."}}}var Sh=new Map;function Tx(t,e,r){let n=`${t}:${e??"undef"}:${r??"true"}`,i=Sh.get(n);return i||(i=new Intl.NumberFormat(t,{minimumFractionDigits:e,maximumFractionDigits:e,useGrouping:r}),Sh.set(n,i)),i}var _h=new Map;function Ox(t,e,r,n){let i=`${t}:${e}:${r??"undef"}:${n??"true"}`,o=_h.get(i);return o||(o=new Intl.NumberFormat(t,{style:"currency",currency:e,minimumFractionDigits:r,maximumFractionDigits:r,useGrouping:n}),_h.set(i,o)),o}var Nx="USD",Ih=new Map;function jx(t,e,r){let n=`${t}:${e??"undef"}:${r??"true"}`,i=Ih.get(n);return i||(i=new Intl.NumberFormat(t,{style:"currency",currency:Nx,currencyDisplay:"code",minimumFractionDigits:e,maximumFractionDigits:e,useGrouping:r}),Ih.set(n,i)),i}var kh=new Map;function Px(t){let e=kh.get(t);if(!e){let r=(o,s)=>{let a=new Intl.DateTimeFormat(t,{...o,timeZone:"UTC"});return s.map(c=>a.format(c))},n=Array.from({length:12},(o,s)=>new Date(Date.UTC(2021,s,15))),i=Array.from({length:7},(o,s)=>new Date(Date.UTC(2021,2,1+s)));e={monthsLong:r({month:"long"},n),monthsShort:r({month:"short"},n),weekdaysLong:r({weekday:"long"},i),weekdaysShort:r({weekday:"short"},i)},kh.set(t,e)}return e}var Mx=/yyyy|yy|MMMM|MMM|MM|M|EEEE|E|dd|d|HH|H|hh|h|mm|ss|a/g,Lx=/(?:Z|[+-]\d{2}:?\d{2})$/,Bx=/^([+-]?\d{4,6})-(\d{2})-(\d{2})(?:[T ](\d{2})(?::(\d{2})(?::(\d{2}))?)?)?/;function Vx(t){let e=Lx.test(t),r=new Date(e?t:`${t}Z`);if(isNaN(r.getTime()))return null;let n=0,i=/([+-])(\d{2}):?(\d{2})$/.exec(t);i&&(n=(i[1]==="-"?-1:1)*(Number(i[2])*60+Number(i[3])));let o=new Date(r.getTime()+n*6e4);return Ux(t,o)?{shifted:o,instant:r}:null}function Ux(t,e){let r=Bx.exec(t);if(!r)return!1;let n=i=>r[i]===void 0?void 0:Number(r[i]);return n(1)===e.getUTCFullYear()&&n(2)===e.getUTCMonth()+1&&n(3)===e.getUTCDate()&&(n(4)??e.getUTCHours())===e.getUTCHours()&&(n(5)??e.getUTCMinutes())===e.getUTCMinutes()&&(n(6)??e.getUTCSeconds())===e.getUTCSeconds()}var Fh=new Map;function zx(t){let e=Fh.get(t);return e||(e=new Intl.PluralRules(t),Fh.set(t,e)),e}var Ui=t=>!!t,la=t=>{if(typeof t=="object"&&t!==null&&!Array.isArray(t)){let e=t.valid;if(typeof e=="boolean")return e}return!!t};function qx(t,e=Ui){if(!Array.isArray(t)||t.length<2)throw new J("and requires at least 2 values","and");return t.every(e)}function Zx(t,e=Ui){if(!Array.isArray(t)||t.length<2)throw new J("or requires at least 2 values","or");return t.some(e)}function Wx(t,e=Ui){return!e(t)}function jh(t){if(typeof t!="object"||t===null||Array.isArray(t))return t;if("path"in t&&typeof t.path=="string"&&!("@path"in t))return{"@path":t.path};if("call"in t&&typeof t.call=="string"&&!("@call"in t)){let e={};if(t.args&&typeof t.args=="object")for(let[r,n]of Object.entries(t.args))e[r]=jh(n);return{"@call":t.call,args:e,returnType:t.returnType}}return t}function Gx(t,e){let n=new ko().parse(t);if(n.length===0)return"";let i=oe(e.surface?.protocolVersion??e.surface?.defaultCatalog?.protocolVersion,"1.0"),o=n.map(s=>{if(typeof s!="object"||s===null||Array.isArray(s))return s;let a=i?jh(s):s;return e.resolveSignal(a)});return at(()=>o.map(s=>$x(jr(s)?ye(s):s)).join(""))}function Hx(t,e,r,n=Qn){return isNaN(t)?"":Tx(n,e,r).format(t)}function Kx(t,e,r=2,n,i=Qn){if(isNaN(t))return"";let o=String(e).toUpperCase();try{return Ox(i,o,r,n).format(t)}catch{return jx(i,r,n).formatToParts(t).map(s=>s.type==="currency"?o:s.value).join("")}}function Jx(t,e="yyyy-MM-dd",r=Qn){if(!t)return"";let n=Vx(String(t));if(!n)return"";let{shifted:i,instant:o}=n,s=e||"yyyy-MM-dd";if(s==="ISO")return o.toISOString();let a=Px(r),c=(i.getUTCDay()+6)%7,u=i.getUTCHours(),l=u%12||12;return s.replace(Mx,f=>{switch(f){case"yyyy":return String(i.getUTCFullYear());case"yy":return String(i.getUTCFullYear()).slice(-2);case"MMMM":return a.monthsLong[i.getUTCMonth()];case"MMM":return a.monthsShort[i.getUTCMonth()];case"MM":return String(i.getUTCMonth()+1).padStart(2,"0");case"M":return String(i.getUTCMonth()+1);case"EEEE":return a.weekdaysLong[c];case"E":return a.weekdaysShort[c];case"dd":return String(i.getUTCDate()).padStart(2,"0");case"d":return String(i.getUTCDate());case"HH":return String(u).padStart(2,"0");case"H":return String(u);case"hh":return String(l).padStart(2,"0");case"h":return String(l);case"mm":return String(i.getUTCMinutes()).padStart(2,"0");case"ss":return String(i.getUTCSeconds()).padStart(2,"0");case"a":return u<12?"AM":"PM";default:return f}})}function Yx(t,e,r=Qn){let n;return t===0&&e.zero!==void 0?n="zero":t===1&&e.one!==void 0?n="one":t===2&&e.two!==void 0?n="two":n=zx(r).select(t),String(e[n]??e.other??"")}function Xx(t){let e=typeof t=="string"?t:void 0;if(!e||typeof window>"u"||typeof window.open!="function")return;let r=typeof window<"u"&&typeof window.location<"u"&&window.location.href?window.location.href:void 0,n;try{n=r?new URL(e,r):new URL(e)}catch(i){throw new J(`Invalid URL specified: ${e}`,"openUrl",i)}if(n.protocol!=="https:"&&n.protocol!=="http:"&&n.protocol!=="mailto:"&&n.protocol!=="tel:")throw new J(`Unsupported URL scheme: ${n.protocol}`,"openUrl");window.open(n.href,"_blank","noopener,noreferrer")}function Ph(t,{truthy:e=Ui}={}){return ke(t,r=>qx(r.values,e))}function Mh(t,{truthy:e=Ui}={}){return ke(t,r=>Zx(r.values,e))}function Lh(t,{truthy:e=Ui}={}){return ke(t,r=>Wx(r.value,e))}function Bh(t){return ke(t,(e,r)=>Gx(e.value,r))}function Vh(t,e){let r=ua(e);return ke(t,n=>Hx(n.value,n.decimals,n.grouping,r))}function Uh(t,e){let r=ua(e);return ke(t,n=>Kx(n.value,n.currency,n.decimals??2,n.grouping,r))}function zh(t,e){let r=ua(e);return ke(t,n=>Jx(n.value,n.format,r))}function qh(t,e){let r=ua(e);return ke(t,n=>Yx(n.value,n,r))}function Zh(t){return ke(t,e=>Xx(e.url))}var Qx=ke(Ah,t=>$h(t.value)),eA=ke(Dh,t=>Rh(t.value,t.pattern)),tA=ke(Ch,t=>Th(t.value,t.min,t.max)),rA=ke(wh,t=>Oh(t.value,t.min,t.max)),nA=ke(Eh,t=>Nh(t.value)),Wh=[Qx,eA,tA,rA,nA];var iA=Ph(bh,{truthy:la}),oA=Mh(vh,{truthy:la}),sA=Lh(xh,{truthy:la}),aA=Bh(fh);function Gh(t){return Vh(ph,t)}var _T=Gh();function Hh(t){return Uh(hh,t)}var IT=Hh();function Kh(t){return zh(mh,t)}var kT=Kh();function Jh(t){return qh(gh,t)}var FT=Jh(),cA=Zh(yh);function uA(t){let e=t?.locale;return[...Wh,aA,Gh(e),Hh(e),Kh(e),Jh(e),cA,iA,oA,sA,Do]}var Yh=uA();var uu=new Jt("https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json","1.0",[ih,Xp,Yp,sh,zp,th,Hp,Qp,Zp,nh,eh,Jp,qp,oh,Wp,Gp,rh,Kp],Yh,{themeSchema:up,...Up});var lA=G`
-  :host {
-    display: block;
-    width: 100%;
-    min-width: 0;
-  }
-  .a2ui-tabs {
-    min-width: 0;
-  }
-  .a2ui-tab-bar {
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-    scrollbar-width: thin;
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    background: var(--a2ui-color-background, #fff);
-  }
-  .a2ui-tab-button {
-    flex: 0 0 auto;
-    white-space: nowrap;
-  }
-  .a2ui-tab-content {
-    min-width: 0;
-    overflow-x: hidden;
-  }
+	:host {
+		display: block;
+		width: 100%;
+		min-width: 0;
+	}
+	.a2ui-tabs {
+		min-width: 0;
+	}
+	.a2ui-tab-bar {
+		overflow-x: auto;
+		overflow-y: hidden;
+		touch-action: pan-x;
+		overscroll-behavior: contain;
+		scrollbar-width: thin;
+		position: sticky;
+		top: 0;
+		z-index: 1;
+		background: var(--a2ui-color-background, #fff);
+	}
+	.a2ui-tab-button {
+		flex: 0 0 auto;
+		white-space: nowrap;
+	}
+	.a2ui-tab-content {
+		min-width: 0;
+		overflow-x: hidden;
+	}
 `;function dA(t){if(t.tagName!=="a2ui-tabs")return;let e=t.element.styles;t.element.styles=G`
-    ${e}
-    ${lA}
-  `}for(let t of uu.components.values())dA(t),ji(t);export{Xf as A2uiSurface,Cc as MessageProcessor,uu as basicCatalog,ra as injectBasicCatalogStyles};
+		${e}
+		${lA}
+	`}for(let t of uu.components.values())dA(t),ji(t);export{Xf as A2uiSurface,Cc as MessageProcessor,uu as basicCatalog,ra as injectBasicCatalogStyles};

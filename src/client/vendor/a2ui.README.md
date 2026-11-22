@@ -24,9 +24,12 @@ Measured: 486 KB minified, ~136 KB gzip. Page load does not fetch it.
 `registerUniversalElement` runs. The upstream Tabs component shrink-to-fits its
 host to the tab bar's max-content width, which made a many-tab panel widen past
 the phone viewport. The patched shadow styles keep the host at 100% width, make
-`.a2ui-tab-bar` scroll horizontally, pin it with `position: sticky`, and keep
-`.a2ui-tab-content` from inheriting the tab bar's width. Rebuild after changing
-the patch; do not edit the generated `a2ui.esm.js`.
+`.a2ui-tab-bar` scroll horizontally on one locked axis, pin it with
+`position: sticky`, and keep `.a2ui-tab-content` from inheriting the tab bar's
+width. The tab bar uses `overflow-y: hidden`, `touch-action: pan-x` and
+`overscroll-behavior: contain`, so a horizontal swipe cannot drift vertically or
+chain into the panel body. Rebuild after changing the patch; do not edit the
+generated `a2ui.esm.js`.
 
 ## Rebuild
 
