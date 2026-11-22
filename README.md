@@ -19,6 +19,11 @@ node bin/pixip.ts --data-dir ./tmp/dev        # http://127.0.0.1:8137/
 <data-dir>/sessions`, so pointing it at a scratch directory never touches
 `~/.pi/agent/sessions`.
 
+`pi-host/` is an optional workspace package, `pixip-pi-host`: an embedded Pi RPC
+host that pixip can use instead of spawning `pi --mode rpc`. It adds a blocking
+`panel` UI request for A2UI while otherwise keeping Pi RPC v1. See
+[pi-host/README.md](pi-host/README.md); the hub does not use it yet.
+
 ## Why
 
 Existing options are slow, shaped around terminals or editors, and some of them

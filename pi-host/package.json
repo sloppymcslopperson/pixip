@@ -1,0 +1,35 @@
+{
+	"name": "pixip-pi-host",
+	"version": "0.0.1",
+	"private": true,
+	"description": "Embedded Pi RPC host for pixip: Pi RPC v1 plus a blocking panel UI request",
+	"type": "module",
+	"bin": {
+		"pixip-pi-host": "./src/main.ts"
+	},
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"scripts": {
+		"start": "node src/main.ts --mode rpc",
+		"test": "node --test test/*.test.ts",
+		"typecheck": "tsc --noEmit",
+		"lint": "eslint .",
+		"format": "prettier --write .",
+		"format:check": "prettier --check .",
+		"check": "npm run typecheck && npm run lint && npm run format:check && npm test",
+		"smoke": "node scripts/smoke.ts"
+	},
+	"dependencies": {
+		"@earendil-works/pi-coding-agent": "1.5.2"
+	},
+	"devDependencies": {
+		"@types/node": "^22.19.0",
+		"eslint": "^9.39.5",
+		"eslint-config-prettier": "^9.1.2",
+		"globals": "^15.15.0",
+		"prettier": "^3.10.1",
+		"typescript": "^5.9.0",
+		"typescript-eslint": "^8.73.0"
+	}
+}

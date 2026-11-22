@@ -7,6 +7,9 @@
 	"bin": {
 		"pixip": "./bin/pixip.ts"
 	},
+	"workspaces": [
+		"pi-host"
+	],
 	"engines": {
 		"node": ">=22.19.0"
 	},
@@ -17,7 +20,7 @@
 		"lint": "eslint .",
 		"format": "prettier --write .",
 		"format:check": "prettier --check .",
-		"check": "npm run typecheck && npm run lint && npm run format:check && npm test",
+		"check": "npm run typecheck && npm run lint && npm run format:check && npm test && npm run check --workspace pixip-pi-host",
 		"shot": "node tools/shot.mjs"
 	},
 	"dependencies": {

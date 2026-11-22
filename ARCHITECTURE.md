@@ -32,6 +32,17 @@ remote terminal.
 6. **Isolation for development.** `--data-dir` sets `--session-dir`; nothing in
    `~/.pi/agent/sessions` is read or written by tests.
 
+## Embedded host boundary
+
+`pi-host/` contains `pixip-pi-host`, an optional package that embeds the Pi SDK
+and speaks Pi RPC v1 plus a `hello` record and a blocking `panel` UI request.
+It exists so a later integration can stop spawning `pi --mode rpc` without
+patching Pi. The host emits protocol records on stdout only, shares the user's
+Pi agent dir and extension set for now, and is isolated by its own
+`--session-dir`. The hub remains the only process that owns the browser
+protocol; nothing in the current hub path consumes the host yet, so the
+latency numbers above are unchanged.
+
 ## Data flow
 
 ```
