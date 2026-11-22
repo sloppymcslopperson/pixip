@@ -195,6 +195,9 @@
 }
 .a2ui-root a2ui-surface {
 	display: block;
+	/* Inputs inside the A2UI shadow roots inherit this size. Keep it at 16px so
+	   iOS Safari does not zoom the page when a field is focused. */
+	font-size: 16px;
 }
 .a2ui-loading {
 	padding: 14px 2px;
