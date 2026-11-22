@@ -1,5 +1,6 @@
 ---
 project: pixip
+deferred: app design pass first
 ---
 
 Polish the A2UI panel styling so it matches the rest of pixip instead of looking odd next to the transcript, composer and sheets. The vendor renderer stays untouched: target the `.a2ui-root` wrapper and the documented `--a2ui-*` theme variables only.
@@ -29,3 +30,7 @@ The owner tested the questionnaire panel and called the styling "a bit odd". Kno
 ### Files
 
 - `src/client/surface.css`, possibly `extensions/pixip-questionnaire/src/surface.ts` for the title.
+
+### Deferred
+
+Moved to backlog (2026-11-22): the owner wants a focused design pass on the app in general before nitty-gritty panel styling. Do this ticket only after that design direction exists, and re-grill it then to replace the candidate list below with concrete decisions. The duplicate "Questionnaire" title is a product decision for that pass, not a standalone CSS fix.
