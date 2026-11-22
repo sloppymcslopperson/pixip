@@ -1,5 +1,7 @@
-// Client sheets module; shared state and transport live in app.js.
-import { applyAddonUi, copyText, flattenTree, notice, renderFooter, send, state, ui } from "./app.js";
+// Client sheets module; shared state lives in kernel/state.js.
+import { applyAddonUi, copyText, flattenTree, notice, renderFooter, send } from "./app.js";
+import { state } from "./kernel/state.js";
+import { ui } from "./kernel/ui.js";
 import { openSurfaceRequest } from "./surface.js";
 
 export function openSessionSheet() {

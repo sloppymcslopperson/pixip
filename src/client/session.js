@@ -1,4 +1,4 @@
-// Client session module; shared state and transport live in app.js.
+// Client session module; shared state lives in kernel/state.js.
 import {
 	appendRestartNotice,
 	applyPolicy,
@@ -33,11 +33,11 @@ import {
 	restoreClearedQueue,
 	scrollToEnd,
 	send,
-	state,
 	toast,
-	ui,
 	updateJump,
 } from "./app.js";
+import { state } from "./kernel/state.js";
+import { ui } from "./kernel/ui.js";
 
 export function beginNewSession(cwd) {
 	state.pendingCreate = { cwd };

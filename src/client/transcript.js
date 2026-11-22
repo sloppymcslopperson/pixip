@@ -1,4 +1,4 @@
-// Client transcript module; shared state and transport live in app.js.
+// Client transcript module; shared state lives in kernel/state.js.
 import {
 	addonStatusText,
 	addonWidgets,
@@ -23,14 +23,14 @@ import {
 	send,
 	setBusy,
 	showThinkingIndicator,
-	state,
 	summarizeArgs,
 	textOf,
 	toast,
 	toolBlock,
 	toolCallsOf,
-	ui,
 } from "./app.js";
+import { state } from "./kernel/state.js";
+import { ui } from "./kernel/ui.js";
 
 export const FIRST_PAINT_BYTES = 24 * 1024;
 

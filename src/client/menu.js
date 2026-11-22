@@ -1,4 +1,4 @@
-// Client menu module; shared state and transport live in app.js.
+// Client menu module; shared state lives in kernel/state.js.
 import {
 	commandQuery,
 	filterCommands,
@@ -10,11 +10,11 @@ import {
 	restoreText,
 	scheduleScroll,
 	send,
-	state,
 	submit,
 	toast,
-	ui,
 } from "./app.js";
+import { state } from "./kernel/state.js";
+import { ui } from "./kernel/ui.js";
 
 export function renderMenu() {
 	const query = commandQuery(ui.input.value);

@@ -562,7 +562,9 @@ protocol path is still one obvious place to start:
 | `src/jsonl.ts`                                  | pure parse/window/truncate/coverage helpers (unit-tested)                                                                  |
 | `src/sessionIndex.ts`                           | index/archive/trash record shapes and normalization                                                                        |
 | `src/wire.ts`                                   | the frame constructors; the protocol table above is authoritative                                                          |
-| `src/client/app.js`                             | boot, routing, socket/frame dispatch, shared state                                                                         |
+| `src/client/app.js`                             | boot, routing, socket/frame dispatch                                                                                       |
+| `src/client/kernel/state.js`                    | the one flat shared state container; slices are connection, dashboard, session, composer, addon/panel                      |
+| `src/client/kernel/ui.js`                       | the `$` helper and static element map for the shell in `index.html`                                                        |
 | `src/client/dashboard.js`                       | session list, groups, directory picker, settings/archive                                                                   |
 | `src/client/session.js`                         | open/cache/restore, frame routing, new-session shell                                                                       |
 | `src/client/transcript.js`                      | snapshot/windows, live events, footer, thinking state                                                                      |
@@ -579,6 +581,13 @@ CSS is split into `base`, `transcript`, `list`, `status`, `composer`, `sheets` a
 `surface` files loaded in that order: one asset set, no bundler and no
 per-breakpoint markup. The hub modules are intentionally thin over the same shared state; the
 public `Hub` API and the wire protocol are unchanged by that split.
+
+The client keeps one state container in `kernel/state.js`. Its keys are grouped
+into five documented slices — connection, dashboard, session, composer, and
+addon/panel — but the object is deliberately flat, with no reactive framework
+and no per-feature stores. `kernel/ui.js` owns the single element map; feature
+modules import state or UI nodes from the kernel instead of re-querying the DOM
+or reaching into `app.js`.
 
 ## Rust port map
 

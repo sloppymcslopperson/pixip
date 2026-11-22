@@ -75,8 +75,6 @@ import {
 	picker,
 	pickerUi,
 	purgeStored,
-	readCollapsedGroups,
-	readKeepActive,
 	refreshDashboard,
 	renderDirectorySheet,
 	renderGroup,
@@ -198,85 +196,8 @@ import {
 } from "./controls.js";
 import { NOTICE_SHEET_CHARS, actionToast, notice, openImageSheet, textSheet, toast, toastTimer } from "./toast.js";
 import { closeSocket, connect, route, send, socketUrl } from "./transport.js";
-
-const $ = (selector) => document.querySelector(selector);
-const ui = {
-	bar: $("#bar"),
-	back: $("#back"),
-	title: $("#title"),
-	sub: $("#sub"),
-	dot: $("#dot"),
-	settings: $("#settings"),
-	reload: $("#reload"),
-	more: $("#more"),
-	barMenu: $("#bar-menu"),
-	stop: $("#stop"),
-	scaleDown: $("#scale-down"),
-	scaleUp: $("#scale-up"),
-	scaleValue: $("#scale-value"),
-	list: $("#list"),
-	session: $("#session"),
-	log: $("#log"),
-	jump: $("#jump"),
-	dock: $("#dock"),
-	menu: $("#menu"),
-	queue: $("#queue"),
-	composer: $("#composer"),
-	attachment: $("#attachment"),
-	attach: $("#attach"),
-	attachMenu: $("#attach-menu"),
-	imageInput: $("#image-input"),
-	fileInput: $("#file-input"),
-	input: $("#input"),
-	send: $("#send"),
-	footer: $("#footer"),
-	footerAbove: $("#footer .addon-widgets.above"),
-	footerStatuses: $("#footer .addon-statuses"),
-	footerBelow: $("#footer .addon-widgets.below"),
-	surface: $("#surface"),
-	sheet: $("#sheet"),
-	toast: $("#toast"),
-};
-
-const state = {
-	sessionId: null,
-	sessionCache: createSessionCache(8), // recently viewed transcripts, in-memory only
-	info: null,
-	ws: null,
-	retries: 0,
-	stick: true,
-	streaming: null, // { section, text }
-	pendingUser: null,
-	pendingAttachment: null, // one image or file, never both: { kind, name, size, ... }
-	attachmentSeq: 0, // invalidates an in-flight image prepare/upload after replace/clear
-	restarting: false, // old daemon announced a restart; socket is about to close
-	restartWasBusy: false, // a turn was in flight when the restart was announced
-	restartNoticePending: false, // paint the interruption notice after the reconnect snapshot
-	pendingCreate: null, // dashboard `new` action waiting for the first session id
-	tools: new Map(), // toolCallId -> <details>
-	coarse: window.matchMedia("(pointer: coarse)").matches,
-	renderQueued: false,
-	footer: null,
-	addon: createAddonUi(), // Pi extension setStatus/setWidget state
-	models: [],
-	levels: [],
-	dynamicCommands: [], // live get_commands entries for the `/` menu
-	menu: { items: [], index: 0 },
-	queue: { steering: [], followUp: [] }, // Pi's pending steer/follow-up texts
-	policy: null, // effective per-session command policy (hub-resolved)
-	bashRunning: false,
-	quitting: false,
-	bash: new Map(), // bash id -> optimistic card, matched by event id
-	entries: [], // what the client currently knows, oldest first
-	more: false, // older entries exist before entries[0]
-	loadingEarlier: false,
-	scale: DEFAULT_PERCENT, // transcript text size, percent (device-local)
-	home: "", // $HOME for dashboard path shortening (device-local cache)
-	defaultCwd: "", // last discovery value, so list refreshes do not clear the form
-	sessions: [], // last dashboard list, for local re-renders
-	collapsed: readCollapsedGroups(), // cwd key -> true when collapsed
-	keepActive: readKeepActive(), // pin hot/warm/newest when collapsed
-};
+import { readCollapsedGroups, readKeepActive, state } from "./kernel/state.js";
+import { ui } from "./kernel/ui.js";
 
 // ------------------------------------------------------------------ transport
 
@@ -602,7 +523,6 @@ route();
 void openFixturePanel();
 
 export {
-	$,
 	COLLAPSED_STORAGE_KEY,
 	DEFAULT_PERCENT,
 	FILL_CHUNK_BYTES,
@@ -795,7 +715,6 @@ export {
 	sizeLabel,
 	socketUrl,
 	softRefresh,
-	state,
 	submit,
 	submitBash,
 	submitSlash,
@@ -809,7 +728,6 @@ export {
 	toastTimer,
 	toolBlock,
 	toolCallsOf,
-	ui,
 	updateDirectoryList,
 	updateJump,
 	updateScaleButtons,

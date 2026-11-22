@@ -1,4 +1,4 @@
-// Client controls module; shared state and transport live in app.js.
+// Client controls module; shared state lives in kernel/state.js.
 import {
 	DEFAULT_PERCENT,
 	STEPS,
@@ -11,10 +11,10 @@ import {
 	parseStored,
 	previousPercent,
 	scaleFactor,
-	state,
 	toast,
-	ui,
 } from "./app.js";
+import { state } from "./kernel/state.js";
+import { ui } from "./kernel/ui.js";
 
 export function readScale() {
 	try {

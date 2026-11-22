@@ -1,4 +1,4 @@
-// Client dashboard module; shared state and transport live in app.js.
+// Client dashboard module; shared state lives in kernel/state.js.
 import {
 	COLLAPSED_STORAGE_KEY,
 	KEEP_ACTIVE_STORAGE_KEY,
@@ -21,8 +21,6 @@ import {
 	groupView,
 	initialDirectory,
 	parentDirectory,
-	parseCollapsed,
-	parseKeepActive,
 	relativeTime,
 	renderQueue,
 	resetSurface,
@@ -30,10 +28,10 @@ import {
 	serializeKeepActive,
 	sheet,
 	sheetHeader,
-	state,
 	toast,
-	ui,
 } from "./app.js";
+import { state } from "./kernel/state.js";
+import { ui } from "./kernel/ui.js";
 
 export async function showList() {
 	cacheCurrentSession();
@@ -546,26 +544,10 @@ export async function archiveInactive(count) {
 	}
 }
 
-export function readCollapsedGroups() {
-	try {
-		return parseCollapsed(localStorage.getItem(COLLAPSED_STORAGE_KEY));
-	} catch {
-		return {};
-	}
-}
-
 export function saveCollapsedGroups() {
 	try {
 		localStorage.setItem(COLLAPSED_STORAGE_KEY, serializeCollapsed(state.collapsed));
 	} catch {}
-}
-
-export function readKeepActive() {
-	try {
-		return parseKeepActive(localStorage.getItem(KEEP_ACTIVE_STORAGE_KEY));
-	} catch {
-		return true;
-	}
 }
 
 export function saveKeepActive() {

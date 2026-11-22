@@ -1,5 +1,6 @@
-// Client toast module; shared state and transport live in app.js.
-import { closeSheet, sheetHeader, ui } from "./app.js";
+// Client toast module; the DOM map lives in kernel/ui.js.
+import { closeSheet, sheetHeader } from "./app.js";
+import { ui } from "./kernel/ui.js";
 
 export let toastTimer;
 

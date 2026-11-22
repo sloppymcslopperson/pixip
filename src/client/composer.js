@@ -1,4 +1,4 @@
-// Client composer module; shared state and transport live in app.js.
+// Client composer module; shared state lives in kernel/state.js.
 import {
 	MAX_IMAGE_BYTES,
 	MAX_IMAGE_EDGE,
@@ -22,12 +22,12 @@ import {
 	send,
 	sheetHeader,
 	sizeLabel,
-	state,
 	textSheet,
 	toast,
-	ui,
 	updateJump,
 } from "./app.js";
+import { state } from "./kernel/state.js";
+import { ui } from "./kernel/ui.js";
 
 export const builtinHandlers = {
 	compact(args) {

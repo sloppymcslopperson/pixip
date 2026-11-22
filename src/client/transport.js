@@ -1,5 +1,6 @@
-// Client transport module; shared state and transport live in app.js.
-import { failPendingSession, handleFrame, lastEntryId, openSession, showList, state, toast } from "./app.js";
+// Client transport module; shared state lives in kernel/state.js.
+import { failPendingSession, handleFrame, lastEntryId, openSession, showList, toast } from "./app.js";
+import { state } from "./kernel/state.js";
 
 export function socketUrl(sessionId) {
 	const scheme = location.protocol === "https:" ? "wss" : "ws";
