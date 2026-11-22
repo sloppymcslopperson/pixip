@@ -297,11 +297,12 @@ export function surfaceOpen() {
 }
 
 /** Dev-only: open an A2UI fixture panel from `?panel=fixture`, `?panel=long`
- * (overflow fixture) or `?panel=questionnaire` (questionnaire surface fixture). */
+ * (overflow fixture), `?panel=tabs` (many-tabs fixture) or `?panel=questionnaire`
+ * (questionnaire surface fixture). */
 export async function openFixturePanel(search = location.search) {
 	const params = new URLSearchParams(search);
 	const panel = params.get("panel");
-	if (panel !== "fixture" && panel !== "long" && panel !== "questionnaire") return false;
+	if (panel !== "fixture" && panel !== "long" && panel !== "tabs" && panel !== "questionnaire") return false;
 	let payload;
 	try {
 		const fixture = panel === "fixture" ? "" : `?fixture=${panel}`;

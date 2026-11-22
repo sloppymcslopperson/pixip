@@ -51,6 +51,8 @@ const metrics = await page.evaluate(() => {
 			left: Math.round(box.left),
 			width: Math.round(box.width),
 			height: Math.round(box.height),
+			clientWidth: element.clientWidth,
+			scrollWidth: element.scrollWidth,
 			clientHeight: element.clientHeight,
 			scrollHeight: element.scrollHeight,
 			display: getComputedStyle(element).display,

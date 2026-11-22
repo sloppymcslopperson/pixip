@@ -1,0 +1,113 @@
+{
+	"title": "A2UI many-tabs fixture",
+	"mode": "a2ui",
+	"surfaceId": "fixture-tabs",
+	"messages": [
+		{
+			"version": "1.0",
+			"createSurface": {
+				"surfaceId": "fixture-tabs",
+				"catalogId": "https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json",
+				"dataModel": {
+					"answers": {
+						"tab1": { "selected": [], "custom": "" },
+						"tab2": { "selected": [], "custom": "" },
+						"tab3": { "selected": [], "custom": "" },
+						"tab4": { "selected": [], "custom": "" },
+						"tab5": { "selected": [], "custom": "" },
+						"tab6": { "selected": [], "custom": "" },
+						"tab7": { "selected": [], "custom": "" }
+					}
+				},
+				"components": [
+					{
+						"id": "root",
+						"component": "Column",
+						"children": ["title", "tabs", "footer"]
+					},
+					{ "id": "title", "component": "Text", "variant": "body", "text": "Seven-tab fixture" },
+					{
+						"id": "tabs",
+						"component": "Tabs",
+						"tabs": [
+							{ "title": "First tab with a long label", "child": "tab1" },
+							{ "title": "Second tab with a long label", "child": "tab2" },
+							{ "title": "Third tab with a long label", "child": "tab3" },
+							{ "title": "Fourth tab with a long label", "child": "tab4" },
+							{ "title": "Fifth tab with a long label", "child": "tab5" },
+							{ "title": "Sixth tab with a long label", "child": "tab6" },
+							{ "title": "Seventh tab with a long label", "child": "tab7" }
+						]
+					},
+					{
+						"id": "tab1",
+						"component": "ChoicePicker",
+						"label": "Pick a colour",
+						"variant": "mutuallyExclusive",
+						"options": [
+							{ "value": "red", "label": "Red" },
+							{ "value": "blue", "label": "Blue" }
+						],
+						"value": { "@path": "/answers/tab1/selected" }
+					},
+					{
+						"id": "tab2",
+						"component": "ChoicePicker",
+						"label": "Pick a size",
+						"variant": "multipleSelection",
+						"options": [
+							{ "value": "s", "label": "Small" },
+							{ "value": "m", "label": "Medium" },
+							{ "value": "l", "label": "Large" }
+						],
+						"value": { "@path": "/answers/tab2/selected" }
+					},
+					{
+						"id": "tab3",
+						"component": "TextField",
+						"label": "Notes",
+						"placeholder": "Anything else?",
+						"value": { "@path": "/answers/tab3/custom" }
+					},
+					{
+						"id": "tab4",
+						"component": "TextField",
+						"label": "More notes",
+						"placeholder": "Room for more text",
+						"value": { "@path": "/answers/tab4/custom" }
+					},
+					{
+						"id": "tab5",
+						"component": "ChoicePicker",
+						"label": "Pick a fruit",
+						"variant": "mutuallyExclusive",
+						"options": [
+							{ "value": "apple", "label": "Apple" },
+							{ "value": "pear", "label": "Pear" }
+						],
+						"value": { "@path": "/answers/tab5/selected" }
+					},
+					{
+						"id": "tab6",
+						"component": "ChoicePicker",
+						"label": "Pick a drink",
+						"variant": "mutuallyExclusive",
+						"options": [
+							{ "value": "tea", "label": "Tea" },
+							{ "value": "coffee", "label": "Coffee" }
+						],
+						"value": { "@path": "/answers/tab6/selected" }
+					},
+					{
+						"id": "tab7",
+						"component": "TextField",
+						"label": "Last notes",
+						"placeholder": "The final tab",
+						"value": { "@path": "/answers/tab7/custom" }
+					},
+					{ "id": "footer", "component": "Text", "variant": "caption", "text": "Footer stays inside the panel." }
+				]
+			}
+		}
+	]
+}

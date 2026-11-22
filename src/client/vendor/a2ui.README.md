@@ -18,6 +18,16 @@ elements registered, `A2uiSurface` from `@a2ui/lit`, and
 
 Measured: 486 KB minified, ~136 KB gzip. Page load does not fetch it.
 
+## Local patch: Tabs layout
+
+`tools/a2ui-entry.js` overrides the Tabs element's static styles before
+`registerUniversalElement` runs. The upstream Tabs component shrink-to-fits its
+host to the tab bar's max-content width, which made a many-tab panel widen past
+the phone viewport. The patched shadow styles keep the host at 100% width, make
+`.a2ui-tab-bar` scroll horizontally, pin it with `position: sticky`, and keep
+`.a2ui-tab-content` from inheriting the tab bar's width. Rebuild after changing
+the patch; do not edit the generated `a2ui.esm.js`.
+
 ## Rebuild
 
 The A2UI packages are pinned in the root `devDependencies`; esbuild is fetched

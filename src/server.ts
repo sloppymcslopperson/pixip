@@ -185,9 +185,11 @@ async function handleHttp(
 				const fixtureName =
 					requested === "long"
 						? "a2ui-panel-long.json"
-						: requested === "questionnaire"
-							? "a2ui-questionnaire.json"
-							: "a2ui-panel.json";
+						: requested === "tabs"
+							? "a2ui-panel-tabs.json"
+							: requested === "questionnaire"
+								? "a2ui-questionnaire.json"
+								: "a2ui-panel.json";
 				const fixture = await readFile(join(options.clientDir, "..", "..", "test", "fixtures", fixtureName));
 				send(200, fixture, CONTENT_TYPES[".json"]);
 			} catch {
