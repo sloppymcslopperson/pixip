@@ -1,5 +1,6 @@
 ---
 project: pixip
+grilled: true
 ---
 
 Turn `app.js` into a composition root and remove the 207-name barrel and the feature-to-`app` import cycles. Feature modules should import the kernel or pure helpers directly; `main` wires routing, frames and cross-feature interactions.
@@ -22,3 +23,12 @@ Turn `app.js` into a composition root and remove the 207-name barrel and the fea
 ### Out of scope
 
 - Splitting dashboard/composer/transcript internals (`09`/`10`/`11`), the import-graph guard (`12`), and new features.
+
+### Grilled decisions
+
+- Keep the entry filename `app.js`; it becomes the composition root. `index.html` keeps `/app.js`.
+- Add `frames.js` as the protocol adapter owning the frame switch/effect routing. `session.js` keeps its `handleFrame`/snapshot logic as a feature handler and stops importing other features.
+- Add `navigation.js` with explicit dashboard ↔ session intents. No event bus.
+- Full 08 as described: remove the 207-name barrel and every feature-to-`app.js` import; no temporary compatibility re-export shim.
+- Build directly on the `src/client/kernel/` modules created in 07.
+- Preserve boot order, hash routing, socket lifecycle, addon replay, protocol and latency.

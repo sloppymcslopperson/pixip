@@ -1,5 +1,6 @@
 ---
 project: pixip
+grilled: true
 ---
 
 Extract the shared mutable state and DOM element map out of `app.js` into kernel modules with state slices and selectors, preserving behaviour and layout. This is the first step of the post-A2UI client normalization.
@@ -22,3 +23,13 @@ Extract the shared mutable state and DOM element map out of `app.js` into kernel
 ### Out of scope
 
 - Removing the `app.js` barrel/cycles (`08-composition-root`), feature splits (`09`/`10`), and new UI behaviour.
+
+### Grilled decisions
+
+- Kernel lives in `src/client/kernel/` (`state.js` and `ui.js`), not flat beside `app.js`.
+- Keep the state container flat with the existing field names (`state.sessionId`, `state.entries`, ...); slices are documented groupings only, no nested `state.connection.*` rewrite.
+- 07 scope is state initialization only: move the state literal and its initializers into `kernel/state.js`. Do not add reset helpers and do not move derived selectors such as `canSend`, queue or footer helpers; those stay in their feature modules.
+- `kernel/ui.js` owns the same single `$` + `ui` map with the same keys, moved verbatim. No per-feature registration and no split maps.
+- Add targeted unit tests for the extracted kernel initialization.
+- Keep the `app.js` entry filename; no `main.js` rename in this ticket.
+- No behaviour, layout, wire-protocol or latency change.
