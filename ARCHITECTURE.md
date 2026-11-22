@@ -460,6 +460,36 @@ still the way to make the child itself fast, and is deliberately not done (1 vCP
 - Measured: hub 92 MB RSS with one live child on this box (Node baseline is most
   of it).
 
+## Module map
+
+The hub and client are split along the same seams a Rust port needs, so the
+protocol path is still one obvious place to start:
+
+| module                                          | owns                                                                                                                       |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `src/backend.ts`                                | the spawn seam; the default backend creates `pi --mode rpc`, and `pixip-pi-host` can replace it without changing hub state |
+| `src/rpc.ts`                                    | LF framing, response correlation, original-record passthrough                                                              |
+| `src/hub.ts`                                    | public `Hub` facade and shared state; one method per operation                                                             |
+| `src/hubLive.ts`                                | one child: spawn, records/events, pending UI timers, footer, idle detach                                                   |
+| `src/hubStore.ts`                               | `sessions.json`, JSONL disk scan, archive/trash store, restore                                                             |
+| `src/hubControl.ts`                             | snapshot/history, prompt/steer, queue/bash, policy, soft refresh                                                           |
+| `src/hubSession.ts`                             | model/thinking/name, tree/fork/clone/import, `/new` re-key, UI replay                                                      |
+| `src/jsonl.ts`                                  | pure parse/window/truncate/coverage helpers (unit-tested)                                                                  |
+| `src/sessionIndex.ts`                           | index/archive/trash record shapes and normalization                                                                        |
+| `src/wire.ts`                                   | the frame constructors; the protocol table above is authoritative                                                          |
+| `src/client/app.js`                             | boot, routing, socket/frame dispatch, shared state                                                                         |
+| `src/client/dashboard.js`                       | session list, groups, directory picker, settings/archive                                                                   |
+| `src/client/session.js`                         | open/cache/restore, frame routing, new-session shell                                                                       |
+| `src/client/transcript.js`                      | snapshot/windows, live events, footer, thinking state                                                                      |
+| `src/client/sheets.js`                          | shared sheet/dialog/confirm layer and extension-UI rendering                                                               |
+| `src/client/composer.js`                        | attachments, composer, built-in commands, bash cards                                                                       |
+| `src/client/{menu,controls,toast,transport}.js` | menus/queue, scale/refresh controls, notices, websocket                                                                    |
+
+CSS is split into `base`, `transcript`, `list`, `status`, `composer` and `sheets`
+files loaded in that order: one asset set, no bundler and no per-breakpoint
+markup. The hub modules are intentionally thin over the same shared state; the
+public `Hub` API and the wire protocol are unchanged by that split.
+
 ## Rust port map
 
 The split exists so this is mechanical:

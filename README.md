@@ -78,7 +78,7 @@ do in the TUI.
 - `!cmd`/`!!cmd` bash cards (streamed output, exit code, `!!` excluded from the
   model context), slash-command passthrough for extension commands/templates/
   skills, and a restrict-only per-session command policy (`pixip.json`,
-  `--allow-command`/`--deny-command`/`--no-bash`) — see `docs/parity.md`;
+  `--allow-command`/`--deny-command`/`--no-bash`) — see `docs/TUI-parity.md`;
 - the RPC-drivable built-ins from the composer: `/compact`, `/name`, `/session`,
   `/copy`, `/model`, `/thinking`, `/new`, `/resume`, `/quit`;
 - per-session model and thinking level, picked from the footer (`get_available_models`
@@ -107,7 +107,7 @@ do in the TUI.
 - test isolation via `--data-dir`.
 
 TUI command parity is the current focus (developing pixip inside pixip); see
-[`docs/parity.md`](docs/parity.md) for the command-by-command coverage map and the
+[`docs/TUI-parity.md`](docs/TUI-parity.md) for the command-by-command coverage map and the
 tickets that own each gap.
 
 ## Running as a daemon
@@ -165,14 +165,21 @@ writes the screenshot. Use `--dev` on the daemon so CSS/JS edits need no restart
 ```
 bin/pixip.ts        supervisor entry: flags, data dir, signals
 src/rpc.ts          `pi --mode rpc` peer: LF framing, id correlation, raw records
-src/hub.ts          session registry, spawn/attach/stop, idle policy, disk scan
+src/backend.ts      spawn seam: default Pi RPC child, replaceable by `pixip-pi-host`
+src/hub.ts          Hub facade: session registry, attach/stop, idle policy, re-keying
+src/hubLive.ts      per-child lifecycle, records, pending UI, footer, idle timers
+src/hubStore.ts     index, JSONL scan, archive/trash store and restore
+src/hubControl.ts   snapshot/history, prompt/steer, queue/bash, policy, soft refresh
+src/hubSession.ts   model/thinking/name, tree/fork/clone/import, new/re-key, UI replay
+src/jsonl.ts        pure JSONL parse/window/truncate and coverage keys
+src/sessionIndex.ts index/archive/trash record types and normalization
 src/commands.ts     per-session command policy: read, validate, merge, serve
 src/daemon.ts       pid/state/log, detach, health, soft refresh, restart decision
 src/wire.ts         hub <-> browser frames (v1)
 src/server.ts       http + ws, static client
-src/client/         index.html, style.css, app.js, render.js and commands.js
-                    (the last two are pure and unit-tested)
-test/               protocol/rpc tests and ANSI/render tests
+src/client/         index.html, split CSS, and app/dashboard/session/transcript/
+                    sheets/composer/menu/controls/toast/transport modules
+test/               shared harness plus protocol/rpc/ANSI/render tests
 ```
 
 Work is tracked on a strict FIT board in `fit/` (backlog holds the known gaps
