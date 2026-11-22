@@ -81,7 +81,7 @@ after(async () => {
 describe("first-prompt session labels", () => {
 	it("labels a new session from a separate one-shot call using the session model", async () => {
 		const paths = await fixtureRoot();
-		const hub = hubFor(paths, { FAKE_PI_TITLE: "Refactor auth module" });
+		const hub = hubFor(paths, { FAKE_PI_TITLE: "Refactor auth module", FAKE_PI_TITLE_REQUIRE_STDIN_END: "1" });
 		const created = await hub.create(paths.dir);
 		assert.equal(created.name, undefined);
 

@@ -19,6 +19,12 @@ const option = (name) => {
 // touch the session store. Tests can set the reply, fail it, or delay it.
 if (argv.includes("--print") || argv.includes("-p")) {
 	const title = env.FAKE_PI_TITLE ?? "Fake session label";
+	if (env.FAKE_PI_TITLE_REQUIRE_STDIN_END === "1" && !process.stdin.readableEnded) {
+		await new Promise((resolve) => {
+			process.stdin.once("end", resolve);
+			process.stdin.resume();
+		});
+	}
 	const logTitle = () => {
 		if (env.FAKE_PI_LOG) {
 			appendFileSync(

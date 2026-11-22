@@ -31,3 +31,8 @@ The quick auto-namer fix now retries once when the first title call loses the pr
 - Failures are diagnosable from `pixip.log`.
 - The agent turn is never blocked or hung by the title call.
 - A manual rename always wins, including while a retry is pending.
+
+### Also fixed after the initial quick pass
+
+- `runTitlePi` now closes the one-shot child's stdin. `execFile` had left the pipe open, so Pi waited for EOF and timed out on every title call; this was the main reason labels fell back to first words.
+- Fake Pi has `FAKE_PI_TITLE_REQUIRE_STDIN_END=1` to keep that regression covered.

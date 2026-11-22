@@ -844,13 +844,31 @@ export class Hub {
 		];
 		if (model) args.push("--model", model);
 		args.push(titlePrompt(prompt));
-		const { stdout } = await run(this.options.piBin, args, {
-			cwd: live.info.cwd,
-			env: { ...process.env, ...this.options.env },
-			timeout: this.options.titleTimeoutMs ?? 15_000,
-			maxBuffer: 256 * 1024,
+		return await new Promise<string>((resolve, reject) => {
+			const child = execFile(
+				this.options.piBin,
+				args,
+				{
+					cwd: live.info.cwd,
+					env: { ...process.env, ...this.options.env },
+					timeout: this.options.titleTimeoutMs ?? 15_000,
+					maxBuffer: 256 * 1024,
+				},
+				(error, stdout, stderr) => {
+					if (error) {
+						// Keep the child's diagnostic tail for the hub log; execFile's own
+						// message only repeats the command line.
+						(error as Error & { stderr?: string }).stderr = stderr;
+						reject(error);
+						return;
+					}
+					resolve(stdout);
+				},
+			);
+			// Pi's print mode waits for stdin EOF before it starts. `execFile` leaves
+			// a pipe open, so every title call used to sit there until the timeout.
+			child.stdin?.end();
 		});
-		return stdout;
 	}
 
 	/** `/compact [instructions]`: manual compaction; the client resnapshots after. */
