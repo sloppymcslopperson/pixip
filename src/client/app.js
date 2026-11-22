@@ -137,9 +137,16 @@ import {
 	openTreeSheet,
 	sheet,
 	sheetCloseButton,
-	sheetCloseRow,
 	sheetHeader,
 } from "./sheets.js";
+import {
+	cancelSurface,
+	finishSurface,
+	openSurfaceRequest,
+	resetSurface,
+	surfaceOpen,
+	surfaceStatus,
+} from "./surface.js";
 import {
 	allowed,
 	appendBashCard,
@@ -225,6 +232,7 @@ const ui = {
 	footerAbove: $("#footer .addon-widgets.above"),
 	footerStatuses: $("#footer .addon-statuses"),
 	footerBelow: $("#footer .addon-widgets.below"),
+	surface: $("#surface"),
 	sheet: $("#sheet"),
 	toast: $("#toast"),
 };
@@ -244,7 +252,6 @@ const state = {
 	restartWasBusy: false, // a turn was in flight when the restart was announced
 	restartNoticePending: false, // paint the interruption notice after the reconnect snapshot
 	pendingCreate: null, // dashboard `new` action waiting for the first session id
-	uiDialog: null, // extension_ui_request currently shown as a modal, if any
 	tools: new Map(), // toolCallId -> <details>
 	coarse: window.matchMedia("(pointer: coarse)").matches,
 	renderQueued: false,
@@ -484,6 +491,11 @@ window.addEventListener("keydown", (event) => {
 		ui.more.focus();
 		return;
 	}
+	if (!ui.surface.hidden && ui.surface.contains(document.activeElement)) {
+		event.preventDefault();
+		cancelSurface();
+		return;
+	}
 	if (ui.sheet.hidden) return;
 	event.preventDefault();
 	dismissSheet();
@@ -626,6 +638,7 @@ export {
 	builtinHandlers,
 	cacheCurrentSession,
 	canSend,
+	cancelSurface,
 	canvasToBlob,
 	chooseAttachment,
 	chooseMenu,
@@ -662,6 +675,7 @@ export {
 	filterCommands,
 	filterDirEntries,
 	finishBash,
+	finishSurface,
 	flattenTree,
 	footerPwdLine,
 	footerStatsLeft,
@@ -699,6 +713,7 @@ export {
 	openModelSheet,
 	openSession,
 	openSessionActions,
+	openSurfaceRequest,
 	openSessionSheet,
 	openSettingsSheet,
 	openThinkingSheet,
@@ -747,6 +762,7 @@ export {
 	restoreCachedSession,
 	restoreClearedQueue,
 	restoreStored,
+	resetSurface,
 	restoreText,
 	route,
 	saveCollapsedGroups,
@@ -768,7 +784,6 @@ export {
 	setScale,
 	sheet,
 	sheetCloseButton,
-	sheetCloseRow,
 	sheetHeader,
 	showList,
 	showNewFolderForm,
@@ -784,6 +799,8 @@ export {
 	submitSlash,
 	submitText,
 	summarizeArgs,
+	surfaceOpen,
+	surfaceStatus,
 	textOf,
 	textSheet,
 	toast,

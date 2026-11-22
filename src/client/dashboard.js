@@ -25,6 +25,7 @@ import {
 	parseKeepActive,
 	relativeTime,
 	renderQueue,
+	resetSurface,
 	serializeCollapsed,
 	serializeKeepActive,
 	sheet,
@@ -59,6 +60,7 @@ export async function showList() {
 	state.more = false;
 	state.loadingEarlier = false;
 	state.addon = createAddonUi();
+	resetSurface();
 	ui.session.hidden = true;
 	ui.composer.hidden = true;
 	ui.footer.hidden = true;

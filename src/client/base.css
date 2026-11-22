@@ -234,7 +234,7 @@ main {
 #jump {
 	position: absolute;
 	right: max(var(--pad), calc((100% - 104ch) / 2 + var(--pad)));
-	bottom: 12px;
+	bottom: calc(12px + var(--surface-height, 0px));
 	z-index: 4;
 	display: inline-flex;
 	align-items: center;

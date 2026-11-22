@@ -29,6 +29,7 @@ import {
 	renderSnapshot,
 	renderTranscript,
 	resize,
+	resetSurface,
 	restoreClearedQueue,
 	scrollToEnd,
 	send,
@@ -58,6 +59,7 @@ export function showPendingSession() {
 	state.more = false;
 	state.loadingEarlier = false;
 	state.addon = createAddonUi();
+	resetSurface();
 	state.policy = null;
 	state.dynamicCommands = [];
 	state.queue = { steering: [], followUp: [] };
@@ -139,6 +141,7 @@ export function openSession(id) {
 	state.more = false;
 	state.loadingEarlier = false;
 	state.addon = createAddonUi();
+	resetSurface();
 	state.stick = true;
 	updateJump();
 	ui.title.textContent = "connecting…";

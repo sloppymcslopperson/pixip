@@ -1,5 +1,6 @@
 // Client sheets module; shared state and transport live in app.js.
 import { applyAddonUi, copyText, flattenTree, notice, renderFooter, send, state, ui } from "./app.js";
+import { openSurfaceRequest } from "./surface.js";
 
 export function openSessionSheet() {
 	const footer = state.footer;
@@ -66,7 +67,6 @@ export function sheet(title, items) {
 export function closeSheet() {
 	ui.sheet.hidden = true;
 	ui.sheet.textContent = "";
-	state.uiDialog = null;
 }
 
 export function sheetCloseButton() {
@@ -89,20 +89,7 @@ export function sheetHeader(title) {
 	return header;
 }
 
-export function sheetCloseRow() {
-	const header = document.createElement("div");
-	header.className = "sheet-header close-only";
-	header.append(sheetCloseButton());
-	return header;
-}
-
 export function dismissSheet() {
-	const dialog = state.uiDialog;
-	if (!dialog) {
-		closeSheet();
-		return;
-	}
-	send({ t: "ui", id: dialog.id, cancelled: true });
 	closeSheet();
 }
 
@@ -236,55 +223,5 @@ export function handleUiRequest(request) {
 		renderFooter();
 		return;
 	}
-	if (!["select", "confirm", "input", "editor"].includes(method)) return;
-	state.uiDialog = request;
-	const sheet = ui.sheet;
-	sheet.hidden = false;
-	sheet.textContent = "";
-	const actions = document.createElement("div");
-	actions.className = "sheet-actions";
-
-	const finish = (fields) => {
-		if (state.uiDialog?.id !== request.id) return;
-		send({ t: "ui", id: request.id, ...fields });
-		closeSheet();
-	};
-
-	const addButton = (label, fields, className = "") => {
-		const button = document.createElement("button");
-		button.textContent = label;
-		if (className) button.classList.add(className);
-		const resolveFields = typeof fields === "function" ? fields : () => fields;
-		button.addEventListener("click", () => finish(resolveFields()));
-		actions.append(button);
-	};
-
-	if (method === "select") {
-		sheet.append(sheetHeader(request.title ?? request.message ?? method));
-		for (const option of request.options ?? []) addButton(String(option), { value: option });
-	} else if (method === "confirm") {
-		sheet.append(sheetHeader(request.title ?? request.message ?? method));
-		addButton(request.yesLabel ?? "yes", { confirmed: true }, "primary");
-		addButton(request.noLabel ?? "no", { confirmed: false });
-	} else {
-		sheet.append(sheetCloseRow());
-		const field = document.createElement(method === "editor" ? "textarea" : "input");
-		if (method === "editor") field.rows = 6;
-		field.value = request.value ?? request.initialValue ?? request.prefill ?? "";
-		sheet.append(field);
-		const hint = document.createElement("div");
-		hint.className = "sheet-hint";
-		hint.textContent = request.title ?? request.message ?? method;
-		sheet.append(hint);
-		field.focus();
-		addButton("send", () => ({ value: field.value }), "primary");
-		field.addEventListener("keydown", (event) => {
-			if (event.key === "Enter" && !event.shiftKey) {
-				event.preventDefault();
-				finish({ value: field.value });
-			}
-		});
-	}
-	addButton("cancel", { cancelled: true });
-	sheet.append(actions);
+	openSurfaceRequest(request);
 }
