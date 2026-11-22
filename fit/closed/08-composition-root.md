@@ -1,6 +1,7 @@
 ---
 project: pixip
 grilled: true
+commit: c5bf7873927c813b978bf41349c0b37b713ef425
 ---
 
 Turn `app.js` into a composition root and remove the 207-name barrel and the feature-to-`app` import cycles. Feature modules should import the kernel or pure helpers directly; `main` wires routing, frames and cross-feature interactions.
