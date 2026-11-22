@@ -19,10 +19,27 @@ describe("session titles", () => {
 		assert.equal(fallbackTitle("hi"), "Hi");
 	});
 
-	it("builds a bounded one-shot prompt", () => {
+	it("prefers a ticket title over slash-command boilerplate in the fallback", () => {
+		const prompt = [
+			"Work on FIT ticket in_progress/00-session-auto-titling-not.md (revision abc).",
+			"",
+			"title: Improve the description of automatic session titles.",
+			"body:",
+			"The current label is too generic.",
+		].join("\n");
+		assert.equal(fallbackTitle(prompt), "Improve the description of automatic");
+		assert.equal(fallbackTitle("title: (empty)\nFix the broken login"), "Fix the broken login");
+	});
+
+	it("builds a bounded one-shot prompt that asks for the task substance", () => {
 		const prompt = titlePrompt("a".repeat(10_000));
 		assert.match(prompt, /3 to 5 words/);
 		assert.match(prompt, /at most 40 characters/);
+		assert.match(prompt, /slash-command template/);
+		assert.match(prompt, /boilerplate/);
+		assert.match(prompt, /Ticket ids and revisions are useful context/);
+		assert.match(prompt, /title:/);
+		assert.match(prompt, /concrete feature, bug, file, or decision/);
 		assert.ok(prompt.length < 5_000);
 	});
 

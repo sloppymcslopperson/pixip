@@ -410,11 +410,15 @@ then applies the reply with `set_session_name`. The real session's transcript an
 model context are untouched, and the call runs beside the prompt rather than on
 its path.
 
-Labels are normalized to sentence case, 3-5 words and 40 characters. The model
-is the session's current model; `--title-model` / `PIXIP_TITLE_MODEL` overrides
-it. A failed, slow or empty call falls back to the first meaningful words of the
-prompt. A configured override that no longer resolves falls back to the session
-model.
+Labels are normalized to sentence case, 3-5 words and 40 characters. The title
+prompt ignores slash-command process boilerplate (board paths, review/commit
+steps, tool names) and asks for the concrete feature, bug or decision, so a
+`/fit work` session is named for its ticket rather than for the command. Ticket
+ids and revisions remain useful context when they help identify the task. The
+model is the session's current model; `--title-model` / `PIXIP_TITLE_MODEL`
+overrides it. A failed, slow or empty call falls back to an explicit `title:`
+field when the prompt has one, otherwise to its first meaningful words. A
+configured override that no longer resolves falls back to the session model.
 
 `sessions.json` records `nameSource: "auto" | "manual"`. Any name already present
 at first prompt skips labeling, and a manual rename always wins; the automatic

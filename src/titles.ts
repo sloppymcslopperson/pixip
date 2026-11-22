@@ -59,7 +59,11 @@ export function messageText(message: unknown): string {
 	return parts.join("\n");
 }
 
-/** Never let a missing/failed model leave the session unnamed. */
+/**
+ * Never let a missing/failed model leave the session unnamed. A FIT or
+ * slash-command prompt often has boilerplate before the task, so prefer an
+ * explicit `title:` field when one is present.
+ */
 export function fallbackTitle(prompt: string): string {
 	const text = String(prompt ?? "")
 		.replace(/```[\s\S]*?```/g, " ")
@@ -68,13 +72,24 @@ export function fallbackTitle(prompt: string): string {
 		.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
 		.replace(/https?:\/\/\S+/g, " ")
 		.replace(/^[/!]+/, " ");
-	return normalizeTitle(text);
+	const lines = text
+		.split(/\r?\n/)
+		.map((line) => line.trim())
+		.filter(Boolean);
+	const titled = lines.find(
+		(line) => /^title\s*:/i.test(line) && !/^\(empty\)$/i.test(line.replace(/^title\s*:/i, "").trim()),
+	);
+	if (titled) return normalizeTitle(titled.replace(/^title\s*:/i, ""));
+	return normalizeTitle(lines.filter((line) => !/^title\s*:/i.test(line)).join("\n"));
 }
 
 /** The one-shot prompt sent to the title model. Keep the user text bounded. */
 export function titlePrompt(prompt: string): string {
 	return [
-		"Summarize this first user prompt as a session label.",
+		"Write a descriptive session label for the task in this first user prompt.",
+		"The prompt may be a slash-command template with process boilerplate: board paths, review or commit steps, tool names, and instructions about where to work or what to do afterward. Ignore those process instructions and label the actual task the user cares about. Ticket ids and revisions are useful context; keep them only when they help identify the task.",
+		"Reach for the substance: if the prompt has a `title:` field, a `### Goal`, a summary, or a sentence that says what should change, use that subject. Name the concrete feature, bug, file, or decision and the action on it.",
+		"Do not answer with a generic label such as 'Work on ticket', 'Fix issue', 'Update code', 'Implement changes', or 'Session title' when a specific detail is available.",
 		`Reply with only 3 to ${TITLE_MAX_WORDS} words in sentence case, no quotes, no punctuation, at most ${TITLE_MAX_CHARS} characters.`,
 		"Do not use tools.",
 		"",
