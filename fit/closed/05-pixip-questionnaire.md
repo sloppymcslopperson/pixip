@@ -1,6 +1,7 @@
 ---
 project: pi-harness
 grilled: true
+commit: "56029b2e309d36e02e36f084376dc7120c7d08ff"
 ---
 
 Create a new Pi extension package that registers the same `questionnaire` tool but builds an A2UI v1.0 surface for the inline pixip panel, while keeping the existing TUI custom UI and dialog fallbacks. It supersedes `pi_questionare` only after the A2UI path is verified; do not modify existing extensions in place.
