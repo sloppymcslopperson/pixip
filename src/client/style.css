@@ -147,6 +147,10 @@ main { flex: 1; min-height: 0; }
 .block.assistant .who { color: var(--accent); }
 .block.meta { border-left-color: var(--line); color: var(--fg-dim); font-size: 0.87em; }
 .block.starting { border-left-color: var(--accent); color: var(--fg-faint); font-style: italic; }
+/* Transient placeholder shown from agent_start until the real thinking box or
+   text arrives; removed by the client, never part of a persisted entry. */
+.block.thinking-indicator { border-left-color: var(--accent); color: var(--fg-faint); font-style: italic; animation: think-pulse 1.4s ease-in-out infinite; }
+@keyframes think-pulse { 50% { opacity: 0.45; } }
 .block.restart { border-left-color: var(--accent); color: var(--fg-dim); }
 /* "load earlier": a full-width affordance above the oldest painted entry. */
 .earlier {

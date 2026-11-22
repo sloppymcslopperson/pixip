@@ -1210,6 +1210,7 @@ function applyInfo() {
 	ui.dot.className = `dot ${restarting ? "busy" : info.state}`;
 	const stopped = !restarting && (info.state === "stopped" || info.state === "error");
 	const starting = !restarting && info.state === "starting";
+	if (stopped || starting) hideThinkingIndicator();
 	ui.input.disabled = restarting || stopped || starting;
 	ui.send.disabled = restarting || stopped || starting;
 	// The provisional transcript is already readable; this only says the child
@@ -1452,8 +1453,10 @@ function handleEvent(event) {
 	switch (event.type) {
 		case "agent_start":
 			setBusy(true);
+			showThinkingIndicator();
 			break;
 		case "agent_settled":
+			hideThinkingIndicator();
 			setBusy(false);
 			break;
 		case "message_start": {
@@ -1462,6 +1465,7 @@ function handleEvent(event) {
 				state.pendingUser?.remove();
 				state.pendingUser = null;
 				appendBlock("user", `<div class="who">you</div><div class="text">${ansiToHtml(textOf(message.content))}</div>`, true);
+				if (state.info?.state === "busy") showThinkingIndicator();
 			} else if (message.role === "assistant") {
 				// Lazy: the block is created by the first text delta, so a turn that
 				// only thinks never leaves an empty labelled block behind.
@@ -1475,6 +1479,7 @@ function handleEvent(event) {
 		case "message_end": {
 			const message = event.message ?? {};
 			if (message.role === "assistant") {
+				hideThinkingIndicator();
 				const body = renderAssistantBody(message.content ?? [], false);
 				const section = state.streaming;
 				state.streaming = null;
@@ -1491,6 +1496,9 @@ function handleEvent(event) {
 			break;
 		}
 		case "tool_execution_start": {
+			// The agent is running a tool, not thinking; the indicator returns with
+			// the tool result if the turn continues.
+			hideThinkingIndicator();
 			const summary = summarizeArgs(event.toolName, event.args);
 			if (!event.toolName && !summary) break;
 			const html = toolBlock(event.toolName, summary, "", "", null, event.toolCallId);
@@ -1506,6 +1514,9 @@ function handleEvent(event) {
 			break;
 		}
 		case "tool_execution_end": {
+			// The turn continues after a tool result, so show the thinking marker
+			// again until the next assistant text/thinking arrives.
+			if (state.info?.state === "busy") showThinkingIndicator();
 			const el = state.tools.get(event.toolCallId);
 			if (!el) break;
 			const out = el.querySelector(".tool-out");
@@ -2568,6 +2579,29 @@ function appendBlock(kind, html, raw = false) {
 	ui.log.append(section);
 	scheduleScroll();
 	return section;
+}
+
+/** Transient "agent is thinking…" marker at the end of the transcript. It is
+ *  never persisted: it lives only until the assistant output (thinking box or
+ *  text) or the end of the turn replaces it. */
+function showThinkingIndicator() {
+	if (ui.session.hidden) return;
+	const existing = ui.log.querySelector(".thinking-indicator");
+	if (existing) {
+		// Keep it after the newest block (for example the real user message that
+		// replaces the optimistic echo) without repainting it.
+		if (existing !== ui.log.lastElementChild) ui.log.append(existing);
+		return;
+	}
+	const section = document.createElement("div");
+	section.className = "block meta thinking-indicator";
+	section.textContent = "agent is thinking…";
+	ui.log.append(section);
+	scheduleScroll();
+}
+
+function hideThinkingIndicator() {
+	ui.log.querySelector(".thinking-indicator")?.remove();
 }
 
 function setBusy(busy) {
