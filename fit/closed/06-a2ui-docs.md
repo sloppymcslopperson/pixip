@@ -1,6 +1,7 @@
 ---
 project: pixip
 grilled: true
+commit: "38f3f70fbd8823c98230923be65634806308b9d1"
 ---
 
 Document the inline panel surface, the A2UI renderer, and the custom host panel transport once the renderer and questionnaire are working, and update the TUI-parity map so the replacement of the questionnaire path is discoverable. Keep the protocol and latency sources of truth in `ARCHITECTURE.md` and the user-facing install notes in `README.md`.
