@@ -1,0 +1,7 @@
+fit/
+tmp/
+node_modules/
+package-lock.json
+src/client/vendor/
+*.png
+*.log
