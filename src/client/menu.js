@@ -1,18 +1,9 @@
 // Client menu module; shared state lives in kernel/state.js.
-import {
-	commandQuery,
-	filterCommands,
-	menuCatalog,
-	menuInsertText,
-	queueCount,
-	queueFromEvent,
-	queueTexts,
-	restoreText,
-	scheduleScroll,
-	send,
-	submit,
-	toast,
-} from "./app.js";
+import { commandQuery, filterCommands, menuCatalog, menuInsertText } from "./commands.js";
+import { submit } from "./composer.js";
+import { closeMenu, renderQueue, resize, scheduleScroll } from "./controls.js";
+import { queueCount, queueFromEvent, restoreText } from "./queue.js";
+import { toast } from "./toast.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
 
@@ -65,16 +56,6 @@ export function renderMenu() {
 	scheduleScroll();
 }
 
-export function closeMenu() {
-	const wasOpen = !ui.menu.hidden;
-	ui.menu.hidden = true;
-	state.menu.items = [];
-	state.menu.index = 0;
-	if (!wasOpen) return;
-	ui.menu.textContent = "";
-	scheduleScroll();
-}
-
 export function moveMenu(delta) {
 	const count = state.menu.items.length;
 	if (count === 0) return;
@@ -101,47 +82,6 @@ export function chooseMenu(index) {
 	ui.input.setSelectionRange(ui.input.value.length, ui.input.value.length);
 }
 
-export function renderQueue() {
-	const queue = state.queue;
-	const count = queueCount(queue);
-	if (count === 0) {
-		if (ui.queue.hidden) return;
-		ui.queue.hidden = true;
-		ui.queue.textContent = "";
-		scheduleScroll();
-		return;
-	}
-	ui.queue.textContent = "";
-	const head = document.createElement("div");
-	head.className = "queue-head";
-	const label = document.createElement("span");
-	label.className = "queue-label";
-	label.textContent = `${count} queued`;
-	const clear = document.createElement("button");
-	clear.type = "button";
-	clear.className = "queue-clear";
-	clear.setAttribute("aria-label", "Clear queued messages");
-	clear.title = "clear and restore to the composer";
-	clear.textContent = "×";
-	clear.addEventListener("click", () => send({ t: "clear_queue" }));
-	head.append(label, clear);
-
-	const chips = document.createElement("div");
-	chips.className = "queue-chips";
-	for (const text of queueTexts(queue)) {
-		const chip = document.createElement("button");
-		chip.type = "button";
-		chip.className = "queue-chip";
-		chip.textContent = text;
-		chip.title = "tap to expand";
-		chip.addEventListener("click", () => chip.classList.toggle("expanded"));
-		chips.append(chip);
-	}
-	ui.queue.append(head, chips);
-	ui.queue.hidden = false;
-	scheduleScroll();
-}
-
 export function restoreClearedQueue(frame) {
 	const cleared = queueFromEvent(frame);
 	state.queue = { steering: [], followUp: [] };
@@ -156,9 +96,4 @@ export function restoreClearedQueue(frame) {
 	}
 	toast(count > 0 ? `restored ${count} queued message${count === 1 ? "" : "s"}` : "queue already empty");
 	scheduleScroll();
-}
-
-export function resize() {
-	ui.input.style.height = "auto";
-	ui.input.style.height = `${Math.min(ui.input.scrollHeight, window.innerHeight * 0.4)}px`;
 }

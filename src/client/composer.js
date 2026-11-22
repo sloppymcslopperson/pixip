@@ -4,28 +4,18 @@ import {
 	MAX_IMAGE_EDGE,
 	MAX_IMAGE_SOURCE_BYTES,
 	MAX_UPLOAD_BYTES,
-	appendBlock,
 	attachmentPrompt,
-	bashCardHtml,
-	classifyInput,
-	closeMenu,
-	closeSheet,
-	formatSession,
-	isAllowed,
 	looksLikeImage,
-	notice,
-	renderSnapshot,
-	renderUserBody,
-	resize,
-	scheduleScroll,
-	scrollToEnd,
-	send,
-	sheetHeader,
 	sizeLabel,
-	textSheet,
-	toast,
-	updateJump,
-} from "./app.js";
+} from "./attachments.js";
+import { classifyInput, isAllowed } from "./commands.js";
+import { appendBlock, closeMenu, resize, scheduleScroll, scrollToEnd, updateJump } from "./controls.js";
+import { bashCardHtml, renderUserBody } from "./render.js";
+import { formatSession } from "./sessionInfo.js";
+import { refreshSendState } from "./sendState.js";
+import { notice, textSheet, toast } from "./toast.js";
+import { renderSnapshot } from "./transcript.js";
+import { send } from "./transport.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
 
@@ -99,23 +89,6 @@ export const builtinHandlers = {
 export function setAttachMenu(open) {
 	ui.attachMenu.hidden = !open;
 	ui.attach.setAttribute("aria-expanded", String(open));
-}
-
-export function refreshSendState() {
-	ui.send.disabled = !canSend();
-}
-
-export function canSend() {
-	const info = state.info;
-	if (!info) return false;
-	if (state.restarting || info.state === "stopped" || info.state === "error" || info.state === "starting") return false;
-	const attachment = state.pendingAttachment;
-	if (attachment) {
-		if (attachment.kind === "image") return true;
-		if (attachment.kind === "file") return !attachment.uploading && Boolean(attachment.path);
-		return false;
-	}
-	return ui.input.value.trim().length > 0;
 }
 
 export function clearPendingAttachment() {
@@ -421,47 +394,6 @@ export function quitSession() {
 		state.quitting = false;
 		location.hash = "";
 	}, 500);
-}
-
-export async function copyText(text) {
-	if (typeof text !== "string" || !text.trim()) {
-		toast("nothing to copy");
-		return;
-	}
-	try {
-		await navigator.clipboard.writeText(text);
-		toast("copied");
-	} catch {
-		copySheet(text);
-	}
-}
-
-export function copySheet(text) {
-	const target = ui.sheet;
-	target.hidden = false;
-	target.textContent = "";
-	const heading = sheetHeader("copy");
-	const body = document.createElement("pre");
-	body.className = "sheet-text";
-	body.textContent = text;
-	const actions = document.createElement("div");
-	actions.className = "sheet-actions";
-	const copy = document.createElement("button");
-	copy.textContent = "copy";
-	copy.addEventListener("click", async () => {
-		try {
-			await navigator.clipboard.writeText(text);
-			toast("copied");
-			closeSheet();
-		} catch {
-			toast("copy failed — select the text and copy manually");
-		}
-	});
-	const close = document.createElement("button");
-	close.textContent = "close";
-	close.addEventListener("click", closeSheet);
-	actions.append(copy, close);
-	target.append(heading, body, actions);
 }
 
 export function submitSlash(text, attachment) {

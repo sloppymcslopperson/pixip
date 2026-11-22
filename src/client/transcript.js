@@ -1,34 +1,29 @@
 // Client transcript module; shared state lives in kernel/state.js.
 import {
-	addonStatusText,
-	addonWidgets,
-	ansiToHtml,
 	appendBlock,
 	applyInfo,
-	contextLevel,
-	footerPwdLine,
-	footerStatsLeft,
-	footerStatsRight,
-	handleUiRequest,
 	hideThinkingIndicator,
-	queueCount,
-	queueFromEvent,
+	renderQueue,
+	scheduleScroll,
+	scrollToEnd,
+	setBusy,
+	showThinkingIndicator,
+} from "./controls.js";
+import { queueCount, queueFromEvent } from "./queue.js";
+import {
+	ansiToHtml,
 	renderAssistant,
 	renderAssistantBody,
 	renderEntry,
-	renderQueue,
 	renderUserBody,
-	scheduleScroll,
-	scrollToEnd,
-	send,
-	setBusy,
-	showThinkingIndicator,
 	summarizeArgs,
 	textOf,
-	toast,
 	toolBlock,
 	toolCallsOf,
-} from "./app.js";
+} from "./render.js";
+import { handleUiRequest } from "./sheets.js";
+import { toast } from "./toast.js";
+import { send } from "./transport.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
 
@@ -373,35 +368,4 @@ export function scheduleFlush(target) {
 		target.textContent += text;
 		scheduleScroll();
 	});
-}
-
-export function renderAddonWidgets(container, placement) {
-	const widgets = addonWidgets(state.addon, placement);
-	container.hidden = widgets.length === 0;
-	container.textContent = "";
-	for (const widget of widgets) {
-		const row = document.createElement("div");
-		row.className = "addon-widget";
-		row.dataset.key = widget.key;
-		// Addon text may carry ANSI styling; ansiToHtml escapes all markup.
-		row.innerHTML = ansiToHtml(widget.lines.join("\n"));
-		container.append(row);
-	}
-}
-
-export function renderFooter() {
-	const footer = state.footer;
-	const status = addonStatusText(state.addon);
-	ui.footerStatuses.hidden = status.length === 0;
-	ui.footerStatuses.innerHTML = ansiToHtml(status);
-	renderAddonWidgets(ui.footerAbove, "above");
-	renderAddonWidgets(ui.footerBelow, "below");
-	if (!footer) return;
-	const pwd = ui.footer.querySelector(".pwd");
-	const left = ui.footer.querySelector(".left");
-	const right = ui.footer.querySelector(".right");
-	pwd.textContent = footerPwdLine(footer);
-	left.textContent = footerStatsLeft(footer);
-	left.dataset.level = contextLevel(footer);
-	right.textContent = footerStatsRight(footer);
 }

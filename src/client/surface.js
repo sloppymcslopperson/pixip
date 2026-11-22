@@ -2,7 +2,7 @@
 // transcript scroll container, and the surface docks between the transcript and
 // the composer. App-owned sheets stay in sheets.js.
 import { registerA2uiPanel } from "./a2ui.js";
-import { send } from "./app.js";
+import { send } from "./transport.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
 import { createSurfaceQueue, enqueueSurface, settleSurface } from "./surfaceQueue.js";

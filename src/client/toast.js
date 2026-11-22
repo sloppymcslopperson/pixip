@@ -1,5 +1,5 @@
 // Client toast module; the DOM map lives in kernel/ui.js.
-import { closeSheet, sheetHeader } from "./app.js";
+import { closeSheet, sheetHeader } from "./sheetShell.js";
 import { ui } from "./kernel/ui.js";
 
 export let toastTimer;

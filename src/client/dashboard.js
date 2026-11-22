@@ -1,35 +1,26 @@
 // Client dashboard module; shared state lives in kernel/state.js.
+import { createAddonUi } from "./addonUi.js";
+import { clearPendingAttachment } from "./composer.js";
+import { closeMenu, renderQueue } from "./controls.js";
+import { crumbTrail, filterDirEntries, initialDirectory, parentDirectory } from "./directoryPicker.js";
+import { escapeHtml, relativeTime } from "./render.js";
+import { beginNewSession, cacheCurrentSession, forgetCachedSession } from "./navigation.js";
 import {
 	COLLAPSED_STORAGE_KEY,
 	KEEP_ACTIVE_STORAGE_KEY,
-	actionToast,
-	beginNewSession,
-	cacheCurrentSession,
-	clearPendingAttachment,
-	closeMenu,
-	closeSheet,
-	connect,
 	countLabel,
-	createAddonUi,
-	crumbTrail,
-	escapeHtml,
-	filterDirEntries,
-	forgetCachedSession,
 	groupBranch,
 	groupLabel,
 	groupSessions,
 	groupView,
-	initialDirectory,
-	parentDirectory,
-	relativeTime,
-	renderQueue,
-	resetSurface,
 	serializeCollapsed,
 	serializeKeepActive,
-	sheet,
-	sheetHeader,
-	toast,
-} from "./app.js";
+} from "./sessionGroups.js";
+import { closeSheet, sheetHeader } from "./sheetShell.js";
+import { sheet } from "./sheets.js";
+import { resetSurface } from "./surface.js";
+import { actionToast, toast } from "./toast.js";
+import { connect } from "./transport.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
 

@@ -1,5 +1,11 @@
 // Client sheets module; shared state lives in kernel/state.js.
-import { applyAddonUi, copyText, flattenTree, notice, renderFooter, send } from "./app.js";
+import { applyAddonUi } from "./addonUi.js";
+import { copyText } from "./clipboard.js";
+import { renderFooter } from "./controls.js";
+import { closeSheet, sheetHeader } from "./sheetShell.js";
+import { notice } from "./toast.js";
+import { send } from "./transport.js";
+import { flattenTree } from "./tree.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
 import { openSurfaceRequest } from "./surface.js";
@@ -64,35 +70,6 @@ export function sheet(title, items) {
 	cancel.addEventListener("click", closeSheet);
 	actions.append(cancel);
 	target.append(actions);
-}
-
-export function closeSheet() {
-	ui.sheet.hidden = true;
-	ui.sheet.textContent = "";
-}
-
-export function sheetCloseButton() {
-	const button = document.createElement("button");
-	button.type = "button";
-	button.className = "sheet-close";
-	button.setAttribute("aria-label", "close");
-	button.textContent = "×";
-	button.addEventListener("click", dismissSheet);
-	return button;
-}
-
-export function sheetHeader(title) {
-	const header = document.createElement("div");
-	header.className = "sheet-header";
-	const heading = document.createElement("div");
-	heading.className = "sheet-title";
-	heading.textContent = title;
-	header.append(heading, sheetCloseButton());
-	return header;
-}
-
-export function dismissSheet() {
-	closeSheet();
 }
 
 export const TREE_ROLE = {
