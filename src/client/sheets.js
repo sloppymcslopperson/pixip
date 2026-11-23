@@ -1,5 +1,6 @@
 // Client sheets module; shared state lives in kernel/state.js.
 import { applyAddonUi } from "./addonUi.js";
+import { installDeps } from "./configure.js";
 import { copyText } from "./clipboard.js";
 import { renderFooter } from "./sessionView.js";
 import { closeSheet, sheetHeader } from "./sheetShell.js";
@@ -8,7 +9,12 @@ import { send } from "./transport.js";
 import { flattenTree } from "./tree.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
-import { openSurfaceRequest } from "./surface.js";
+
+let deps;
+
+export function configureSheets(next) {
+	deps = installDeps("sheets", "configureSheets", next, ["openSurfaceRequest"]);
+}
 
 export function openSessionSheet() {
 	const footer = state.footer;
@@ -202,5 +208,5 @@ export function handleUiRequest(request) {
 		renderFooter();
 		return;
 	}
-	openSurfaceRequest(request);
+	deps.openSurfaceRequest(request);
 }

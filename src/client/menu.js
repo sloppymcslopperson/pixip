@@ -1,6 +1,6 @@
 // Client menu module; shared state lives in kernel/state.js.
 import { commandQuery, filterCommands, menuCatalog, menuInsertText } from "./commands.js";
-import { submit } from "./composer.js";
+import { installDeps } from "./configure.js";
 import { resize } from "./composerInput.js";
 import { closeMenu } from "./menuView.js";
 import { renderQueue } from "./queueView.js";
@@ -9,6 +9,12 @@ import { queueCount, queueFromEvent, restoreText } from "./queue.js";
 import { toast } from "./toast.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
+
+let deps;
+
+export function configureMenu(next) {
+	deps = installDeps("menu", "configureMenu", next, ["submit"]);
+}
 
 export function renderMenu() {
 	const query = commandQuery(ui.input.value);
@@ -76,7 +82,7 @@ export function chooseMenu(index) {
 	closeMenu();
 	if (item.tuiOnly) {
 		ui.input.value = `/${item.name}`;
-		submit();
+		deps.submit();
 		return;
 	}
 	ui.input.value = menuInsertText(item);

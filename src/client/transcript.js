@@ -1,5 +1,6 @@
 // Client transcript module; shared state lives in kernel/state.js.
 import { appendBlock, hideThinkingIndicator, showThinkingIndicator } from "./transcriptView.js";
+import { installDeps } from "./configure.js";
 import { renderQueue } from "./queueView.js";
 import { scheduleScroll, scrollToEnd } from "./scroll.js";
 import { applyInfo, setBusy } from "./sessionView.js";
@@ -15,7 +16,6 @@ import {
 	toolBlock,
 	toolCallsOf,
 } from "./render.js";
-import { handleUiRequest } from "./sheets.js";
 import { toast } from "./toast.js";
 import { readingDistance, restoreScrollTop } from "./transcriptScroll.js";
 import {
@@ -33,6 +33,12 @@ import {
 import { send } from "./transport.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
+
+let deps;
+
+export function configureTranscript(next) {
+	deps = installDeps("transcript", "configureTranscript", next, ["handleUiRequest"]);
+}
 
 export let fillTimer = 0;
 
@@ -260,7 +266,7 @@ export function handleEvent(event) {
 			break;
 		}
 		case "extension_ui_request":
-			handleUiRequest(event);
+			deps.handleUiRequest(event);
 			break;
 		case "queue_update": {
 			// The event carries the complete queue: replace, never append.

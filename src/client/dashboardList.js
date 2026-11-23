@@ -1,8 +1,8 @@
 // Dashboard session list and cwd groups. Pure display predicates are exported
 // for Node tests; the DOM builders stay event-driven and thin.
 import { initialDirectory } from "./directoryPicker.js";
+import { installDeps } from "./configure.js";
 import { listSessions } from "./dashboardApi.js";
-import { archiveInactive, openSessionActions } from "./dashboardSettings.js";
 import { openDirectorySheet } from "./dashboardPicker.js";
 import { bulkArchiveTargets, draftInputValue, groupDisplay } from "./dashboardModel.js";
 import { beginNewSession } from "./navigation.js";
@@ -17,6 +17,12 @@ import {
 } from "./sessionGroups.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
+
+let deps;
+
+export function configureDashboardList(next) {
+	deps = installDeps("dashboardList", "configureDashboardList", next, ["archiveInactive", "openSessionActions"]);
+}
 
 export async function refreshDashboard() {
 	const sessions = await listSessions();
@@ -50,7 +56,7 @@ export function renderList(sessions, defaultCwd = state.defaultCwd, home = state
 		bulk.className = "bulk-archive";
 		bulk.textContent = `archive inactive (${targets.length})`;
 		bulk.title = "Archive stopped sessions, keeping the newest in a group with no active sessions";
-		bulk.addEventListener("click", () => void archiveInactive(targets));
+		bulk.addEventListener("click", () => void deps.archiveInactive(targets));
 		ui.list.append(bulk);
 	}
 
@@ -145,7 +151,7 @@ export function sessionRow(session) {
 	actions.textContent = "⋯";
 	actions.title = "Session actions";
 	actions.setAttribute("aria-label", `Actions for ${session.name ?? session.id.slice(0, 8)}`);
-	actions.addEventListener("click", () => openSessionActions(session));
+	actions.addEventListener("click", () => deps.openSessionActions(session));
 	row.append(open, actions);
 	return row;
 }

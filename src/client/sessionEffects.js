@@ -1,22 +1,35 @@
 // Session frame effects: the explicit handlers the protocol adapter calls for
 // snapshots, restarts, status, re-keys and socket close. Decisions come from
 // the pure sessionPlan.js helpers; this module applies them.
-import { clearPendingAttachment } from "./composerAttachments.js";
+import { installDeps } from "./configure.js";
 import { applyInfo } from "./sessionView.js";
 import { closePlan, openedPlan, snapshotPlan, statusPlan } from "./sessionPlan.js";
-import { failPendingSession, openSession } from "./session.js";
-import { appendRestartNotice, lastEntryId, renderResume, renderSnapshot, renderTranscript } from "./transcript.js";
 import { toast } from "./toast.js";
 import { connect, send } from "./transport.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
+
+let deps;
+
+export function configureSessionEffects(next) {
+	deps = installDeps("sessionEffects", "configureSessionEffects", next, [
+		"clearPendingAttachment",
+		"failPendingSession",
+		"openSession",
+		"appendRestartNotice",
+		"lastEntryId",
+		"renderResume",
+		"renderSnapshot",
+		"renderTranscript",
+	]);
+}
 
 /** Replacement snapshot: a compaction or a `/new` invalidates loaded windows. */
 export function renderReplace(entries, more) {
 	state.entries = [];
 	state.more = false;
 	state.stick = true;
-	renderSnapshot(entries, more);
+	deps.renderSnapshot(entries, more);
 }
 
 export function handleSnapshot(frame) {
@@ -32,14 +45,14 @@ export function handleSnapshot(frame) {
 		state.pendingUser = null;
 	}
 	state.info = frame.session;
-	if (plan.render === "resume") renderResume(frame.entries ?? []);
+	if (plan.render === "resume") deps.renderResume(frame.entries ?? []);
 	else if (plan.render === "replace") renderReplace(frame.entries ?? [], frame.more === true);
-	else renderSnapshot(frame.entries ?? [], frame.more === true);
-	if (plan.repaint) renderTranscript();
+	else deps.renderSnapshot(frame.entries ?? [], frame.more === true);
+	if (plan.repaint) deps.renderTranscript();
 	applyInfo();
 	if (state.restartNoticePending) {
 		state.restartNoticePending = false;
-		appendRestartNotice(plan.interrupted);
+		deps.appendRestartNotice(plan.interrupted);
 	}
 }
 
@@ -73,7 +86,7 @@ export function handleOpened(frame) {
 		state.pendingCreate = null;
 		state.sessionId = null;
 		history.replaceState(null, "", `#s=${encodeURIComponent(plan.id)}`);
-		openSession(plan.id);
+		deps.openSession(plan.id);
 		return;
 	}
 	if (plan.act === "reattach") {
@@ -92,7 +105,7 @@ export function handleOpened(frame) {
 			state.tools.clear();
 			state.streaming = null;
 			state.pendingUser = null;
-			clearPendingAttachment();
+			deps.clearPendingAttachment();
 			state.bashRunning = false;
 			state.bash.clear();
 			ui.log.textContent = "";
@@ -112,11 +125,11 @@ export function handleTransportClose() {
 		retries: state.retries,
 	});
 	if (plan.act === "fail") {
-		failPendingSession("daemon disconnected");
+		deps.failPendingSession("daemon disconnected");
 		return;
 	}
 	if (plan.act === "none") return;
 	state.retries += 1;
 	toast(state.restarting ? `pixip restarting — reconnecting… (${plan.delay}ms)` : `reconnecting… (${plan.delay}ms)`);
-	setTimeout(() => connect(state.sessionId, lastEntryId()), plan.delay);
+	setTimeout(() => connect(state.sessionId, deps.lastEntryId()), plan.delay);
 }

@@ -2,15 +2,20 @@
 // session list to dashboardList. HTTP, rendering, picker and settings live in
 // dashboardApi, dashboardList, dashboardPicker and dashboardSettings.
 import { createAddonUi } from "./addonUi.js";
-import { clearPendingAttachment } from "./composerAttachments.js";
+import { installDeps } from "./configure.js";
 import { closeMenu } from "./menuView.js";
 import { renderQueue } from "./queueView.js";
 import { fetchInfo, listSessions } from "./dashboardApi.js";
 import { renderList } from "./dashboardList.js";
-import { resetSurface } from "./surface.js";
 import { connect } from "./transport.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
+
+let deps;
+
+export function configureDashboard(next) {
+	deps = installDeps("dashboard", "configureDashboard", next, ["clearPendingAttachment", "resetSurface"]);
+}
 
 export async function showList() {
 	state.sessionId = null;
@@ -20,7 +25,7 @@ export async function showList() {
 	state.tools.clear();
 	state.streaming = null;
 	state.pendingUser = null;
-	clearPendingAttachment();
+	deps.clearPendingAttachment();
 	state.restarting = false;
 	state.restartWasBusy = false;
 	state.restartNoticePending = false;
@@ -36,7 +41,7 @@ export async function showList() {
 	state.more = false;
 	state.loadingEarlier = false;
 	state.addon = createAddonUi();
-	resetSurface();
+	deps.resetSurface();
 	ui.session.hidden = true;
 	ui.composer.hidden = true;
 	ui.footer.hidden = true;

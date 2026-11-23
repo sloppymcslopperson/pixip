@@ -3,6 +3,7 @@ import { optimisticContent, slashPayload, textPayload } from "./attachments.js";
 import { clearPendingAttachment } from "./composerAttachments.js";
 import { submitBash } from "./composerBash.js";
 import { classifyInput, isAllowed } from "./commands.js";
+import { installDeps } from "./configure.js";
 import { clearInput } from "./composerInput.js";
 import { scrollToEnd } from "./scroll.js";
 import { appendBlock } from "./transcriptView.js";
@@ -12,7 +13,12 @@ import { notice, textSheet, toast } from "./toast.js";
 import { send } from "./transport.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
-import { surfaceOpen } from "./surface.js";
+
+let deps;
+
+export function configureComposer(next) {
+	deps = installDeps("composer", "configureComposer", next, ["surfaceOpen"]);
+}
 
 export const builtinHandlers = {
 	compact(args) {
@@ -88,7 +94,7 @@ export function attachmentBlocksCommand(label) {
 }
 
 export function submit() {
-	if (surfaceOpen()) {
+	if (deps.surfaceOpen()) {
 		toast("answer or cancel the request first");
 		return;
 	}

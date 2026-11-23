@@ -1,18 +1,26 @@
 // Client session module; shared state lives in kernel/state.js.
 import { createAddonUi } from "./addonUi.js";
-import { clearPendingAttachment } from "./composerAttachments.js";
+import { installDeps } from "./configure.js";
 import { resize } from "./composerInput.js";
 import { closeMenu } from "./menuView.js";
 import { renderQueue } from "./queueView.js";
 import { pendingErrorHtml, pendingSessionHtml } from "./render.js";
 import { updateJump } from "./scroll.js";
 import { applyInfo, renderFooter } from "./sessionView.js";
-import { resetSurface } from "./surface.js";
 import { readingDistance, restoreSession, snapshotSession } from "./sessionCache.js";
-import { renderTranscript } from "./transcript.js";
 import { connect, send } from "./transport.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
+
+let deps;
+
+export function configureSession(next) {
+	deps = installDeps("session", "configureSession", next, [
+		"clearPendingAttachment",
+		"resetSurface",
+		"renderTranscript",
+	]);
+}
 
 export function beginNewSession(cwd) {
 	state.pendingCreate = { cwd };
@@ -29,12 +37,12 @@ export function showPendingSession() {
 	state.tools.clear();
 	state.streaming = null;
 	state.pendingUser = null;
-	clearPendingAttachment();
+	deps.clearPendingAttachment();
 	state.entries = [];
 	state.more = false;
 	state.loadingEarlier = false;
 	state.addon = createAddonUi();
-	resetSurface();
+	deps.resetSurface();
 	state.policy = null;
 	state.dynamicCommands = [];
 	state.queue = { steering: [], followUp: [] };
@@ -94,7 +102,7 @@ export function openSession(id) {
 	state.tools.clear();
 	state.streaming = null;
 	state.pendingUser = null;
-	clearPendingAttachment();
+	deps.clearPendingAttachment();
 	state.policy = null;
 	state.dynamicCommands = [];
 	state.queue = { steering: [], followUp: [] };
@@ -116,7 +124,7 @@ export function openSession(id) {
 	state.more = false;
 	state.loadingEarlier = false;
 	state.addon = createAddonUi();
-	resetSurface();
+	deps.resetSurface();
 	state.stick = true;
 	updateJump();
 	ui.title.textContent = "connecting…";
@@ -158,7 +166,7 @@ export function restoreCachedSession(cached) {
 	state.addon = restored.addon ?? createAddonUi();
 	state.queue = restored.queue;
 	ui.input.value = restored.input;
-	renderTranscript(restored.distance ?? (state.stick ? ui.log.clientHeight : null));
+	deps.renderTranscript(restored.distance ?? (state.stick ? ui.log.clientHeight : null));
 	renderQueue();
 	renderFooter();
 	if (state.info) applyInfo();

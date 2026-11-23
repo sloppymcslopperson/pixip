@@ -1,19 +1,25 @@
 // Dashboard settings, archive and trash surfaces. HTTP stays in dashboardApi,
 // list re-rendering in dashboardList; this module owns only these sheets.
 import { apiJson, fetchStored } from "./dashboardApi.js";
+import { installDeps } from "./configure.js";
 import { refreshDashboard, renderList } from "./dashboardList.js";
 import { storedSheetModel } from "./dashboardModel.js";
 import { forgetCachedSession } from "./navigation.js";
 import { KEEP_ACTIVE_STORAGE_KEY, serializeKeepActive } from "./sessionGroups.js";
 import { closeSheet, sheetHeader } from "./sheetShell.js";
-import { sheet } from "./sheets.js";
 import { actionToast, toast } from "./toast.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
 
+let deps;
+
+export function configureDashboardSettings(next) {
+	deps = installDeps("dashboardSettings", "configureDashboardSettings", next, ["sheet"]);
+}
+
 export function openSessionActions(session) {
 	const label = session.name ?? session.id.slice(0, 8);
-	sheet(`session · ${label}`, [
+	deps.sheet(`session · ${label}`, [
 		["archive", () => confirmSessionAction("archive", session)],
 		["delete", () => confirmSessionAction("delete", session)],
 	]);

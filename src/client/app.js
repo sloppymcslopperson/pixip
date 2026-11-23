@@ -1,25 +1,46 @@
 import { looksLikeImage } from "./attachments.js";
-import { submit } from "./composer.js";
-import { chooseAttachment, setAttachMenu } from "./composerAttachments.js";
+import { configureComposer, submit } from "./composer.js";
+import { chooseAttachment, clearPendingAttachment, setAttachMenu } from "./composerAttachments.js";
 import { resize } from "./composerInput.js";
 import { bindScaleButton, readScale, setBarMenu, setScale, softRefresh } from "./controls.js";
-import { showList } from "./dashboard.js";
-import { openSettingsSheet } from "./dashboardSettings.js";
+import { configureDashboard, showList } from "./dashboard.js";
+import { configureDashboardList } from "./dashboardList.js";
+import {
+	archiveInactive,
+	configureDashboardSettings,
+	openSessionActions,
+	openSettingsSheet,
+} from "./dashboardSettings.js";
 import { handleFrame } from "./frames.js";
-import { handleTransportClose } from "./sessionEffects.js";
+import { configureSessionEffects, handleTransportClose } from "./sessionEffects.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
-import { chooseMenu, moveMenu, renderMenu } from "./menu.js";
+import { chooseMenu, configureMenu, moveMenu, renderMenu } from "./menu.js";
 import { closeMenu } from "./menuView.js";
 import { configureNavigation, route } from "./navigation.js";
 import { updateJump } from "./scroll.js";
 import { refreshSendState } from "./sendState.js";
-import { beginNewSession, cacheCurrentSession, forgetCachedSession, openSession } from "./session.js";
+import {
+	beginNewSession,
+	cacheCurrentSession,
+	configureSession,
+	failPendingSession,
+	forgetCachedSession,
+	openSession,
+} from "./session.js";
 import { dismissSheet } from "./sheetShell.js";
-import { openSessionSheet } from "./sheets.js";
-import { cancelSurface, openFixturePanel } from "./surface.js";
+import { configureSheets, handleUiRequest, openSessionSheet, sheet } from "./sheets.js";
+import { cancelSurface, openFixturePanel, openSurfaceRequest, resetSurface, surfaceOpen } from "./surface.js";
 import { openImageSheet } from "./toast.js";
 import { DEFAULT_PERCENT, nextPercent, previousPercent } from "./transcriptScale.js";
+import {
+	appendRestartNotice,
+	configureTranscript,
+	lastEntryId,
+	renderResume,
+	renderSnapshot,
+	renderTranscript,
+} from "./transcript.js";
 import { distanceFromBottom, shouldStick } from "./transcriptScroll.js";
 import { configureTransport, send } from "./transport.js";
 
@@ -343,6 +364,24 @@ ui.log.addEventListener("click", (event) => {
 /** A 3.2 s toast is useless for `/fit help`'s 2 KB notify: long or multi-line
  *  notices get a dismissible sheet instead. */
 
+configureComposer({ surfaceOpen });
+configureDashboard({ clearPendingAttachment, resetSurface });
+configureDashboardList({ archiveInactive, openSessionActions });
+configureDashboardSettings({ sheet });
+configureMenu({ submit });
+configureSession({ clearPendingAttachment, resetSurface, renderTranscript });
+configureSessionEffects({
+	clearPendingAttachment,
+	failPendingSession,
+	openSession,
+	appendRestartNotice,
+	lastEntryId,
+	renderResume,
+	renderSnapshot,
+	renderTranscript,
+});
+configureSheets({ openSurfaceRequest });
+configureTranscript({ handleUiRequest });
 configureTransport({ onFrame: handleFrame, onClose: handleTransportClose });
 configureNavigation({
 	openSession,
