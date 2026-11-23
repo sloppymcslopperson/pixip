@@ -17,6 +17,7 @@ import {
 	previousPercent,
 	scaleFactor,
 } from "./transcriptScale.js";
+import { readingDistance, restoreScrollTop, jumpHidden } from "./transcriptScroll.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
 import { connect, send } from "./transport.js";
@@ -39,10 +40,10 @@ export function saveScale(percent) {
 export function setScale(percent, { persist = true } = {}) {
 	const next = clampPercent(percent);
 	if (next !== state.scale) {
-		const distance = state.stick ? ui.log.clientHeight : ui.log.scrollHeight - ui.log.scrollTop;
+		const distance = readingDistance(state.stick, ui.log.clientHeight, ui.log.scrollHeight, ui.log.scrollTop);
 		state.scale = next;
 		document.documentElement.style.setProperty("--transcript-scale", String(scaleFactor(next)));
-		ui.log.scrollTop = Math.max(0, ui.log.scrollHeight - distance);
+		ui.log.scrollTop = restoreScrollTop(distance, ui.log.scrollHeight);
 	}
 	if (persist) saveScale(next);
 	updateScaleButtons();
@@ -159,7 +160,7 @@ export function scrollToEnd(force = false) {
 }
 
 export function updateJump() {
-	ui.jump.hidden = state.stick || ui.session.hidden;
+	ui.jump.hidden = jumpHidden(state.stick, ui.session.hidden);
 }
 
 export let scrollQueued = false;

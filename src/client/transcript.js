@@ -23,51 +23,34 @@ import {
 } from "./render.js";
 import { handleUiRequest } from "./sheets.js";
 import { toast } from "./toast.js";
+import { readingDistance, restoreScrollTop } from "./transcriptScroll.js";
+import {
+	FIRST_PAINT_BYTES,
+	FILL_CHUNK_BYTES,
+	entryWeight,
+	lastEntryId,
+	mergeTail as mergeWindow,
+	oldestEntryId,
+	planFillChunk,
+	planFirstPaint,
+	prependWindow,
+	unseenEntries,
+} from "./transcriptWindow.js";
 import { send } from "./transport.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
-
-export const FIRST_PAINT_BYTES = 24 * 1024;
-
-export const FILL_CHUNK_BYTES = 32 * 1024;
 
 export let fillTimer = 0;
 
 export let fillToken = 0;
 
 export function mergeTail(entries, more) {
-	const previous = state.entries;
-	const ids = new Set(entries.map((entry) => entry?.id).filter(Boolean));
-	const cut = previous.findIndex((entry) => entry?.id && ids.has(entry.id));
-	const keep = cut > 0 ? cut : 0;
-	const merged = [...previous.slice(0, keep), ...entries];
-	const seen = new Set();
-	const out = [];
-	for (let index = merged.length - 1; index >= 0; index -= 1) {
-		const entry = merged[index];
-		const id = entry?.id;
-		if (typeof id === "string") {
-			if (seen.has(id)) continue;
-			seen.add(id);
-		}
-		out.push(entry);
-	}
-	out.reverse();
-	state.entries = out;
-	state.more = more;
+	const result = mergeWindow(state.entries, entries, more);
+	state.entries = result.entries;
+	state.more = result.more;
 }
 
-export function oldestEntryId() {
-	return state.entries.find((entry) => typeof entry?.id === "string")?.id ?? null;
-}
-
-export function lastEntryId() {
-	for (let index = state.entries.length - 1; index >= 0; index -= 1) {
-		const id = state.entries[index]?.id;
-		if (typeof id === "string") return id;
-	}
-	return null;
-}
+export { FIRST_PAINT_BYTES, FILL_CHUNK_BYTES, entryWeight, lastEntryId, oldestEntryId };
 
 export function earlierButton() {
 	const button = document.createElement("button");
@@ -76,7 +59,7 @@ export function earlierButton() {
 	button.textContent = state.loadingEarlier ? "loading…" : "load earlier";
 	button.disabled = state.loadingEarlier;
 	button.addEventListener("click", () => {
-		const before = oldestEntryId();
+		const before = oldestEntryId(state.entries);
 		if (!before || state.loadingEarlier) return;
 		state.loadingEarlier = true;
 		button.textContent = "loading…";
@@ -84,14 +67,6 @@ export function earlierButton() {
 		send({ t: "earlier", before });
 	});
 	return button;
-}
-
-export function entryWeight(entry) {
-	try {
-		return JSON.stringify(entry).length;
-	} catch {
-		return 512;
-	}
 }
 
 export function htmlOf(entries, calls) {
@@ -122,7 +97,7 @@ export function htmlOf(entries, calls) {
 
 export function renderTranscript(distance = null) {
 	const restore = () => {
-		if (distance !== null) ui.log.scrollTop = Math.max(0, ui.log.scrollHeight - distance);
+		if (distance !== null) ui.log.scrollTop = restoreScrollTop(distance, ui.log.scrollHeight);
 	};
 	clearTimeout(fillTimer);
 	fillToken += 1;
@@ -137,13 +112,8 @@ export function renderTranscript(distance = null) {
 	}
 
 	const entries = state.entries;
-	let start = entries.length;
-	let bytes = 0;
-	while (start > 0 && (bytes === 0 || bytes < FIRST_PAINT_BYTES)) {
-		start -= 1;
-		bytes += entryWeight(entries[start]);
-	}
-	const older = state.more && oldestEntryId() ? earlierButton() : null;
+	let { start } = planFirstPaint(entries, FIRST_PAINT_BYTES);
+	const older = state.more && oldestEntryId(entries) ? earlierButton() : null;
 
 	ui.log.innerHTML =
 		entries.length === 0
@@ -160,12 +130,7 @@ export function renderTranscript(distance = null) {
 	// distance from the bottom is held constant, so a pinned view stays pinned.
 	const fill = () => {
 		if (token !== fillToken || start === 0) return;
-		let from = start;
-		let chunkBytes = 0;
-		while (from > 0 && chunkBytes < FILL_CHUNK_BYTES) {
-			from -= 1;
-			chunkBytes += entryWeight(entries[from]);
-		}
+		const { from } = planFillChunk(entries, start, FILL_CHUNK_BYTES);
 		ui.log.insertAdjacentHTML("afterbegin", htmlOf(entries.slice(from, start), calls));
 		if (older) ui.log.prepend(older);
 		restore();
@@ -179,17 +144,16 @@ export function renderTranscript(distance = null) {
 export function renderSnapshot(entries, more) {
 	// Pinned: stay at the bottom. Elsewhere: keep the same distance from the
 	// bottom, which is exactly the same content once new entries are painted.
-	const distance = state.stick ? ui.log.clientHeight : ui.log.scrollHeight - ui.log.scrollTop;
+	const distance = readingDistance(state.stick, ui.log.clientHeight, ui.log.scrollHeight, ui.log.scrollTop);
 	if (state.stick) state.stick = true;
 	mergeTail(entries, more);
 	renderTranscript(distance);
 }
 
 export function renderResume(entries) {
-	const known = new Set(state.entries.map((entry) => entry?.id).filter(Boolean));
-	const fresh = entries.filter((entry) => typeof entry?.id !== "string" || !known.has(entry.id));
+	const fresh = unseenEntries(state.entries, entries);
 	if (fresh.length === 0) return;
-	const distance = state.stick ? ui.log.clientHeight : ui.log.scrollHeight - ui.log.scrollTop;
+	const distance = readingDistance(state.stick, ui.log.clientHeight, ui.log.scrollHeight, ui.log.scrollTop);
 	state.entries = [...state.entries, ...fresh];
 	renderTranscript(distance);
 }
@@ -204,11 +168,10 @@ export function appendRestartNotice(interrupted) {
 
 export function prependHistory(entries, more) {
 	state.loadingEarlier = false;
-	const distance = state.stick ? ui.log.clientHeight : ui.log.scrollHeight - ui.log.scrollTop;
-	const known = new Set(state.entries.map((entry) => entry?.id).filter(Boolean));
-	const older = entries.filter((entry) => typeof entry?.id !== "string" || !known.has(entry.id));
-	if (older.length > 0) state.entries = [...older, ...state.entries];
-	state.more = more;
+	const distance = readingDistance(state.stick, ui.log.clientHeight, ui.log.scrollHeight, ui.log.scrollTop);
+	const result = prependWindow(state.entries, entries, more);
+	state.entries = result.entries;
+	state.more = result.more;
 	renderTranscript(distance);
 }
 

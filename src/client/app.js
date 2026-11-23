@@ -26,6 +26,7 @@ import { openSessionSheet } from "./sheets.js";
 import { cancelSurface, openFixturePanel } from "./surface.js";
 import { openImageSheet } from "./toast.js";
 import { DEFAULT_PERCENT, nextPercent, previousPercent } from "./transcriptScale.js";
+import { distanceFromBottom, shouldStick } from "./transcriptScroll.js";
 import { configureTransport, send } from "./transport.js";
 
 // ------------------------------------------------------------------ transport
@@ -316,8 +317,8 @@ window.addEventListener("hashchange", route);
  *  the newest entry and the transcript is on screen. */
 
 ui.log.addEventListener("scroll", () => {
-	const distance = ui.log.scrollHeight - ui.log.scrollTop - ui.log.clientHeight;
-	state.stick = distance < 80;
+	const distance = distanceFromBottom(ui.log.clientHeight, ui.log.scrollHeight, ui.log.scrollTop);
+	state.stick = shouldStick(distance);
 	updateJump();
 });
 
