@@ -1,0 +1,1 @@
+Question niggles. The panel shows the extension's name twice, and when the panel is visible it should hide (or grey out, but hide preferred) the main composer input. If it doesn't, then the specific behavior of the user submitting a prompt while a panel is up should be decided and documented
