@@ -11,6 +11,7 @@ import { notice, textSheet, toast } from "./toast.js";
 import { send } from "./transport.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
+import { surfaceOpen } from "./surface.js";
 
 export const builtinHandlers = {
 	compact(args) {
@@ -93,6 +94,10 @@ export function attachmentBlocksCommand(label) {
 }
 
 export function submit() {
+	if (surfaceOpen()) {
+		toast("answer or cancel the request first");
+		return;
+	}
 	const text = ui.input.value.trim();
 	const attachment = state.pendingAttachment;
 	if (attachment?.kind === "busy" || (attachment?.kind === "file" && attachment.uploading)) {

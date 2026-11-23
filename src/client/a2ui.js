@@ -34,6 +34,40 @@ function componentsOf(message) {
 	return Array.isArray(components) ? components : [];
 }
 
+/** Remove an in-panel Text node that repeats the surface header title. */
+export function stripDuplicateTitle(messages, title) {
+	const wanted = typeof title === "string" ? title.trim() : "";
+	if (!wanted) return messages;
+	const removed = new Set();
+	let changed = false;
+	const next = messages.map((message) => {
+		const created = message?.createSurface;
+		const updated = message?.updateComponents;
+		const target = created ?? updated;
+		const components = target?.components;
+		if (!Array.isArray(components)) return message;
+		const kept = components.filter((component) => {
+			const duplicate =
+				component?.component === "Text" && typeof component.text === "string" && component.text.trim() === wanted;
+			if (duplicate && typeof component.id === "string") removed.add(component.id);
+			return !duplicate;
+		});
+		if (kept.length === components.length) return message;
+		changed = true;
+		const without = kept.map((component) => {
+			if (!Array.isArray(component?.children)) return component;
+			const children = component.children.filter((id) => !removed.has(id));
+			return children.length === component.children.length ? component : { ...component, children };
+		});
+		return {
+			...message,
+			...(created ? { createSurface: { ...created, components: without } } : {}),
+			...(updated ? { updateComponents: { ...updated, components: without } } : {}),
+		};
+	});
+	return changed ? next : messages;
+}
+
 export function componentTypes(messages) {
 	const types = new Set();
 	for (const message of messages) {
@@ -151,7 +185,7 @@ export function createA2uiRenderer({
 
 			let unknown = [];
 			try {
-				const messages = panelMessages(payload);
+				const messages = stripDuplicateTitle(panelMessages(payload), payload?.title);
 				const surfaceId = panelSurfaceId(payload);
 				unknown = unknownComponents(messages, catalog);
 				if (unknown.length > 0) {

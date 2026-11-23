@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { createSurfaceQueue, enqueueSurface, settleSurface } from "../src/client/surfaceQueue.js";
+import { createSurfaceQueue, enqueueSurface, nextComposerState, settleSurface } from "../src/client/surfaceQueue.js";
 
 const request = (id) => ({ id, method: "select", title: id, options: ["a", "b"] });
 
@@ -42,5 +42,19 @@ describe("inline surface queue", () => {
 		const queue = createSurfaceQueue();
 		enqueueSurface(queue, request("one"));
 		assert.equal(settleSurface(queue, "one"), null);
+	});
+});
+
+describe("blocking surface composer", () => {
+	it("hides while a request is active and restores the previous state", () => {
+		const hidden = nextComposerState({ id: "one" }, false, null);
+		assert.deepEqual(hidden, { hidden: true, saved: false });
+		assert.deepEqual(nextComposerState(null, true, hidden.saved), { hidden: false, saved: null });
+	});
+
+	it("leaves a composer that was already hidden hidden", () => {
+		const hidden = nextComposerState({ id: "one" }, true, null);
+		assert.deepEqual(hidden, { hidden: true, saved: true });
+		assert.deepEqual(nextComposerState(null, true, hidden.saved), { hidden: true, saved: null });
 	});
 });

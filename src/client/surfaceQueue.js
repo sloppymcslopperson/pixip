@@ -24,3 +24,9 @@ export function settleSurface(queue, id) {
 	}
 	return queue.active;
 }
+
+/** Hide the composer for any active blocking request, then restore its state. */
+export function nextComposerState(active, hidden, saved) {
+	if (active) return { hidden: true, saved: saved === null ? hidden : saved };
+	return { hidden: saved === null ? hidden : saved, saved: null };
+}

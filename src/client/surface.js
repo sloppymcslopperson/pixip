@@ -5,7 +5,7 @@ import { registerA2uiPanel } from "./a2ui.js";
 import { send } from "./transport.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
-import { createSurfaceQueue, enqueueSurface, settleSurface } from "./surfaceQueue.js";
+import { createSurfaceQueue, enqueueSurface, nextComposerState, settleSurface } from "./surfaceQueue.js";
 import { closeAllPanels, closePanel, openPanel, panelTitle } from "./panelHost.js";
 
 // Claim the "a2ui" mode at startup without loading the bundle: the lazy
@@ -17,8 +17,17 @@ let collapsed = false;
 let renderedId = null;
 let lastShell = null;
 let observer = null;
+let composerBeforeSurface = null;
 
 let lastSurfaceHeight = 0;
+
+/** Hide the composer while any blocking request is up; restore what was there. */
+function syncComposer() {
+	if (!ui.composer) return;
+	const next = nextComposerState(queue.active, ui.composer.hidden, composerBeforeSurface);
+	ui.composer.hidden = next.hidden;
+	composerBeforeSurface = next.saved;
+}
 
 /** Keep the jump pill above the surface instead of overlaying its actions. */
 function syncOffset() {
@@ -39,12 +48,17 @@ function observeSurface() {
 	observer.observe(ui.surface);
 }
 
-const BLOCKING = ["select", "confirm", "input", "editor", "panel"];
+const BLOCKING = ["select", "confirm", "input", "editor", "panel", "reask"];
 const panelTitles = new Map();
 
 function titleOf(request) {
 	if (request?.method === "panel") {
 		return panelTitles.get(request.id) ?? panelTitle(request.payload);
+	}
+	if (request?.method === "reask") {
+		const original = request.reask?.request ?? {};
+		const label = original.title ?? original.message ?? original.payload?.title ?? request.reask?.method ?? "request";
+		return `Re-ask: ${String(label).trim()}`;
 	}
 	const title = request?.title ?? request?.message;
 	if (typeof title === "string" && title.trim()) return title.trim();
@@ -136,10 +150,58 @@ function addButton(actions, label, fields, className = "") {
 	actions.append(button);
 }
 
+function formatAge(ms) {
+	const hours = Math.round(ms / 3_600_000);
+	if (hours >= 1) return `${hours}h`;
+	return `${Math.max(1, Math.round(ms / 60_000))}m`;
+}
+
+function mountReask(request) {
+	const { body } = shell();
+	body.textContent = "";
+	const record = request.reask ?? {};
+	const original = record.request ?? {};
+	const note = document.createElement("div");
+	note.className = "surface-hint";
+	note.textContent = `This ${record.method ?? "request"} timed out after ${formatAge(Number(record.timeoutMs) || 0)} with no answer. Re-ask it now, or dismiss it.`;
+	body.append(note);
+	if (record.method === "panel" && original.payload) {
+		const wrap = document.createElement("div");
+		wrap.className = "reask-panel";
+		body.append(wrap);
+		try {
+			openPanel({ id: request.panelId, payload: original.payload }, wrap, {
+				submit: () => {},
+				cancel: () => {},
+				setTitle: () => {},
+			});
+		} catch (error) {
+			wrap.textContent = String(error?.message ?? error);
+		}
+	}
+	const actions = actionRow();
+	const ask = document.createElement("button");
+	ask.type = "button";
+	ask.className = "primary";
+	ask.textContent = "re-ask";
+	ask.addEventListener("click", () => finishReask("ask"));
+	const dismiss = document.createElement("button");
+	dismiss.type = "button";
+	dismiss.textContent = "dismiss";
+	dismiss.addEventListener("click", () => finishReask("dismiss"));
+	actions.append(ask, dismiss);
+	body.append(actions);
+}
+
 function mountBody(request) {
 	const { body } = shell();
 	body.textContent = "";
 	const title = titleOf(request);
+
+	if (request.method === "reask") {
+		mountReask(request);
+		return;
+	}
 
 	if (request.method === "panel") {
 		const id = request.id;
@@ -211,6 +273,7 @@ function mountBody(request) {
 export function renderSurface({ force = false } = {}) {
 	const root = ui.surface;
 	if (!root) return;
+	syncComposer();
 	if (!queue.active) {
 		root.hidden = true;
 		root.textContent = "";
@@ -256,10 +319,27 @@ export function openSurfaceRequest(request) {
 	return true;
 }
 
+/** Show recorded timed-out requests as re-ask cards. */
+export function handleReasks(requests) {
+	for (const record of Array.isArray(requests) ? requests : []) {
+		if (!record || typeof record.id !== "string") continue;
+		openSurfaceRequest({
+			id: `reask:${record.id}`,
+			method: "reask",
+			reask: record,
+			panelId: `reask-panel:${record.id}`,
+		});
+	}
+}
+
 /** Exactly-once answer/cancel for the active request. */
 export function finishSurface(fields) {
 	const active = queue.active;
 	if (!active) return;
+	if (active.method === "reask") {
+		finishReask(fields?.cancelled ? "dismiss" : "ask");
+		return;
+	}
 	const position = logPosition();
 	if (active.method === "panel") {
 		panelTitles.delete(active.id);
@@ -270,6 +350,30 @@ export function finishSurface(fields) {
 	collapsed = false;
 	renderSurface();
 	restoreLog(position);
+}
+
+/** Ask the agent to re-issue, or forget, one recorded timed-out request. */
+export function finishReask(action) {
+	const active = queue.active;
+	if (active?.method !== "reask") return;
+	const position = logPosition();
+	closePanel(active.panelId, { discard: true });
+	send({ t: "reask", id: active.reask.id, action });
+	settleSurface(queue, active.id);
+	collapsed = false;
+	renderSurface();
+	restoreLog(position);
+}
+
+/** Retire one timed-out request without sending an answer to Pi. */
+export function dropSurface(id) {
+	const active = queue.active;
+	if (active?.id === id) {
+		if (active.method === "panel") closePanel(active.id, { discard: true });
+		if (active.method === "reask") closePanel(active.panelId, { discard: true });
+	}
+	settleSurface(queue, id);
+	renderSurface();
 }
 
 export function cancelSurface() {
@@ -292,6 +396,7 @@ export function resetSurface() {
 		lastSurfaceHeight = 0;
 		syncOffset();
 	}
+	syncComposer();
 }
 
 export function surfaceOpen() {

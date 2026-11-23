@@ -9,6 +9,7 @@ import {
 	createLazyA2uiPanel,
 	panelMessages,
 	panelSurfaceId,
+	stripDuplicateTitle,
 	unknownComponents,
 } from "../src/client/a2ui.js";
 import { hasPanelRenderer } from "../src/client/panelHost.js";
@@ -159,6 +160,23 @@ describe("a2ui payload helpers", () => {
 			),
 			["Widget"],
 		);
+	});
+
+	it("drops an in-panel title that repeats the surface header", () => {
+		const list = messages([
+			{ id: "root", component: "Column", children: ["title", "question"] },
+			{ id: "title", component: "Text", text: "Questionnaire" },
+			{ id: "question", component: "Text", text: "Pick a colour" },
+		]);
+		const next = stripDuplicateTitle(list, "Questionnaire");
+		const components = next[0].createSurface.components;
+		assert.deepEqual(
+			components.map((component) => component.id),
+			["root", "question"],
+		);
+		assert.deepEqual(components[0].children, ["question"]);
+		// A different title leaves the panel untouched.
+		assert.equal(stripDuplicateTitle(list, "Other"), list);
 	});
 
 	it("serializes an action as JSON the extension can parse", () => {
