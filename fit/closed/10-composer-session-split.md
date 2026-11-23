@@ -1,6 +1,7 @@
 ---
 project: pixip
 grilled: true
+commit: "6d6cefa6b0d52de26cb3513a611f72e1dde54ab8"
 ---
 
 Split `composer.js` and `session.js` along their existing seams: composer controller, attachments and bash cards; session open/restore/cache, routing and frame effects. Extract pure helpers and keep the DOM controllers thin.
@@ -30,3 +31,11 @@ Split `composer.js` and `session.js` along their existing seams: composer contro
 - **Session: session + effects.** `session.js` keeps open/pending/restore/cache. New `sessionEffects.js` holds frame-driven state changes as explicit handlers; `frames.js` remains the protocol adapter and calls them. Routing stays in `navigation.js`. No new `sessionCache.js` module; expand the existing pure cache helpers there if needed.
 - **Session tests: both.** Add DOM-free tests for cache snapshot/restore shape, distance computation and queue copying, plus a pure frame-effect handler/reducer returning state changes.
 - **Preserve** optimistic user blocks, queue handling, reconnect, scroll pinning and footer rendering. The inline surface and panel wiring stay outside the controllers except through narrow calls.
+
+### Implementation note
+
+- Composer controller is now 211 lines: command dispatch, policy gating, submit and quit only. `composerAttachments.js` owns the attachment UI/upload lifecycle, `composerBash.js` owns bash cards, and `attachments.js` gained the pure engines `fitImage`, `imageSourceError`, `uploadError`, `outgoingText`, `imageBlocks`, `slashPayload`, `textPayload` and `optimisticContent`.
+- Session frame effects moved into `sessionEffects.js` (snapshot/restart/status/opened/close plus replacement snapshots). `frames.js` is now a thin protocol switch. Decisions live in the DOM-free `sessionPlan.js` (`snapshotPlan`, `openedPlan`, `statusPlan`, `closePlan`), so they are testable.
+- `sessionCache.js` gained `readingDistance`, `copyQueue`, `snapshotSession` and `restoreSession`; `session.js` uses them for cache/restore.
+
+Verified with `env -u PIXIP_INSIDE -u PIXIP_SESSION_ID npm run check` (all suites green, 302 root tests) and screenshot/interaction probes at 390 and 1280: dashboard, transcript, attach menu toggle and `/` menu, no console errors. Parent commit `6d6cefa6b0d52de26cb3513a611f72e1dde54ab8`.
