@@ -1,6 +1,7 @@
 ---
 project: pixip
 grilled: true
+commit: a7b5904e8305f8c7f07563b927f469edff649968
 ---
 
 Extract the transcript's scroll and windowing seams while keeping the append-only HTML painter and rAF delta path deliberately isolated. The goal is testable scroll/merge/chunk logic without changing transcript performance or behaviour.
@@ -30,3 +31,11 @@ Extract the transcript's scroll and windowing seams while keeping the append-onl
 - **Fully pure API.** Pass entries/state in and return values, for example `mergeTail(previous, incoming, more) -> {entries, more}`, `planTail(entries, budget)`, `scrollDistance(...)`. `transcript.js` keeps only thin stateful wrappers that assign results back to `state` and call the painter. No DOM inside the extracted helpers.
 - **Tests** cover the pure scroll/window helpers without DOM; existing render and windowing tests stay intact.
 - **Budgets unchanged:** first paint 24 KB, fill chunks 32 KB, live deltas in one rAF. Loading earlier history preserves reading position; jump-to-newest keeps working. Verify with 390/1280 screenshots via the local headless Chrome path recorded in ticket 09.
+
+### Implementation note
+
+- `transcriptScroll.js` exports `STICK_DISTANCE`, `distanceFromBottom`, `shouldStick`, `readingDistance`, `restoreScrollTop` and `jumpHidden`. `controls.updateJump`, `controls.setScale` and the `#log` scroll listener now use them.
+- `transcriptWindow.js` exports the 24 KB/32 KB budgets, `entryWeight`, `mergeTail`, `oldestEntryId`, `lastEntryId`, `planFirstPaint`, `planFillChunk`, `unseenEntries` and `prependWindow`.
+- `transcript.js` keeps the append-only painter and the `textContent +=` rAF flush; its `mergeTail` is now a thin state wrapper and its old pure helpers are re-exported for compatibility. No DOM was added to the pure modules.
+
+Verified with `env -u PIXIP_INSIDE -u PIXIP_SESSION_ID npm run check` (all suites green, 319 root tests) and puppeteer probes at 390/1280. Non-pinned load-earlier kept the bottom distance at 1162 px across a prepend; pinned load-earlier stayed pinned; jump-to-newest returned to the bottom and hid the jump control; no console errors. Parent commit `a7b5904e8305f8c7f07563b927f469edff649968`.
