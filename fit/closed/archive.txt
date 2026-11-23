@@ -1589,3 +1589,348 @@ The web view needs the TUI footer line, not a custom summary bar.
 Hub sends raw numbers (`get_session_stats` + `get_state`, git branch via `git -C cwd branch --show-current`); the client formats using the same rules, so the hub stays thin. Formatting is unit tested in `test/footer.test.js`.
 ```
 
+### fit/closed/07-kernel-state.md
+```
+---
+project: pixip
+grilled: true
+commit: f99fd18b9468243c6f8e1a75fc6d77fd8a7de3fd
+---
+
+Extract the shared mutable state and DOM element map out of `app.js` into kernel modules with state slices and selectors, preserving behaviour and layout. This is the first step of the post-A2UI client normalization.
+
+### Work
+
+- Add `src/client/state.js` and `src/client/ui.js` (or a small `kernel/` folder) and move the ~40-field state object and the `$`/element map out of `app.js`.
+- Split state into logical slices: connection, dashboard, session, transcript, composer, addon/panel. Keep one state container; no reactive framework and no per-feature stores yet.
+- Move state initialization, reset helpers and common derived selectors into the kernel. Keep DOM out of `state.js` and state out of `ui.js`.
+- Update imports so modules depend on the kernel rather than reaching into `app.js`. Preserve all existing behaviour, protocol handling and layout.
+- Document the slices in `ARCHITECTURE.md` and keep the module map accurate.
+
+### Acceptance
+
+- `app.js` no longer defines the shared state object or the element map.
+- No duplicate `document.querySelector` bootstrapping; every module imports the owning kernel module.
+- `npm run check` green; `tools/shot.mjs` at 390 and 1280 shows dashboard, session, surface and sheet unchanged.
+- No wire-protocol, latency or visual change.
+
+### Out of scope
+
+- Removing the `app.js` barrel/cycles (`08-composition-root`), feature splits (`09`/`10`), and new UI behaviour.
+
+### Grilled decisions
+
+- Kernel lives in `src/client/kernel/` (`state.js` and `ui.js`), not flat beside `app.js`.
+- Keep the state container flat with the existing field names (`state.sessionId`, `state.entries`, ...); slices are documented groupings only, no nested `state.connection.*` rewrite.
+- 07 scope is state initialization only: move the state literal and its initializers into `kernel/state.js`. Do not add reset helpers and do not move derived selectors such as `canSend`, queue or footer helpers; those stay in their feature modules.
+- `kernel/ui.js` owns the same single `$` + `ui` map with the same keys, moved verbatim. No per-feature registration and no split maps.
+- Add targeted unit tests for the extracted kernel initialization.
+- Keep the `app.js` entry filename; no `main.js` rename in this ticket.
+- No behaviour, layout, wire-protocol or latency change.
+```
+
+### fit/closed/08-composition-root.md
+```
+---
+project: pixip
+grilled: true
+commit: c5bf7873927c813b978bf41349c0b37b713ef425
+---
+
+Turn `app.js` into a composition root and remove the 207-name barrel and the feature-to-`app` import cycles. Feature modules should import the kernel or pure helpers directly; `main` wires routing, frames and cross-feature interactions.
+
+### Work
+
+- Make `app.js` (or a renamed `main.js`) the only module that imports all features and wires them together.
+- Remove the giant export block. Consumers import from the module that owns each symbol.
+- Move frame dispatch into a small protocol adapter (or keep one switch in `main`/`frames.js`) and route frame effects to feature handlers instead of letting `session.js` reach into every feature.
+- Define explicit navigation/intent calls for dashboard ↔ session instead of direct feature imports. No new event bus.
+- Preserve boot order, hash routing, socket lifecycle, addon replay and all existing behaviour.
+
+### Acceptance
+
+- No import cycles and no feature imports `app.js`.
+- `app.js`/`main.js` is a composition root, not a feature dump; the export barrel is gone.
+- `npm run check` green; 390/1280 screenshots unchanged; no latency or protocol change.
+- `ARCHITECTURE.md` dependency direction matches the code.
+
+### Out of scope
+
+- Splitting dashboard/composer/transcript internals (`09`/`10`/`11`), the import-graph guard (`12`), and new features.
+
+### Grilled decisions
+
+- Keep the entry filename `app.js`; it becomes the composition root. `index.html` keeps `/app.js`.
+- Add `frames.js` as the protocol adapter owning the frame switch/effect routing. `session.js` keeps its `handleFrame`/snapshot logic as a feature handler and stops importing other features.
+- Add `navigation.js` with explicit dashboard ↔ session intents. No event bus.
+- Full 08 as described: remove the 207-name barrel and every feature-to-`app.js` import; no temporary compatibility re-export shim.
+- Build directly on the `src/client/kernel/` modules created in 07.
+- Preserve boot order, hash routing, socket lifecycle, addon replay, protocol and latency.
+```
+
+### fit/closed/09-dashboard-split.md
+```
+---
+project: pixip
+grilled: true
+commit: d4b006bd0642c5cae1acc2c7e50fd0d3963b018a
+---
+
+Split `dashboard.js` into a session-list API, list/group rendering, directory picker, and settings/archive surfaces, with pure helpers covered by Node tests. Preserve the current dashboard behaviour and responsive layout.
+
+### Work
+
+- Extract HTTP/session-list data access (`listSessions`, `refreshDashboard`, archive/delete calls) from rendering.
+- Separate session list and cwd grouping from the directory picker and settings/archive sheets.
+- Move pure grouping, formatting and filtering helpers into testable modules; keep controllers thin and event-driven.
+- Keep `sessionGroups.js`, `sessionInfo.js` and `directoryPicker.js` as the pure engines and extend their tests rather than duplicating logic.
+- Wire feature-to-feature navigation through the composition root/router established by `08-composition-root`.
+
+### Acceptance
+
+- No dashboard module mixes HTTP, persistence and unrelated sheet rendering in one file.
+- Existing dashboard interactions still work: new session, groups, branch chips, collapse/pin, picker, archive/restore/delete, settings.
+- New pure helpers have Node tests; `npm run check` green.
+- `tools/shot.mjs` at 390 and 1280 shows the dashboard, a group and the directory picker unchanged.
+
+### Out of scope
+
+- Desktop session-card surface, new dashboard features, and framework changes.
+
+### Grilling
+
+- **Module layout (four modules).** `dashboard.js` stays the dashboard feature entry point and keeps `showList`, route reset and orchestration. New `dashboardApi.js` owns all fetch/HTTP (`listSessions`, `apiJson`, `refreshDashboard`). New `dashboardList.js` owns the new-session row, group sections and session rows. New `dashboardPicker.js` owns the directory-picker state and DOM. New `dashboardSettings.js` owns settings, archive/trash lists, confirm sheets, archive/delete/archive-inactive and restore/purge.
+- **Pure helpers.** Extract more than the existing engines: at minimum the draft-preserving new-row value, inactive-session count, group-toggle visibility decision, picker transition/notice state and stored-row labels become pure functions. Test them in Node; also extend `sessionGroups`/`sessionInfo`/`directoryPicker` tests where the split exposes gaps.
+- **showList stays in `dashboard.js`**, not `app.js`. `app.js` remains the composition root; dashboard navigation continues through `navigation.js` (no feature-to-feature imports added).
+- **Settings surfaces** move to `dashboardSettings.js`; `sheets.js`/`sheetShell.js` stay generic and untouched except for imports.
+- **Verification.** `tools/shot.mjs` will use the local headless Chrome at `/tmp/pixip-chrome/chrome-headless-shell/linux-158.0.8127.36/chrome-headless-shell-linux64/chrome-headless-shell` at 390 and 1280. Dashboard, group and picker screenshots must look unchanged.
+
+### Implementation note
+
+`refreshDashboard` landed in `dashboardList.js`, not `dashboardApi.js`: it is the two-line "fetch then paint" orchestration and calling `renderList` from the HTTP module would mix the layers. The archive/delete/archive-inactive calls stay in `dashboardSettings.js` and use `dashboardApi.apiJson`. Pure display logic lives in `dashboardModel.js` so Node tests do not load the DOM kernel.
+
+Verified with `env -u PIXIP_INSIDE -u PIXIP_SESSION_ID npm run check` (all suites green) and `tools/shot.mjs`/a picker+group probe at 390 and 1280 (no overflow, no console errors). Parent commit `d4b006bd0642c5cae1acc2c7e50fd0d3963b018a`.
+```
+
+### fit/closed/10-composer-session-split.md
+```
+---
+project: pixip
+grilled: true
+commit: "6d6cefa6b0d52de26cb3513a611f72e1dde54ab8"
+---
+
+Split `composer.js` and `session.js` along their existing seams: composer controller, attachments and bash cards; session open/restore/cache, routing and frame effects. Extract pure helpers and keep the DOM controllers thin.
+
+### Work
+
+- Composer: separate input/send/command dispatch from attachments and bash-card lifecycle; keep attachment encoding/validation pure and tested.
+- Session: separate open/restore/cache from frame effects and routing; move frame-driven state changes into explicit handlers called by the protocol adapter.
+- Keep the inline surface and panel wiring out of the composer/session controllers except through narrow calls.
+- Preserve optimistic user blocks, queue handling, reconnect behaviour, scroll pinning and footer rendering.
+
+### Acceptance
+
+- No composer/session module owns three unrelated concerns.
+- Existing composer flows still work: text, slash commands, bash, image/file attachments, queue chips, stop.
+- Session open, reattach, `/new` re-key, snapshot/history and reconnect still behave as before.
+- Pure helpers have tests; `npm run check` green; 390/1280 screenshots unchanged.
+
+### Out of scope
+
+- Transcript windowing (`11-transcript-seam`), new composer features, and protocol changes.
+
+### Grilling
+
+- **Composer: split and extract.** Keep the acceptance as written. `composer.js` becomes the thin controller (input/dispatch/submit/commands), new `composerAttachments.js` owns attachment choice/render/upload lifecycle, new `composerBash.js` owns bash submit/append/finish card lifecycle. `attachments.js` remains the pure engine.
+- **Composer pure helpers to extract and test:** file validation (size/type limits and image-vs-file decision), image encode math (thumbnail dimensions/fit and canvas-to-blob type/quality selection, DOM-free), outgoing payload shaping (image/file prompt payloads as pure functions), and bash card state shaping where it is not already covered by `render.js` tests.
+- **Session: session + effects.** `session.js` keeps open/pending/restore/cache. New `sessionEffects.js` holds frame-driven state changes as explicit handlers; `frames.js` remains the protocol adapter and calls them. Routing stays in `navigation.js`. No new `sessionCache.js` module; expand the existing pure cache helpers there if needed.
+- **Session tests: both.** Add DOM-free tests for cache snapshot/restore shape, distance computation and queue copying, plus a pure frame-effect handler/reducer returning state changes.
+- **Preserve** optimistic user blocks, queue handling, reconnect, scroll pinning and footer rendering. The inline surface and panel wiring stay outside the controllers except through narrow calls.
+
+### Implementation note
+
+- Composer controller is now 211 lines: command dispatch, policy gating, submit and quit only. `composerAttachments.js` owns the attachment UI/upload lifecycle, `composerBash.js` owns bash cards, and `attachments.js` gained the pure engines `fitImage`, `imageSourceError`, `uploadError`, `outgoingText`, `imageBlocks`, `slashPayload`, `textPayload` and `optimisticContent`.
+- Session frame effects moved into `sessionEffects.js` (snapshot/restart/status/opened/close plus replacement snapshots). `frames.js` is now a thin protocol switch. Decisions live in the DOM-free `sessionPlan.js` (`snapshotPlan`, `openedPlan`, `statusPlan`, `closePlan`), so they are testable.
+- `sessionCache.js` gained `readingDistance`, `copyQueue`, `snapshotSession` and `restoreSession`; `session.js` uses them for cache/restore.
+
+Verified with `env -u PIXIP_INSIDE -u PIXIP_SESSION_ID npm run check` (all suites green, 302 root tests) and screenshot/interaction probes at 390 and 1280: dashboard, transcript, attach menu toggle and `/` menu, no console errors. Parent commit `6d6cefa6b0d52de26cb3513a611f72e1dde54ab8`.
+```
+
+### fit/closed/11-transcript-seam.md
+```
+---
+project: pixip
+grilled: true
+commit: a7b5904e8305f8c7f07563b927f469edff649968
+---
+
+Extract the transcript's scroll and windowing seams while keeping the append-only HTML painter and rAF delta path deliberately isolated. The goal is testable scroll/merge/chunk logic without changing transcript performance or behaviour.
+
+### Work
+
+- Extract reading-position helpers: pinned distance, stick detection, jump visibility, and restore-after-prepend.
+- Extract window planning: entry weighting, tail merge/dedupe, first-paint slice and chunk sizing.
+- Keep `renderTranscript`/`htmlOf` and the direct `textContent +=` delta flush as the deliberate imperative painter; do not turn it into per-entry components.
+- Keep the inline surface outside `#log` so transcript repaints cannot wipe it.
+- Add Node tests for the extracted scroll/window helpers and keep the existing render tests intact.
+
+### Acceptance
+
+- Window/scroll math is testable without DOM.
+- First paint remains 24 KB and fill chunks 32 KB; live deltas still flush in one rAF.
+- Loading earlier history preserves the reading position; jump-to-newest still works.
+- `npm run check` green; 390/1280 transcript screenshots unchanged.
+
+### Out of scope
+
+- A framework migration, virtual DOM, or changing the append-only transcript strategy.
+
+### Grilling
+
+- **Two new pure modules.** `transcriptScroll.js` owns pinned distance, stick detection, jump visibility and restore-after-prepend distance math. `transcriptWindow.js` owns entry weighting, tail merge/dedupe, first-paint slice and chunk planning. `transcript.js` keeps `renderTranscript`/`htmlOf` and the direct `textContent +=` rAF delta flush as the deliberate imperative painter; the inline surface stays outside `#log`.
+- **Fully pure API.** Pass entries/state in and return values, for example `mergeTail(previous, incoming, more) -> {entries, more}`, `planTail(entries, budget)`, `scrollDistance(...)`. `transcript.js` keeps only thin stateful wrappers that assign results back to `state` and call the painter. No DOM inside the extracted helpers.
+- **Tests** cover the pure scroll/window helpers without DOM; existing render and windowing tests stay intact.
+- **Budgets unchanged:** first paint 24 KB, fill chunks 32 KB, live deltas in one rAF. Loading earlier history preserves reading position; jump-to-newest keeps working. Verify with 390/1280 screenshots via the local headless Chrome path recorded in ticket 09.
+
+### Implementation note
+
+- `transcriptScroll.js` exports `STICK_DISTANCE`, `distanceFromBottom`, `shouldStick`, `readingDistance`, `restoreScrollTop` and `jumpHidden`. `controls.updateJump`, `controls.setScale` and the `#log` scroll listener now use them.
+- `transcriptWindow.js` exports the 24 KB/32 KB budgets, `entryWeight`, `mergeTail`, `oldestEntryId`, `lastEntryId`, `planFirstPaint`, `planFillChunk`, `unseenEntries` and `prependWindow`.
+- `transcript.js` keeps the append-only painter and the `textContent +=` rAF flush; its `mergeTail` is now a thin state wrapper and its old pure helpers are re-exported for compatibility. No DOM was added to the pure modules.
+
+Verified with `env -u PIXIP_INSIDE -u PIXIP_SESSION_ID npm run check` (all suites green, 319 root tests) and puppeteer probes at 390/1280. Non-pinned load-earlier kept the bottom distance at 1162 px across a prepend; pinned load-earlier stayed pinned; jump-to-newest returned to the bottom and hid the jump control; no console errors. Parent commit `a7b5904e8305f8c7f07563b927f469edff649968`.
+```
+
+### fit/closed/12-shared-client-seams.md
+```
+---
+project: pixip
+grilled: true
+---
+
+Extract the generic client seams that currently live inside feature controllers so later boundary work has clean shared modules. This is a mechanical move with no intended behaviour, layout or protocol change.
+
+### Work
+
+- Add `src/client/scroll.js` with `scheduleScroll`, `scrollToEnd`, `updateJump` and `restoreDistance`; move them out of `controls.js` and repoint callers.
+- Add `src/client/menuView.js` with `closeMenu`; move it out of `controls.js`.
+- Add `src/client/composerInput.js` with `clearInput` and `resize`; move `clearInput` out of `composer.js` and `resize` out of `controls.js`.
+- Add `src/client/queueView.js` with `renderQueue`; move it out of `controls.js`.
+- Add `src/client/transcriptView.js` with `appendBlock`, `showThinkingIndicator` and `hideThinkingIndicator`; move them out of `controls.js`.
+- Add `src/client/sessionView.js` with `renderAddonWidgets`, `renderFooter`, `applyInfo` and `setBusy`; move them out of `controls.js`.
+- Keep `controls.js` as the scale/refresh/bar-menu controller and update every import in `app.js`, `composer`, `composerBash`, `dashboard`, `frames`, `menu`, `session`, `sessionEffects`, `sheets` and `transcript`.
+- Keep shared modules below features: they may import kernel, pure helpers and other shared modules, never a feature controller.
+
+### Acceptance
+
+- The moved functions exist in exactly one module; no compatibility wrappers or duplicate copies.
+- `npm run check` green and `tools/shot.mjs` at 390 and 1280 shows no page errors, layout change or horizontal overflow.
+- No cross-feature configure callbacks are added in this ticket; the remaining feature-to-feature imports are deliberately left for ticket 13.
+
+### Decisions from grilling
+
+- Shared resources move down into modules both sides import; callbacks in ticket 13 are for orchestration, not for generic helpers.
+- No event bus, no global service locator and no bundler.
+- Commit as one logical ticket commit after the checks are green.
+
+### Grilling answers
+
+- `scrollQueued` becomes module-private in `scroll.js`; nothing imports it and it should not be a dead public export.
+- `restoreDistance(distance)` did not exist under that name. Add it to `scroll.js` as the thin wrapper over `restoreScrollTop` and use it from `setScale`, keeping the current scroll math unchanged.
+- No new tests: this is a mechanical move, covered by `npm run check` plus `tools/shot.mjs` at 390 and 1280.
+- One commit after the checks pass, subject `Extract shared client seams`.
+
+### Outcome
+
+- Added `scroll.js`, `menuView.js`, `composerInput.js`, `queueView.js`, `transcriptView.js` and `sessionView.js`; `controls.js` is now only scale, soft refresh and the bar menu.
+- All callers in `app.js`, `composer`, `composerBash`, `dashboard`, `frames`, `menu`, `session`, `sessionEffects`, `sheets` and `transcript` import from the shared modules.
+- `scrollQueued` is module-private; `restoreDistance(distance)` is the thin `restoreScrollTop` wrapper used by `setScale`.
+- Verification: `env -u PIXIP_INSIDE -u PIXIP_SESSION_ID npm run check` green (the daemon tests otherwise see the caller session marker and turn stop into restart). `tools/shot.mjs` at 390 and 1280 on both the dashboard and a session URL: `overflowX: false`, `problems: []`.
+- No new tests and no configure callbacks, per the grilling answers.
+```
+
+### fit/closed/13-client-boundary-callbacks.md
+```
+---
+project: pixip
+grilled: true
+---
+
+Introduce explicit per-module `configureX({ ...callbacks })` boundaries, remove the remaining cross-cluster feature imports and break both existing import cycles without behaviour changes. This is the prerequisite for the import guard in ticket 16.
+
+### Work
+
+- Add `configureComposer({ surfaceOpen })`, `configureDashboard({ clearPendingAttachment, resetSurface })`, `configureDashboardList({ archiveInactive, openSessionActions })`, `configureDashboardSettings({ sheet })`, `configureMenu({ submit })`, `configureSession({ clearPendingAttachment, resetSurface, renderTranscript })`, `configureSessionEffects({ clearPendingAttachment, failPendingSession, openSession, appendRestartNotice, lastEntryId, renderResume, renderSnapshot, renderTranscript })`, `configureSheets({ openSurfaceRequest })` and `configureTranscript({ handleUiRequest })`.
+- Install every configure function once from `app.js`; no global ports object and no subscriptions/events.
+- Break `composer.js <-> composerBash.js`: `composerBash` must not import `composer`; both use `composerInput.js` for `clearInput`.
+- Break `dashboardList.js <-> dashboardSettings.js`: `dashboardList` uses the configured session-action and archive-inactive callbacks; `dashboardSettings` may keep its direct dashboard-cluster imports.
+- Remove the remaining cross-cluster imports: composer→surface; dashboard→composerAttachments/surface; dashboardSettings→sheets; menu→composer; session→composerAttachments/surface/transcript; sessionEffects→composerAttachments/session/transcript; sheets→surface; transcript→sheets.
+- Keep intra-cluster imports direct: dashboard cluster (`dashboard`, `dashboardApi`, `dashboardList`, `dashboardPicker`, `dashboardSettings`, `dashboardModel`), session cluster (`session`, `sessionEffects`, `sessionPlan`), composer cluster (`composer`, `composerAttachments`, `composerBash`).
+- `app.js` remains the only composition root; `frames.js` remains the only protocol adapter allowed to import feature handlers.
+
+### Acceptance
+
+- No feature module imports another feature cluster directly and the client dependency graph has no cycles.
+- `npm run check` green; `tools/shot.mjs` at 390 and 1280 shows the dashboard, session, composer, surface and sheets unchanged.
+- No wire, latency or visual change.
+
+### Depends on
+
+- Ticket 12 (shared client seams), because it creates the lower modules that remove most of the current edges.
+
+### Decisions from grilling
+
+- Option B: explicit per-module configure functions installed by `app.js`.
+- Prefer extracting a genuinely shared resource downward over adding a callback.
+- No allowlist and no global ports/service locator.
+- Commit as one logical ticket commit after the checks are green.
+
+### Grilling answers
+
+- Missing callbacks fail fast: `installDeps` validates every required function when `configureX` is called, so a wiring mistake throws with the module and callback name.
+- No new tests; `npm run check` plus the 390/1280 shots are the acceptance evidence.
+- One commit with subject `Add client configure boundaries`.
+- `composer → composerBash` was already one-way after ticket 12; the only remaining cycle was `dashboardList ↔ dashboardSettings`.
+
+### Outcome
+
+- Added `src/client/configure.js` with `installDeps` and `configureX` in composer, dashboard, dashboardList, dashboardSettings, menu, session, sessionEffects, sheets and transcript. `app.js` installs all nine once before `configureTransport`, `configureNavigation` and `route`.
+- Removed the cross-cluster edges composer→surface, dashboard→composerAttachments/surface, dashboardList→dashboardSettings, dashboardSettings→sheets, menu→composer, session→composerAttachments/surface/transcript, sessionEffects→composerAttachments/session/transcript, sheets→surface and transcript→sheets.
+- `dashboardSettings` keeps its direct dashboard-cluster imports; `composerBash` never imported `composer` after ticket 12. A full import scan over all 50 client modules reports no cycles.
+- `env -u PIXIP_INSIDE -u PIXIP_SESSION_ID npm run check` green (334 root tests, both workspaces). The unrelated untracked `UI_WIDGET_BREAKDOWN.html` was moved aside only for the prettier pass, then restored.
+- `tools/shot.mjs` at 390 and 1280: dashboard and session clean (`overflowX: false`, `problems: []`). A temporary deterministic check also opened the settings sheet, session actions, session footer sheet and the A2UI fixture panel at both widths: all visible, `overflowX: false`, no page or console errors, panel collapses.
+```
+
+### fit/closed/14-scripted-browser-checks.md
+```
+---
+project: pixip
+grilled: true
+---
+
+### Implementation notes
+
+- `tools/browser-check.mjs` boots `fixtureRoot` + `hubFor` + `startServer` on an ephemeral port, serves the real `src/client`, and seeds 320 runtime-generated JSONL entries (also passed as `FAKE_PI_ENTRIES` so the snapshot offers "load earlier").
+- Select surface uses harness injection through the hub's real record path (`hub.onRecord`), as grilled; answer/cancel are asserted against the fake Pi log.
+- A2UI panel asserts the client half, including the outgoing action JSON captured with CDP `Network.webSocketFrameSent` (Submit sends the action, Cancel sends its cancel action), then cancel/collapse.
+- Load-earlier distance is asserted exactly (0 px). Jump-to-newest uses the floating control and asserts the smooth-scroll clamp: Chrome settles 1 px short of the exact bottom, so the assertion is `0 <= bottom <= 1` (anything larger is a regression). Everything else (overflow, page/console errors) is exact.
+- Negative path verified: injected page overflow exits 1; unset `PIXIP_CHROME` prints a skip and exits 0.
+- Verified here with `/tmp/pixip-chrome/chrome-headless-shell` and `LD_LIBRARY_PATH=/tmp/chromedeps/root/usr/lib/x86_64-linux-gnu`; `npm run check` is green (daemon tests need `PIXIP_INSIDE` unset in this session).
+```
+
+### fit/closed/16-import-guard.md
+```
+---
+project: pixip
+grilled: true
+---
+
+### Implementation notes
+
+- `tools/check-client-imports.mjs` parses `src/client` with `typescript` (`import`, `export ... from`, dynamic `import()`), skips `vendor/`, and keeps the cluster map in that file. It fails on cycles, any `app.js` import, cross-cluster feature imports, and non-`app.js`/`frames.js` modules importing a feature module.
+- `test/check-client-imports.test.js` covers a synthetic static+dynamic cycle, cross-cluster import, non-feature import, same-cluster/kernel allowed edges, `app.js` import, and the real client passing.
+- `check:imports` runs before `npm test` in `npm run check`. Verified the real graph (52 modules) passes and a temporary directory with a cycle plus `dashboard -> session` exits 1.
+- `ARCHITECTURE.md` now documents the dependency rule, `app.js`/`frames.js` exceptions, configure callbacks, both tools, and the complete module map (dashboard/session/composer clusters, shared seams, configure, all client files). `README.md` gained the guard and `tools/` layout note.
+```
+
