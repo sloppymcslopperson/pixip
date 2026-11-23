@@ -6,4 +6,4 @@ package-lock.json
 src/client/vendor/
 *.png
 *.log
-UI_WIDGET_BREAKDOWN.html
+ui_work/
