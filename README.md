@@ -210,6 +210,18 @@ It prints the box model of the header/list/log/composer (so a resize is asserted
 not eyeballed), flags horizontal overflow, console errors and page errors, and
 writes the screenshot. Use `--dev` on the daemon so CSS/JS edits need no restart.
 
+`tools/browser-check.mjs` covers the main client flows (dashboard open,
+composer submit, inline `select`, A2UI fixture panel, transcript windows) with an
+in-process fixture Hub and the real client assets:
+
+```bash
+PIXIP_CHROME=/path/to/chrome npm run check:browser
+```
+
+It runs at 390x844 and 1280x900 and fails on page errors, console errors or
+horizontal overflow. `npm run check` includes it; without `PIXIP_CHROME` it
+prints a skip and exits 0 so a box without Chromium stays green.
+
 ## Layout
 
 ```
