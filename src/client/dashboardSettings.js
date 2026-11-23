@@ -93,8 +93,16 @@ export async function deleteSession(session) {
 	}
 }
 
-export async function archiveInactive(count) {
-	if (!window.confirm(`Archive ${count} inactive session${count === 1 ? "" : "s"}?`)) return;
+export function archiveInactive(count) {
+	if (!Number.isFinite(count) || count <= 0) return;
+	const message = `Archive ${count} inactive session${count === 1 ? "" : "s"}?`;
+	confirmSheet("archive", message, "archive", () => {
+		closeSheet();
+		void archiveInactiveConfirmed();
+	});
+}
+
+async function archiveInactiveConfirmed() {
 	try {
 		const result = await apiJson("/api/sessions/archive-inactive", { method: "POST" });
 		if (Array.isArray(result.archived)) for (const session of result.archived) forgetCachedSession(session);
