@@ -14,7 +14,7 @@ import { ui } from "./kernel/ui.js";
 import { renderMenu, restoreClearedQueue } from "./menu.js";
 import { openExportSheet, openModelSheet, openThinkingSheet, openTreeSheet } from "./sheets.js";
 import { dropSurface, handleNeedTime, handleReasks } from "./surface.js";
-import { handleEvent, prependHistory, renderTranscript } from "./transcript.js";
+import { applyFullEntry, handleEvent, prependHistory, renderTranscript } from "./transcript.js";
 import { toast } from "./toast.js";
 
 export function handleFrame(frame) {
@@ -52,6 +52,9 @@ export function handleFrame(frame) {
 			break;
 		case "history":
 			prependHistory(frame.entries ?? [], frame.more === true);
+			break;
+		case "entry":
+			applyFullEntry(frame);
 			break;
 		case "ui_need_time":
 			handleNeedTime(frame);

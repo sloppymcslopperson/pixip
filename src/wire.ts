@@ -129,6 +129,14 @@ export function frameHistory(entries: unknown[], more: boolean): string {
 	return JSON.stringify({ t: "history", entries, more });
 }
 
+/**
+ * Answer to `entry`: one full entry from the JSONL for lazy expansion, or the
+ * id plus an error while the entry is still only in the live child's memory.
+ */
+export function frameEntry(id: string, entry: unknown, error?: string): string {
+	return JSON.stringify({ t: "entry", id, entry, ...(error ? { error } : {}) });
+}
+
 /** Answer to `/tree`: Pi's read-only session tree and the current leaf id. */
 export function frameTree(tree: unknown[], leafId: string | null): string {
 	return JSON.stringify({ t: "tree", tree, leafId });

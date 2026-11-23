@@ -8,6 +8,8 @@ export const WINDOW_ENTRIES = 200;
 export const WINDOW_BYTES = 256 * 1024;
 /** Per-entry text cap in the provisional frame only. */
 export const ENTRY_TEXT_LIMIT = 8 * 1024;
+/** Hard cap for one lazily fetched full entry; beyond this the text stays capped. */
+export const FULL_ENTRY_BYTES = 8 * 1024 * 1024;
 
 export async function moveFile(from: string, to: string): Promise<void> {
 	await mkdir(dirname(to), { recursive: true });
@@ -173,53 +175,101 @@ export function transcriptEntries(entries: unknown[]): unknown[] {
 	return entries.filter((entry) => (entry as { type?: unknown })?.type !== "session");
 }
 
-/** Provisional-view truncation: only the entries pushed before the child boots. */
+/**
+ * Window truncation: cap every text field and mark entries that changed, so the
+ * client can offer a lazy full-text fetch for exactly those blocks.
+ */
 export function truncateEntries(entries: unknown[], limit = ENTRY_TEXT_LIMIT): unknown[] {
-	return entries.map((entry) => truncateEntry(entry, limit));
-}
-
-function truncateText(text: string, limit: number): string {
-	if (text.length <= limit) return text;
-	return `${text.slice(0, limit)}\n… truncated (${text.length - limit} more characters)`;
-}
-
-function truncateArgs(value: unknown, limit: number): unknown {
-	if (typeof value === "string") return truncateText(value, limit);
-	if (Array.isArray(value)) return value.map((item) => truncateArgs(item, limit));
-	if (!value || typeof value !== "object") return value;
-	const copy: Record<string, unknown> = {};
-	for (const [key, item] of Object.entries(value)) copy[key] = truncateArgs(item, limit);
-	return copy;
-}
-
-function truncateContent(content: unknown, limit: number): unknown {
-	if (typeof content === "string") return truncateText(content, limit);
-	if (!Array.isArray(content)) return content;
-	return content.map((block) => {
-		if (!block || typeof block !== "object") return block;
-		const copy = { ...(block as Record<string, unknown>) };
-		for (const key of ["text", "thinking", "output"]) {
-			if (typeof copy[key] === "string") copy[key] = truncateText(copy[key], limit);
-		}
-		if (copy["arguments"] && typeof copy["arguments"] === "object") {
-			copy["arguments"] = truncateArgs(copy["arguments"], limit);
-		}
-		if (copy["content"] !== undefined) copy["content"] = truncateContent(copy["content"], limit);
-		return copy;
+	return entries.map((entry) => {
+		const result = truncateEntry(entry, limit);
+		if (!result.changed || !result.value || typeof result.value !== "object") return result.value;
+		return { ...(result.value as Record<string, unknown>), truncated: true };
 	});
 }
 
-function truncateEntry(entry: unknown, limit: number): unknown {
-	if (!entry || typeof entry !== "object") return entry;
+interface TruncateResult {
+	value: unknown;
+	changed: boolean;
+}
+
+function truncateText(text: string, limit: number): TruncateResult {
+	if (text.length <= limit) return { value: text, changed: false };
+	return { value: `${text.slice(0, limit)}\n… truncated (${text.length - limit} more characters)`, changed: true };
+}
+
+function truncateArgs(value: unknown, limit: number): TruncateResult {
+	if (typeof value === "string") return truncateText(value, limit);
+	if (Array.isArray(value)) return truncateList(value, limit);
+	if (!value || typeof value !== "object") return { value, changed: false };
+	const copy: Record<string, unknown> = {};
+	let changed = false;
+	for (const [key, item] of Object.entries(value)) {
+		const result = truncateArgs(item, limit);
+		copy[key] = result.value;
+		changed ||= result.changed;
+	}
+	return { value: copy, changed };
+}
+
+function truncateList(list: unknown[], limit: number): TruncateResult {
+	let changed = false;
+	const value = list.map((item) => {
+		const result = truncateArgs(item, limit);
+		changed ||= result.changed;
+		return result.value;
+	});
+	return { value, changed };
+}
+
+function truncateContent(content: unknown, limit: number): TruncateResult {
+	if (typeof content === "string") return truncateText(content, limit);
+	if (!Array.isArray(content)) return { value: content, changed: false };
+	let changed = false;
+	const value = content.map((block) => {
+		if (!block || typeof block !== "object") return block;
+		const copy = { ...(block as Record<string, unknown>) };
+		for (const key of ["text", "thinking", "output"]) {
+			if (typeof copy[key] === "string") {
+				const result = truncateText(copy[key], limit);
+				copy[key] = result.value;
+				changed ||= result.changed;
+			}
+		}
+		if (copy["arguments"] && typeof copy["arguments"] === "object") {
+			const result = truncateArgs(copy["arguments"], limit);
+			copy["arguments"] = result.value;
+			changed ||= result.changed;
+		}
+		if (copy["content"] !== undefined) {
+			const result = truncateContent(copy["content"], limit);
+			copy["content"] = result.value;
+			changed ||= result.changed;
+		}
+		return copy;
+	});
+	return { value, changed };
+}
+
+function truncateEntry(entry: unknown, limit: number): TruncateResult {
+	if (!entry || typeof entry !== "object") return { value: entry, changed: false };
 	const copy = { ...(entry as Record<string, unknown>) };
-	if (typeof copy["summary"] === "string") copy["summary"] = truncateText(copy["summary"], limit);
+	let changed = false;
+	if (typeof copy["summary"] === "string") {
+		const result = truncateText(copy["summary"], limit);
+		copy["summary"] = result.value;
+		changed ||= result.changed;
+	}
 	const message = copy["message"];
 	if (message && typeof message === "object") {
 		const next = { ...(message as Record<string, unknown>) };
 		for (const key of ["output", "content"]) {
-			if (next[key] !== undefined) next[key] = truncateContent(next[key], limit);
+			if (next[key] !== undefined) {
+				const result = truncateContent(next[key], limit);
+				next[key] = result.value;
+				changed ||= result.changed;
+			}
 		}
 		copy["message"] = next;
 	}
-	return copy;
+	return { value: copy, changed };
 }

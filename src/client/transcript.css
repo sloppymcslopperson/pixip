@@ -131,6 +131,27 @@
 .earlier:disabled {
 	opacity: 0.6;
 }
+/* Bounded windows mark the cap; this fetches the one full entry from disk. */
+.load-full {
+	align-self: flex-start;
+	margin: 6px 0 0;
+	background: none;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	color: var(--fg-dim);
+	padding: 3px 8px;
+	font-size: 11.5px;
+}
+.load-full:hover:not(:disabled) {
+	color: var(--fg);
+	border-color: var(--accent);
+}
+.load-full:disabled {
+	opacity: 0.6;
+}
+details.tool > .load-full {
+	margin: 0 9px 9px;
+}
 .meta-head {
 	font-size: 0.67em;
 	text-transform: uppercase;

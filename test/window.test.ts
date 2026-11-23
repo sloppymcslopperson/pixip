@@ -47,9 +47,12 @@ describe("jsonl windows", () => {
 	it("truncates long text and tool output, leaving short entries alone", () => {
 		const long = "x".repeat(ENTRY_TEXT_LIMIT + 50);
 		const [short, big] = truncateEntries([JSON.parse(message(1, "short")), JSON.parse(message(2, long))]) as Array<{
+			truncated?: boolean;
 			message: { content: Array<{ text: string }> };
 		}>;
 		assert.equal(short?.message.content[0]?.text, "short");
+		assert.equal(short?.truncated, undefined);
+		assert.equal(big?.truncated, true);
 		const text = big?.message.content[0]?.text ?? "";
 		assert.ok(text.startsWith("x".repeat(ENTRY_TEXT_LIMIT)));
 		assert.match(text, /truncated \(50 more characters\)/);

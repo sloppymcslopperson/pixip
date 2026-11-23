@@ -9,6 +9,7 @@ import { updateJump } from "./scroll.js";
 import { applyInfo, renderFooter } from "./sessionView.js";
 import { readingDistance, restoreSession, snapshotSession } from "./sessionCache.js";
 import { connect, send } from "./transport.js";
+import { lastEntryId } from "./transcriptWindow.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
 
@@ -132,9 +133,14 @@ export function openSession(id) {
 	ui.dot.className = "dot busy";
 	document.title = "pixip";
 	const cached = state.sessionCache.get(id);
-	if (cached) restoreCachedSession(cached);
-	else ui.input.value = "";
-	connect(id);
+	let cursor = null;
+	if (cached) {
+		restoreCachedSession(cached);
+		// The page already holds this transcript: resume from its last entry
+		// instead of paying for the full window again.
+		cursor = lastEntryId(state.entries);
+	} else ui.input.value = "";
+	connect(id, cursor);
 }
 
 export function cacheCurrentSession() {

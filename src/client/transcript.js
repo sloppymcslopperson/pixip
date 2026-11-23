@@ -7,6 +7,7 @@ import { applyInfo, setBusy } from "./sessionView.js";
 import { queueCount, queueFromEvent } from "./queue.js";
 import {
 	ansiToHtml,
+	escapeHtml,
 	renderAssistant,
 	renderAssistantBody,
 	renderEntry,
@@ -52,6 +53,57 @@ export function mergeTail(entries, more) {
 
 export { FIRST_PAINT_BYTES, FILL_CHUNK_BYTES, entryWeight, lastEntryId, oldestEntryId };
 
+/** Requests already in flight, so a toggle + button tap fetches once. */
+const pendingFull = new Set();
+
+function requestFull(entryId) {
+	if (typeof entryId !== "string" || !entryId || pendingFull.has(entryId)) return;
+	pendingFull.add(entryId);
+	send({ t: "entry", id: entryId });
+}
+
+function detailsKey(details) {
+	return details.dataset.call || details.className;
+}
+
+function callsFromEntries(entries) {
+	const calls = new Map();
+	for (const entry of entries) {
+		if (entry?.type === "message" && entry.message?.role === "assistant") {
+			for (const call of toolCallsOf(entry.message.content)) calls.set(call.id, call);
+		}
+	}
+	return calls;
+}
+
+function trackTools() {
+	for (const node of ui.log.querySelectorAll("details.tool")) state.tools.set(node.dataset.call, node);
+}
+
+/** Every bounded-window block gets a visible way to ask for its full text. */
+function trackTruncated() {
+	for (const block of ui.log.querySelectorAll('[data-truncated="1"]')) {
+		if (block.querySelector(":scope > .load-full")) continue;
+		const button = document.createElement("button");
+		button.type = "button";
+		button.className = "load-full";
+		button.dataset.entry = block.dataset.entry;
+		button.textContent = "load full";
+		block.append(button);
+	}
+}
+
+/**
+ * Mark snapshot entries so a block can be found and replaced after its full
+ * text arrives. `truncated` is the fetchable window cap; `fullTruncated` is the
+ * hard cap and deliberately gets no repeated fetch affordance.
+ */
+function tagEntry(html, entry) {
+	if (!html || typeof entry?.id !== "string" || entry.id.length === 0) return html;
+	const attrs = ` data-entry="${escapeHtml(entry.id)}"${entry.truncated === true ? ' data-truncated="1"' : ""}`;
+	return html.replace(/^<(section|details)/, `<$1${attrs}`);
+}
+
 export function earlierButton() {
 	const button = document.createElement("button");
 	button.type = "button";
@@ -73,27 +125,86 @@ export function htmlOf(entries, calls) {
 	const blocks = [];
 	for (const entry of entries) {
 		if (entry?.type === "message" && entry.message?.role === "assistant") {
-			blocks.push(renderAssistant(entry.message.content, false));
+			blocks.push(tagEntry(renderAssistant(entry.message.content, false), entry));
 			continue;
 		}
 		if (entry?.type === "message" && entry.message?.role === "toolResult") {
 			const call = calls.get(entry.message.toolCallId);
 			blocks.push(
-				toolBlock(
-					entry.message.toolName ?? call?.name ?? "tool",
-					call ? summarizeArgs(call.name, call.arguments) : "",
-					ansiToHtml(textOf(entry.message.content)),
-					entry.message.isError ? " error" : "",
-					null,
-					entry.message.toolCallId ?? "",
+				tagEntry(
+					toolBlock(
+						entry.message.toolName ?? call?.name ?? "tool",
+						call ? summarizeArgs(call.name, call.arguments) : "",
+						ansiToHtml(textOf(entry.message.content)),
+						entry.message.isError ? " error" : "",
+						null,
+						entry.message.toolCallId ?? "",
+					),
+					entry,
 				),
 			);
 			continue;
 		}
-		blocks.push(renderEntry(entry));
+		blocks.push(tagEntry(renderEntry(entry), entry));
 	}
 	return blocks.join("");
 }
+
+/** Replace one block after its full entry arrives, keeping its open details. */
+export function applyFullEntry(frame) {
+	const id = typeof frame?.id === "string" ? frame.id : "";
+	if (!id) return;
+	pendingFull.delete(id);
+	if (frame.error || !frame.entry) {
+		toast(frame.error ?? "full text is not available yet");
+		for (const button of ui.log.querySelectorAll(`.load-full[data-entry="${CSS.escape(id)}"]`)) {
+			button.disabled = false;
+			button.textContent = "load full";
+		}
+		return;
+	}
+	const entry = frame.entry;
+	const index = state.entries.findIndex((item) => item?.id === id);
+	if (index < 0) return;
+	state.entries = state.entries.map((item, at) => (at === index ? entry : item));
+	const node = ui.log.querySelector(`[data-entry="${CSS.escape(id)}"]`);
+	if (!node) {
+		renderTranscript();
+		return;
+	}
+	const open = new Set([...node.querySelectorAll("details[open]")].map(detailsKey));
+	const distance = readingDistance(state.stick, ui.log.clientHeight, ui.log.scrollHeight, ui.log.scrollTop);
+	node.outerHTML = htmlOf([entry], callsFromEntries(state.entries));
+	const next = ui.log.querySelector(`[data-entry="${CSS.escape(id)}"]`);
+	if (next) {
+		for (const details of next.querySelectorAll("details")) {
+			if (open.has(detailsKey(details))) details.open = true;
+		}
+	}
+	ui.log.scrollTop = restoreScrollTop(distance, ui.log.scrollHeight);
+	trackTools();
+	trackTruncated();
+}
+
+ui.log.addEventListener("click", (event) => {
+	const button = event.target.closest(".load-full");
+	if (!button) return;
+	event.preventDefault();
+	button.disabled = true;
+	button.textContent = "loading…";
+	requestFull(button.dataset.entry);
+});
+
+ui.log.addEventListener(
+	"toggle",
+	(event) => {
+		const details = event.target;
+		if (!(details instanceof HTMLDetailsElement) || !details.open) return;
+		const block = details.closest('[data-truncated="1"]');
+		if (block) requestFull(block.dataset.entry);
+	},
+	true,
+);
 
 export function renderTranscript(distance = null) {
 	const restore = () => {
@@ -104,12 +215,7 @@ export function renderTranscript(distance = null) {
 	const token = fillToken;
 
 	state.tools.clear();
-	const calls = new Map();
-	for (const entry of state.entries) {
-		if (entry?.type === "message" && entry.message?.role === "assistant") {
-			for (const call of toolCallsOf(entry.message.content)) calls.set(call.id, call);
-		}
-	}
+	const calls = callsFromEntries(state.entries);
 
 	const entries = state.entries;
 	let { start } = planFirstPaint(entries, FIRST_PAINT_BYTES);
@@ -121,10 +227,8 @@ export function renderTranscript(distance = null) {
 			: htmlOf(entries.slice(start), calls);
 	if (older) ui.log.prepend(older);
 	restore();
-	const trackTools = () => {
-		for (const node of ui.log.querySelectorAll("details.tool")) state.tools.set(node.dataset.call, node);
-	};
 	trackTools();
+	trackTruncated();
 
 	// Older entries of the same window fill in above, chunk by chunk. The
 	// distance from the bottom is held constant, so a pinned view stays pinned.
@@ -135,6 +239,7 @@ export function renderTranscript(distance = null) {
 		if (older) ui.log.prepend(older);
 		restore();
 		trackTools();
+		trackTruncated();
 		start = from;
 		if (start > 0) fillTimer = setTimeout(fill, 0);
 	};

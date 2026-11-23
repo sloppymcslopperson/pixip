@@ -12,6 +12,7 @@ import { MAX_UPLOAD_BYTES, normalizeImageAttachments, safeUploadName } from "./a
 import { type NameSource } from "./sessionIndex.ts";
 import {
 	ENTRY_TEXT_LIMIT,
+	FULL_ENTRY_BYTES,
 	WINDOW_BYTES,
 	WINDOW_ENTRIES,
 	parseEntries,
@@ -137,6 +138,34 @@ const HEAD_BYTES = 8 * 1024;
 const NAME_HEAD_LINES = 20;
 const NAME_TAIL_BYTES = 16 * 1024;
 
+interface DiskWindow {
+	entries: unknown[];
+	leafId: string | null;
+	more: boolean;
+}
+
+/**
+ * The same bounded tail read the provisional paint uses, but for any session.
+ * The authoritative window must never ask Pi for the whole history: on an 11 MB
+ * session that is ~5 s and an 8 MB frame, while this stays well under 100 ms.
+ */
+async function readDiskWindow(path: string, limit: number, maxBytes: number): Promise<DiskWindow> {
+	try {
+		const tail = await readFromEnd(path, maxBytes);
+		const parsed = transcriptEntries(parseEntries(tail.text, { dropFirst: tail.offset > 0 }));
+		const windowed = parsed.slice(-limit);
+		const leaf = windowed.at(-1) as { id?: unknown } | undefined;
+		return {
+			entries: truncateEntries(windowed, ENTRY_TEXT_LIMIT),
+			leafId: typeof leaf?.id === "string" ? leaf.id : null,
+			more: tail.offset > 0 || parsed.length > windowed.length,
+		};
+	} catch {
+		// Missing or unreadable file: an empty window is the honest paint.
+		return { entries: [], leafId: null, more: false };
+	}
+}
+
 export async function snapshot(
 	this: any,
 	id: string,
@@ -153,13 +182,99 @@ export async function snapshot(
 	const windowed = entries.slice(-limit);
 	return {
 		info: live.info,
-		entries: windowed,
+		// A delta may carry one huge tool result; cap it here too, so a resume
+		// cannot reintroduce the multi-megabyte frame the windowing avoids.
+		entries: truncateEntries(windowed, ENTRY_TEXT_LIMIT),
 		leafId: data.leafId ?? null,
 		more: entries.length > windowed.length,
 		// Coverage is computed over the full response, not the window: a buffered
 		// record for an entry older than the window is still a duplicate.
 		covered: coverageKeys(entries),
 	};
+}
+
+/**
+ * Authoritative initial window for any session, live or stopped. Reads the
+ * JSONL tail instead of `get_entries`, so a 17 MB history costs one bounded
+ * disk read. A live session still exposes its real state, which lets a
+ * green/yellow reconnect enable the composer immediately.
+ */
+export async function window(
+	this: any,
+	id: string,
+	limit = WINDOW_ENTRIES,
+	maxBytes = WINDOW_BYTES,
+): Promise<{ info: SessionInfo; entries: unknown[]; leafId: string | null; more: boolean }> {
+	const live = this.live.get(id);
+	let info: SessionInfo | undefined = live?.info;
+	let path = live?.info.sessionFile;
+	if (!info) {
+		const found = (await this.scan()).find((entry) => entry.header.id === id);
+		if (found) {
+			const record = await this.findRecord(found.header.id);
+			info = {
+				id: found.header.id,
+				logicalId: record?.logicalId,
+				cwd: found.header.cwd,
+				name: found.header.name,
+				state: "stopped",
+				sessionFile: found.path,
+				lastActivity: Date.parse(found.header.timestamp) || 0,
+			};
+			path = found.path;
+		} else {
+			const record = await this.findRecord(id);
+			if (!record) throw new Error(`unknown session ${id}`);
+			info = {
+				id: record.piId,
+				logicalId: record.logicalId,
+				cwd: record.cwd,
+				name: record.name,
+				state: "stopped",
+				sessionFile: record.sessionFile,
+				lastActivity: Date.parse(record.createdAt) || 0,
+			};
+			path = record.sessionFile;
+		}
+	}
+	const disk = path ? await readDiskWindow(path, limit, maxBytes) : { entries: [], leafId: null, more: false };
+	return { info, ...disk };
+}
+
+/**
+ * One full entry from the JSONL for the lazy expansion path. Scans backwards
+ * from the end in growing bounded reads; returns undefined when the entry is
+ * not on disk yet (an in-flight turn) or its line exceeds the hard cap.
+ */
+export async function entry(this: any, id: string, entryId: string, maxBytes = FULL_ENTRY_BYTES): Promise<unknown> {
+	const path = await this.sessionPath(id);
+	if (!path || !entryId) return undefined;
+	for (let budget = WINDOW_BYTES; ; budget *= 4) {
+		const read = Math.min(budget, maxBytes);
+		let tail: { text: string; offset: number };
+		try {
+			tail = await readFromEnd(path, read);
+		} catch {
+			return undefined;
+		}
+		const parsed = transcriptEntries(parseEntries(tail.text, { dropFirst: tail.offset > 0 }));
+		const found = parsed.find((item) => (item as { id?: unknown })?.id === entryId);
+		if (found) return capEntry(found, maxBytes);
+		if (tail.offset === 0 || read >= maxBytes) return undefined;
+	}
+}
+
+function capEntry(entry: unknown, maxBytes: number): unknown {
+	if (JSON.stringify(entry).length <= maxBytes) return entry;
+	// Prefer the biggest per-field cap that still fits the frame. This only
+	// triggers for absurd single entries; the marker explains the loss.
+	for (let limit = 1024 * 1024; limit >= 1024; limit = Math.floor(limit / 4)) {
+		const [capped] = truncateEntries([entry], limit) as Array<Record<string, unknown>>;
+		if (JSON.stringify(capped).length > maxBytes) continue;
+		const { truncated: _windowTruncated, ...rest } = capped;
+		return { ...rest, fullTruncated: true };
+	}
+	return { ...(entry as Record<string, unknown>), fullTruncated: true };
 }
 
 export async function provisional(
@@ -187,18 +302,7 @@ export async function provisional(
 		return { info, entries: [], leafId: null, more: false };
 	}
 
-	let entries: unknown[] = [];
-	let more = false;
-	try {
-		const tail = await readFromEnd(found.path, maxBytes);
-		const parsed = transcriptEntries(parseEntries(tail.text, { dropFirst: tail.offset > 0 }));
-		const windowed = parsed.slice(-limit);
-		entries = truncateEntries(windowed, ENTRY_TEXT_LIMIT);
-		more = tail.offset > 0 || parsed.length > windowed.length;
-	} catch {
-		// Missing or unreadable file: the uniform empty-starting snapshot covers it.
-	}
-
+	const disk = await readDiskWindow(found.path, limit, maxBytes);
 	const info: SessionInfo = {
 		id: found.header.id,
 		logicalId: (await this.findRecord(found.header.id))?.logicalId,
@@ -208,8 +312,7 @@ export async function provisional(
 		sessionFile: found.path,
 		lastActivity: Date.parse(found.header.timestamp) || 0,
 	};
-	const leaf = entries.at(-1) as { id?: unknown } | undefined;
-	return { info, entries, leafId: typeof leaf?.id === "string" ? leaf.id : null, more };
+	return { info, ...disk };
 }
 
 export async function earlier(

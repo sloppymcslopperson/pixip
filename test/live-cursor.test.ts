@@ -59,6 +59,7 @@ async function boot(paths: TestPaths, env: Record<string, string>): Promise<{ hu
 
 interface Inbox {
 	frames: Array<Record<string, unknown>>;
+	send: (frame: Record<string, unknown>) => void;
 	close: () => void;
 }
 
@@ -76,7 +77,7 @@ async function connect(url: string): Promise<Inbox> {
 		ws.once("open", () => resolve());
 		ws.once("error", reject);
 	});
-	return { frames, close: () => ws.close() };
+	return { frames, send: (frame) => ws.send(JSON.stringify(frame)), close: () => ws.close() };
 }
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -92,6 +93,61 @@ after(async () => {
 });
 
 describe("snapshot / live boundary", () => {
+	it("bounds the initial window from the JSONL and marks truncated entries", async () => {
+		const paths = await fixtureRoot("pixip-cursor-");
+		const huge = "z".repeat(40_000);
+		const first = entry("m1", "user", 111, huge);
+		await writeSession(paths, [first]);
+		const { hub, server } = await boot(paths, {
+			FAKE_PI_ENTRIES: JSON.stringify([first]),
+			FAKE_PI_LEAF: "m1",
+		});
+		const inbox = await connect(`${server.url}ws?session=${SESSION_ID}`);
+		await waitFor(() => inbox.frames.some((frame) => frame["t"] === "footer"));
+		await delay(100);
+
+		const base = snapshots(inbox)[0];
+		const entries = base?.["entries"] as Array<{ truncated?: boolean; message: { content: Array<{ text: string }> } }>;
+		assert.equal(entries.length, 1);
+		assert.equal(entries[0]?.truncated, true);
+		assert.ok((entries[0]?.message.content[0]?.text.length ?? 0) < huge.length);
+		assert.ok(JSON.stringify(base).length < 100_000);
+		inbox.close();
+		await server.close();
+		await hub.shutdown();
+	});
+
+	it("serves one full entry from the JSONL on demand", async () => {
+		const paths = await fixtureRoot("pixip-cursor-");
+		const huge = "q".repeat(40_000);
+		const first = entry("m1", "user", 111, huge);
+		await writeSession(paths, [first]);
+		const { hub, server } = await boot(paths, {
+			FAKE_PI_ENTRIES: JSON.stringify([first]),
+			FAKE_PI_LEAF: "m1",
+		});
+		const inbox = await connect(`${server.url}ws?session=${SESSION_ID}`);
+		await waitFor(() => inbox.frames.some((frame) => frame["t"] === "footer"));
+		await delay(100);
+
+		inbox.send({ t: "entry", id: "m1" });
+		await waitFor(() => inbox.frames.some((frame) => frame["t"] === "entry"));
+		const answer = inbox.frames.find((frame) => frame["t"] === "entry");
+		const full = answer?.["entry"] as { message: { content: Array<{ text: string }> } };
+		assert.equal(full.message.content[0]?.text, huge);
+		assert.equal(answer?.["error"], undefined);
+
+		inbox.frames.length = 0;
+		inbox.send({ t: "entry", id: "missing" });
+		await waitFor(() => inbox.frames.some((frame) => frame["t"] === "entry"));
+		const missing = inbox.frames.find((frame) => frame["t"] === "entry");
+		assert.equal(missing?.["entry"], null);
+		assert.match(String(missing?.["error"]), /not on disk/);
+		inbox.close();
+		await server.close();
+		await hub.shutdown();
+	});
+
 	it("drops a buffered record the snapshot already covers", async () => {
 		const paths = await fixtureRoot("pixip-cursor-");
 		const first = entry("m1", "user", 111);
@@ -109,14 +165,15 @@ describe("snapshot / live boundary", () => {
 		await waitFor(() => inbox.frames.some((frame) => frame["t"] === "footer"));
 		await delay(100);
 
-		const authoritative = snapshots(inbox).at(-1);
-		const entries = authoritative?.["entries"] as Array<{ id: string }>;
-		assert.deepEqual(
-			entries.map((item) => item.id),
-			["m1", "m2"],
-		);
+		// The first frame is the bounded JSONL window; the second is the cursor
+		// delta that closes the gap with Pi's newer entries.
+		const byId = new Map<string, unknown>();
+		for (const frame of snapshots(inbox)) {
+			for (const item of frame["entries"] as Array<{ id: string }>) byId.set(item.id, item);
+		}
+		assert.deepEqual([...byId.keys()], ["m1", "m2"]);
 		assert.equal(liveMessages(inbox).includes(222), false);
-		assert.ok(snapshots(inbox).length >= 1);
+		assert.ok(snapshots(inbox).length >= 2);
 		inbox.close();
 		await server.close();
 		await hub.shutdown();

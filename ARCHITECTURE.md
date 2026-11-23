@@ -127,14 +127,14 @@ That is why the host stays opt-in until boot cost is addressed.
 ```
  phone browser                    hub (pixip)                     pi child
  ─────────────                    ───────────                     ─────────
- open /ws?session=<id> ──────▶  attach()
-                                  ├─ read JSONL tail ───────────┐ (200 entries,
-                                  │                             ▼  state "starting")
- bytes ◀─ provisional snapshot ───┤
+ open /ws?session=<id> ──────▶  window()
+                                  ├─ read JSONL tail ───────────┐ (200 entries or
+                                  │                             ▼  256 KB, text capped)
+ bytes ◀─ bounded window ────────┤
                                   ├─ spawn pi --mode rpc ───────▶  process
                                   ├─ get_state           ───────▶  session id
-                                  └─ get_entries         ◀───────  snapshot
- bytes ◀───── snapshot frame ────┤
+                                  └─ get_entries since=<leaf> ◀───  delta
+ bytes ◀───── resume delta ──────┤
                                   │  stdout line (raw)  ◀────────  event
  bytes ◀── {"t":"event","ev":…} ──┤  (no parse/re-encode)
  {"t":"prompt","text":…} ───────▶ ┤─ prompt              ───────▶  command
@@ -146,15 +146,24 @@ One child process per _attached_ session. `--idle-ms` detaches it; the list stil
 shows the session as `stopped` from the JSONL header, and opening it reattaches.
 
 Opening a session is a two-step paint. The hub reads the JSONL tail **before**
-spawning (`src/hub.ts` `provisional()`): the last 200 entries, reading backwards
+spawning (`src/hub.ts` `window()`): up to the last 200 entries, reading backwards
 until ~256 KB of raw line bytes, whichever bound comes first, with each entry's
-text truncated to 8 KB and marked as such. That snapshot goes out with
-`state: "starting"`, so the transcript is readable while the child boots. When
-`get_state`/`get_entries` answer, the authoritative snapshot replaces it, windowed
-hub-side to the newest 200 entries (`get_entries` can be 17 MB; it never crosses
-the socket whole). Older history comes from the JSONL through `earlier` windows of
-200 entries. The client keeps windows the user already loaded, dedupes by entry id
-and holds `scrollHeight - scrollTop` constant so a prepend never moves the view.
+text truncated to 8 KB and marked `truncated: true`. That snapshot goes out with
+`state: "stopped"` mapped to `starting`, so the transcript is readable while the
+child boots; a live green/yellow session keeps its real `idle`/`busy` state, so
+the composer is usable immediately. When the child answers, the hub asks Pi only
+for `get_entries since=<JSONL leaf>` and sends that delta as a `resume` snapshot.
+Pi's full history is never requested: on an 11 MB session that call took 4.6 s and
+an 8.4 MB frame, while the bounded window is tens of milliseconds.
+
+A reconnect that carries a durable cursor skips the JSONL window entirely and
+requests only the delta. Resume deltas are capped and marked the same way. Older
+history comes from the JSONL through `earlier` windows of 200 entries. The client
+keeps windows the user already loaded, dedupes by entry id and holds
+`scrollHeight - scrollTop` constant so a prepend never moves the view. Expanding
+a truncated block asks for that one full entry (`entry` frame), read backwards
+from the JSONL in growing bounded chunks; entries not yet flushed by a live turn
+keep their capped text and can be retried after the turn settles.
 
 Transient states are explicit: `starting` (child booting, provisional paint),
 `busy` (agent running), `idle`, `stopped` (JSONL only), `error` (child died).
@@ -170,26 +179,27 @@ All frames are JSON text on one websocket. `v` is bumped on breaking change.
 
 Hub → client:
 
-| frame      | fields                                                                                                             | notes                                                                                                                                           |
-| ---------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hello`    | `v`, `sessions`, `defaultCwd`, `home`                                                                              | sent on a session-less socket                                                                                                                   |
-| `sessions` | `sessions`                                                                                                         | list refresh                                                                                                                                    |
-| `snapshot` | `session`, `entries`, `leafId`, `more`, `replace?`                                                                 | (re)places the window; `more` = older entries exist, so "load earlier" is offered; `replace` drops windows loaded before a compaction or `/new` |
-| `history`  | `entries`, `more`                                                                                                  | answer to `earlier`: the window just before the oldest held entry                                                                               |
-| `status`   | `session`                                                                                                          | state/name/model changes                                                                                                                        |
-| `event`    | `ev`                                                                                                               | **verbatim** Pi record                                                                                                                          |
-| `opened`   | `session`, `rekey?`                                                                                                | reply to `create`; `rekey` when `/new` moved the session to a new Pi id                                                                         |
-| `copy`     | `text`                                                                                                             | answer to a `copy` frame: Pi's last assistant text (`null` if none)                                                                             |
-| `policy`   | `policy` (`allow`, `deny`, `bash`)                                                                                 | effective per-session command policy                                                                                                            |
-| `commands` | `commands` (`name`, `description?`, `source`)                                                                      | live `get_commands` entries for the `/` menu; sent once per attach, cached by the client                                                        |
-| `queue`    | `steering`, `followUp`                                                                                             | answer to `clear_queue`: the texts Pi removed, restored into the composer unsent                                                                |
-| `tree`     | `tree`, `leafId`                                                                                                   | answer to `/tree`: Pi's read-only session tree                                                                                                  |
-| `fork`     | `text`, `cancelled`                                                                                                | answer to `/fork`; the new session itself arrives as `opened` with `rekey`                                                                      |
-| `clone`    | `cancelled`                                                                                                        | answer to `/clone`; same re-key path                                                                                                            |
-| `import`   | `cancelled`                                                                                                        | answer to `/import`; the switched-to session arrives as `opened`                                                                                |
-| `export`   | `html`, `jsonl`                                                                                                    | download URLs served by the export REST route (`jsonl` is `null` when Pi has no file yet)                                                       |
-| `bash`     | `id`, `command`, `excludeFromContext`, `output`, `exitCode`, `cancelled`, `truncated`, `fullOutputPath?`, `error?` | terminal result for `!`/`!!`; chunks arrive as `event`                                                                                          |
-| `error`    | `message`                                                                                                          | protocol/command failure                                                                                                                        |
+| frame      | fields                                                                                                             | notes                                                                                                                                                                                        |
+| ---------- | ------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hello`    | `v`, `sessions`, `defaultCwd`, `home`                                                                              | sent on a session-less socket                                                                                                                                                                |
+| `sessions` | `sessions`                                                                                                         | list refresh                                                                                                                                                                                 |
+| `snapshot` | `session`, `entries`, `leafId`, `more`, `resume?`, `replace?`                                                      | (re)places the window; `more` = older entries exist, so "load earlier" is offered; `resume` means append only the cursor delta; `replace` drops windows loaded before a compaction or `/new` |
+| `entry`    | `id`, `entry` \| `error`                                                                                           | answer to a lazy full-text request; `entry` is `null` with a reason when the JSONL does not have it yet                                                                                      |
+| `history`  | `entries`, `more`                                                                                                  | answer to `earlier`: the window just before the oldest held entry                                                                                                                            |
+| `status`   | `session`                                                                                                          | state/name/model changes                                                                                                                                                                     |
+| `event`    | `ev`                                                                                                               | **verbatim** Pi record                                                                                                                                                                       |
+| `opened`   | `session`, `rekey?`                                                                                                | reply to `create`; `rekey` when `/new` moved the session to a new Pi id                                                                                                                      |
+| `copy`     | `text`                                                                                                             | answer to a `copy` frame: Pi's last assistant text (`null` if none)                                                                                                                          |
+| `policy`   | `policy` (`allow`, `deny`, `bash`)                                                                                 | effective per-session command policy                                                                                                                                                         |
+| `commands` | `commands` (`name`, `description?`, `source`)                                                                      | live `get_commands` entries for the `/` menu; sent once per attach, cached by the client                                                                                                     |
+| `queue`    | `steering`, `followUp`                                                                                             | answer to `clear_queue`: the texts Pi removed, restored into the composer unsent                                                                                                             |
+| `tree`     | `tree`, `leafId`                                                                                                   | answer to `/tree`: Pi's read-only session tree                                                                                                                                               |
+| `fork`     | `text`, `cancelled`                                                                                                | answer to `/fork`; the new session itself arrives as `opened` with `rekey`                                                                                                                   |
+| `clone`    | `cancelled`                                                                                                        | answer to `/clone`; same re-key path                                                                                                                                                         |
+| `import`   | `cancelled`                                                                                                        | answer to `/import`; the switched-to session arrives as `opened`                                                                                                                             |
+| `export`   | `html`, `jsonl`                                                                                                    | download URLs served by the export REST route (`jsonl` is `null` when Pi has no file yet)                                                                                                    |
+| `bash`     | `id`, `command`, `excludeFromContext`, `output`, `exitCode`, `cancelled`, `truncated`, `fullOutputPath?`, `error?` | terminal result for `!`/`!!`; chunks arrive as `event`                                                                                                                                       |
+| `error`    | `message`                                                                                                          | protocol/command failure                                                                                                                                                                     |
 
 Client → hub:
 
@@ -213,6 +223,7 @@ Client → hub:
 | `set_model_query` / `set_thinking_query` | `query`                                     | resolve against `get_available_models` / levels, then set                                                                                                    |
 | `abort`                                  | –                                           | `abort`                                                                                                                                                      |
 | `earlier`                                | `before` (entry id)                         | hub reads the preceding window from the JSONL and replies with `history`                                                                                     |
+| `entry`                                  | `id` (entry id)                             | hub reads that one full entry from the JSONL and replies with `entry`, or an error while it is not on disk                                                   |
 | `stop`                                   | –                                           | detach process, keep JSONL                                                                                                                                   |
 | `ui`                                     | `id`, `value` \| `confirmed` \| `cancelled` | `extension_ui_response`                                                                                                                                      |
 
@@ -492,36 +503,43 @@ label is never applied over a name that appeared while the one-shot call ran.
 | prompt sent → user `message_end` echoed                         | **18 ms**                         |
 | prompt sent → first `text_delta`                                | 1539 ms (model/provider, not hub) |
 | `stop` (graceful detach)                                        | **46 ms**                         |
-| reattach after stop (cold)                                      | 1.25 s                            |
-| open (app loaded) → provisional snapshot frame, 17 MB session   | **110–140 ms**                    |
-| open (app loaded) → transcript painted, 17 MB session           | **143–185 ms**                    |
+| reattach after stop (cold spawn)                                | ~1.3 s                            |
+| reconnect → bounded JSONL window (11 MB / 1,200 entries)        | **8–45 ms**                       |
+| switch green/yellow → window + resume delta                     | **7–43 ms**                       |
+| reconnect with durable cursor → delta                           | **5–24 ms**                       |
+| create → composer ready, alone                                  | **0.94–1.05 s**                   |
+| create → composer ready, another agent busy streaming           | **1.28 s**                        |
 | "load earlier" (200 entries from the JSONL, 17 MB session)      | 54–77 ms                          |
 | cold page load (browser, empty session) → transcript painted    | ~230 ms                           |
 | cold page load (browser, 200-entry window) → transcript painted | ~430–550 ms                       |
 
-The provisional rows are measured with a local daemon and a synthetic 17 MB
-session (1,900 entries, some 400 KB tool outputs): socket timing via the
-`wsdump`-style probe, paint via `puppeteer-core` on the loaded session list
-(tap → transcript painted), which is how the phone opens a session. The cold
-page-load row is a full browser navigation on this 1 vCPU box; roughly 170–240 ms
-of it is the app's own HTML/CSS/JS load, before the hub sees a socket. The first
-paint only lays out the newest ~24 KB of the window; the rest of the 200 entries
-fills in above in chunks (32 KB per task) without moving the scroll position.
+The reconnect/create rows are from `tools/reconnect-bench.mjs` on an 11 MB
+synthetic session, median of five socket runs against a local daemon with a real
+`pi` child. Before the bounded window, the authoritative `get_entries` call took
+4.6 s warm / 7.2 s cold and produced an 8.4 MB frame. The browser paint rows are
+older measurements from a synthetic 17 MB session; the bench measures paint too
+when `PIXIP_CHROME` is set, but the CI box in this checkout had no Chromium
+dependencies, so the current paint number was not re-taken here. The first paint
+only lays out the newest ~24 KB of the window; the rest fills in above in chunks
+(32 KB per task) without moving the scroll position.
 
-So hub overhead is single-digit milliseconds; the perceived cost is Pi process
-startup and provider latency. Budgets to keep:
+So hub overhead is single-digit milliseconds; the perceived cost is now Pi
+process startup, provider latency and the browser's own load. Budgets to keep:
 
 - prompt → `agent_start` under 15 ms local;
-- open a stopped session → readable transcript under 300 ms (app already loaded;
-  the child boot continues behind the provisional window);
+- switch/reconnect green/yellow → readable transcript under 250 ms target,
+  500 ms acceptable (browser paint, app already loaded);
+- open a stopped session → readable transcript under 300 ms (the child boot
+  continues behind the bounded window);
+- create a session → usable composer under 1.5 s;
 - event → frame emitted in the same tick (no queueing, no batching server-side);
 - event → DOM paint within one rAF;
 - no request per keystroke, no polling, no server-side transcript re-sends.
 
-Startup cost is hidden rather than removed: the JSONL provisional window paints
+Startup cost is hidden rather than removed: the JSONL bounded window paints
 first, and the child's 1.3 s boot no longer blocks the transcript. A warm pool is
-still the way to make the child itself fast, and is deliberately not done (1 vCPU,
-2 GB).
+still the only way to make the child itself fast, and is deliberately not done
+(1 vCPU, 2 GB); reconnect no longer depends on it.
 
 ## UI strategy (responsiveness on a phone)
 
@@ -673,8 +691,9 @@ per child, and raw bytes/strings on the hot path.
 
 ## Open design questions
 
-1. Cold attach is 1.3 s. Warm pool of one idle child per cwd? The JSONL
-   provisional paint hides it today; the pool would remove it.
+1. Cold attach is 1.3 s. Warm pool of one idle child per cwd? The bounded JSONL
+   window hides it for reads, but a create still waits for the child; the pool
+   would remove that wait (see the Pi hot-swap spike in the ticket board).
 2. Hub restart kills live children. Resume-all-on-start (by last activity) or
    leave them stopped?
 3. Worktrees: pixip needs them to replace AoE; `git worktree` in the hub, or shell

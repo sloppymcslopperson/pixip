@@ -267,6 +267,24 @@ export class Hub {
 	}
 
 	/**
+	 * Authoritative initial window from the JSONL tail, for live and stopped
+	 * sessions alike. A live session keeps its real state so the client can enable
+	 * the composer before the child has answered anything else.
+	 */
+	async window(
+		id: string,
+		limit = WINDOW_ENTRIES,
+		maxBytes = WINDOW_BYTES,
+	): Promise<{ info: SessionInfo; entries: unknown[]; leafId: string | null; more: boolean }> {
+		return await hubControl.window.apply(this, arguments as any);
+	}
+
+	/** One full entry from the JSONL for the client's lazy expansion path. */
+	async entry(id: string, entryId: string, maxBytes?: number): Promise<unknown> {
+		return await hubControl.entry.apply(this, arguments as any);
+	}
+
+	/**
 	 * Provisional transcript straight off the JSONL tail, before the child has
 	 * booted. Returns `null` for an already-live session (nothing to wait for).
 	 * Never throws on a broken file: an unreadable tail yields empty entries.
@@ -798,6 +816,7 @@ export class Hub {
 
 export {
 	ENTRY_TEXT_LIMIT,
+	FULL_ENTRY_BYTES,
 	WINDOW_BYTES,
 	WINDOW_ENTRIES,
 	moveFile,

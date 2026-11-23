@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+		<title>pixip · latency</title>
+		<style>
+			:root {
+				color-scheme: dark;
+				--bg: #11131a;
+				--panel: #181b24;
+				--line: #2a2f3d;
+				--fg: #e7e9ee;
+				--dim: #9aa2b1;
+				--accent: #7aa2f7;
+				--ok: #9ece6a;
+				--warn: #e0af68;
+				--err: #f7768e;
+			}
+			* {
+				box-sizing: border-box;
+			}
+			body {
+				margin: 0;
+				background: var(--bg);
+				color: var(--fg);
+				font:
+					15px/1.45 ui-sans-serif,
+					system-ui,
+					sans-serif;
+				padding: max(14px, env(safe-area-inset-top)) 14px max(20px, env(safe-area-inset-bottom));
+			}
+			main {
+				max-width: 680px;
+				margin: 0 auto;
+			}
+			h1 {
+				font-size: 18px;
+				margin: 0 0 4px;
+			}
+			p {
+				color: var(--dim);
+				margin: 0 0 14px;
+			}
+			button {
+				background: var(--accent);
+				border: 0;
+				border-radius: 10px;
+				color: #0b1020;
+				font: inherit;
+				font-weight: 650;
+				padding: 10px 14px;
+				min-height: 44px;
+			}
+			button:disabled {
+				opacity: 0.55;
+			}
+			section {
+				background: var(--panel);
+				border: 1px solid var(--line);
+				border-radius: 12px;
+				margin: 14px 0;
+				padding: 12px 14px;
+			}
+			h2 {
+				font-size: 13px;
+				letter-spacing: 0.06em;
+				text-transform: uppercase;
+				color: var(--dim);
+				margin: 0 0 8px;
+			}
+			table {
+				width: 100%;
+				border-collapse: collapse;
+			}
+			th,
+			td {
+				text-align: left;
+				padding: 4px 0;
+				font-variant-numeric: tabular-nums;
+			}
+			th {
+				color: var(--dim);
+				font-weight: 500;
+			}
+			td:last-child,
+			th:last-child {
+				text-align: right;
+			}
+			.big {
+				font-size: 20px;
+				font-weight: 700;
+				color: var(--ok);
+			}
+			.note {
+				font-size: 12.5px;
+				color: var(--dim);
+				margin: 8px 0 0;
+			}
+			.err {
+				color: var(--err);
+			}
+			.raw {
+				color: var(--dim);
+				font:
+					12px/1.5 ui-monospace,
+					monospace;
+				overflow-wrap: anywhere;
+			}
+		</style>
+	</head>
+	<body>
+		<main>
+			<h1>Network latency</h1>
+			<p>
+				Measures browser → daemon round trips from this device. Run it over the same connection you use for pixip; the
+				median is the cell latency that a session switch pays today.
+			</p>
+			<button id="run" type="button">Run test</button>
+
+			<section>
+				<h2>HTTP round trip</h2>
+				<table>
+					<tr>
+						<th>median</th>
+						<td class="big" id="http-median">–</td>
+					</tr>
+					<tr>
+						<th>p95</th>
+						<td id="http-p95">–</td>
+					</tr>
+					<tr>
+						<th>min / max</th>
+						<td id="http-range">–</td>
+					</tr>
+				</table>
+				<p class="note" id="http-note"></p>
+			</section>
+
+			<section>
+				<h2>WebSocket</h2>
+				<table>
+					<tr>
+						<th>handshake median</th>
+						<td id="ws-handshake">–</td>
+					</tr>
+					<tr>
+						<th>hello median</th>
+						<td id="ws-hello">–</td>
+					</tr>
+				</table>
+				<p class="note">
+					Handshake is the round trip a new session socket pays today. Parking a green/yellow socket removes that from a
+					switch; a resume on an open socket still costs roughly one HTTP round trip.
+				</p>
+			</section>
+
+			<section>
+				<h2>Connection</h2>
+				<div id="connection" class="raw">–</div>
+			</section>
+
+			<section>
+				<h2>Raw samples</h2>
+				<div id="raw" class="raw">–</div>
+			</section>
+		</main>
+
+		<script type="module">
+			const $ = (id) => document.getElementById(id);
+			const samples = { http: [], handshake: [], hello: [], errors: [] };
+			const run = $("run");
+			const now = () => performance.now();
+
+			function median(values) {
+				const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+				if (sorted.length === 0) return null;
+				return sorted[Math.floor(sorted.length / 2)];
+			}
+			function p95(values) {
+				const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+				if (sorted.length === 0) return null;
+				return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1)];
+			}
+			const ms = (value) => (value === null ? "–" : `${value.toFixed(0)} ms`);
+
+			function parseConnection() {
+				const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+				if (!connection) return { note: "Network Information API not available on this browser." };
+				return {
+					effectiveType: connection.effectiveType,
+					rtt: connection.rtt,
+					downlink: connection.downlink,
+					saveData: connection.saveData,
+				};
+			}
+
+			function render() {
+				$("http-median").textContent = ms(median(samples.http));
+				$("http-p95").textContent = ms(p95(samples.http));
+				const http = samples.http.filter(Number.isFinite);
+				$("http-range").textContent = http.length
+					? `${Math.min(...http).toFixed(0)} / ${Math.max(...http).toFixed(0)} ms`
+					: "–";
+				$("http-note").textContent = http.length
+					? `${http.length} samples. The first may include connection setup; min is the steady-state round trip.`
+					: "";
+				$("ws-handshake").textContent = ms(median(samples.handshake));
+				$("ws-hello").textContent = ms(median(samples.hello));
+				$("connection").textContent = JSON.stringify(parseConnection());
+				$("raw").innerHTML = [
+					`http: ${samples.http.map((value) => value.toFixed(0)).join(", ") || "–"}`,
+					`handshake: ${samples.handshake.map((value) => value.toFixed(0)).join(", ") || "–"}`,
+					`hello: ${samples.hello.map((value) => value.toFixed(0)).join(", ") || "–"}`,
+					`errors: ${samples.errors.join("; ") || "none"}`,
+				]
+					.map((line) => `<div>${line.replace(/[<>&]/g, "")}</div>`)
+					.join("");
+			}
+
+			async function httpPing() {
+				const started = now();
+				try {
+					const response = await fetch(`/health?ping=${started}`, { cache: "no-store" });
+					if (!response.ok) throw new Error(`HTTP ${response.status}`);
+					await response.json();
+					samples.http.push(now() - started);
+				} catch (error) {
+					samples.errors.push(`http: ${error.message}`);
+				}
+			}
+
+			function wsHandshake() {
+				return new Promise((resolve) => {
+					const scheme = location.protocol === "https:" ? "wss" : "ws";
+					const started = now();
+					const socket = new WebSocket(`${scheme}://${location.host}/ws`);
+					let opened = false;
+					const finish = () => {
+						socket.close();
+						resolve();
+					};
+					socket.onopen = () => {
+						opened = true;
+						samples.handshake.push(now() - started);
+					};
+					socket.onmessage = () => {
+						samples.hello.push(now() - started);
+						finish();
+					};
+					socket.onerror = () => {
+						samples.errors.push("websocket failed");
+						finish();
+					};
+					setTimeout(() => {
+						if (!opened) samples.errors.push("websocket handshake timed out");
+						finish();
+					}, 5000);
+				});
+			}
+
+			async function runTest() {
+				run.disabled = true;
+				samples.http.length = 0;
+				samples.handshake.length = 0;
+				samples.hello.length = 0;
+				samples.errors.length = 0;
+				render();
+				for (let index = 0; index < 20; index += 1) {
+					await httpPing();
+					render();
+				}
+				for (let index = 0; index < 5; index += 1) {
+					await wsHandshake();
+					render();
+				}
+				run.disabled = false;
+			}
+
+			run.addEventListener("click", () => void runTest());
+			render();
+		</script>
+	</body>
+</html>

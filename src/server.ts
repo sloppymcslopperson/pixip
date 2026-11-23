@@ -6,13 +6,14 @@ import { WebSocketServer, type WebSocket } from "ws";
 
 import { createDirectory, DirError, listDirectories } from "./dirs.ts";
 import { MAX_UPLOAD_BYTES } from "./attachments.ts";
-import { Hub } from "./hub.ts";
+import { coverageKeys, Hub } from "./hub.ts";
 import {
 	frameBash,
 	frameBashError,
 	frameClone,
 	frameCommands,
 	frameCopy,
+	frameEntry,
 	frameError,
 	frameExport,
 	frameFork,
@@ -90,23 +91,31 @@ interface SnapshotReply {
 }
 
 /**
- * Ask for the window after `since`, falling back to a full snapshot when Pi no
- * longer knows the cursor (forked, compacted away, or simply bogus).
+ * Ask for the delta after `since`. A rejected cursor falls back to the bounded
+ * JSONL window, never to Pi's full history: that is the reconnect cost this
+ * path exists to avoid.
  */
 async function requestSnapshot(
 	hub: Hub,
 	id: string,
 	since: string | undefined,
 	log: (message: string) => void,
+	piWindow = false,
 ): Promise<SnapshotReply> {
+	if (!since && piWindow) {
+		// No JSONL window exists yet (a brand-new live session, or a file that
+		// has not been flushed). Ask Pi once, still bounded by `snapshot`.
+		return { ...(await hub.snapshot(id, undefined, undefined)), resume: false };
+	}
 	if (since) {
 		try {
 			return { ...(await hub.snapshot(id, undefined, since)), resume: true };
 		} catch (error) {
-			log(`resume cursor ${since} rejected (${(error as Error).message}); sending a full snapshot`);
+			log(`resume cursor ${since} rejected (${(error as Error).message}); sending the bounded window`);
 		}
 	}
-	return { ...(await hub.snapshot(id, undefined, undefined)), resume: false };
+	const window = await hub.window(id);
+	return { ...window, covered: coverageKeys(window.entries), resume: false };
 }
 
 export async function startServer(options: ServerOptions): Promise<RunningServer> {
@@ -423,10 +432,16 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 	try {
 		// A reconnect that carries a cursor already has a transcript: skip the
 		// provisional repaint and resume from the durable entry cursor instead.
+		// Otherwise paint the bounded JSONL window before the child boots.
 		const cursor = url.searchParams.get("since") ?? undefined;
-		const provisional = cursor ? null : await hub.provisional(sessionId);
-		if (provisional) {
-			send(frameSnapshot(provisional.info, provisional.entries, provisional.leafId, provisional.more));
+		const base = cursor ? null : await hub.window(sessionId);
+		const hasBase = Boolean(base && (base.leafId !== null || base.entries.length > 0));
+		if (hasBase && base) {
+			// A stopped session is about to be attached; saying `starting` avoids a
+			// flash of the wake card. A live green/yellow session keeps its real
+			// state so the composer can be used immediately.
+			const info = base.info.state === "stopped" ? { ...base.info, state: "starting" as const } : base.info;
+			send(frameSnapshot(info, base.entries, base.leafId, base.more));
 		}
 		const info = await hub.attach(sessionId);
 		active.id = info.id;
@@ -467,10 +482,13 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 		);
 		subscriptions.push(hub.watch((frame) => send(frame)));
 
-		let resumeFrom = cursor;
+		let resumeFrom = cursor ?? (hasBase ? (base?.leafId ?? undefined) : undefined);
+		const piWindow = !cursor && !hasBase;
 		for (let attempt = 0; ; attempt += 1) {
-			const snapshot = await requestSnapshot(hub, info.id, resumeFrom, log);
-			send(frameSnapshot(snapshot.info, snapshot.entries, snapshot.leafId, snapshot.more, snapshot.resume));
+			const snapshot = await requestSnapshot(hub, info.id, resumeFrom, log, piWindow && attempt === 0);
+			if (hasBase && base) snapshot.covered = [...new Set([...coverageKeys(base.entries), ...snapshot.covered])];
+			const more = snapshot.resume ? snapshot.more : Boolean((hasBase && base?.more) || snapshot.more);
+			send(frameSnapshot(snapshot.info, snapshot.entries, snapshot.leafId, more, snapshot.resume));
 			const covered = new Set(snapshot.covered);
 			for (const item of buffer) {
 				if (!covered.has(item.key)) send(item.frame);
@@ -590,6 +608,13 @@ async function handleCommand(
 			case "abort":
 				await hub.abort(sessionId);
 				break;
+			case "entry": {
+				const entryId = String(message["id"] ?? "");
+				const entry = entryId ? await hub.entry(sessionId, entryId) : undefined;
+				if (entry === undefined) send(frameEntry(entryId, null, "entry is not on disk yet"));
+				else send(frameEntry(entryId, entry));
+				return;
+			}
 			case "earlier": {
 				const before = String(message["before"] ?? "");
 				const window = await hub.earlier(sessionId, before);
