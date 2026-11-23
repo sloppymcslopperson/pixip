@@ -1,7 +1,7 @@
 // Client sheets module; shared state lives in kernel/state.js.
 import { applyAddonUi } from "./addonUi.js";
 import { copyText } from "./clipboard.js";
-import { renderFooter } from "./controls.js";
+import { renderFooter } from "./sessionView.js";
 import { closeSheet, sheetHeader } from "./sheetShell.js";
 import { notice } from "./toast.js";
 import { send } from "./transport.js";

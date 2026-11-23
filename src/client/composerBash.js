@@ -1,7 +1,7 @@
 // Bash-card lifecycle: optimistic card on submit, then replace with the hub's
 // authoritative result. Card HTML stays in render.js; state is in kernel/state.
-import { clearInput } from "./composer.js";
-import { scheduleScroll, scrollToEnd } from "./controls.js";
+import { clearInput } from "./composerInput.js";
+import { scheduleScroll, scrollToEnd } from "./scroll.js";
 import { bashCardHtml, bashStartCard } from "./render.js";
 import { notice, toast } from "./toast.js";
 import { send } from "./transport.js";

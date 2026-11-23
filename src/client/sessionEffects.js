@@ -2,7 +2,7 @@
 // snapshots, restarts, status, re-keys and socket close. Decisions come from
 // the pure sessionPlan.js helpers; this module applies them.
 import { clearPendingAttachment } from "./composerAttachments.js";
-import { applyInfo } from "./controls.js";
+import { applyInfo } from "./sessionView.js";
 import { closePlan, openedPlan, snapshotPlan, statusPlan } from "./sessionPlan.js";
 import { failPendingSession, openSession } from "./session.js";
 import { appendRestartNotice, lastEntryId, renderResume, renderSnapshot, renderTranscript } from "./transcript.js";

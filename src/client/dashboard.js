@@ -3,7 +3,8 @@
 // dashboardApi, dashboardList, dashboardPicker and dashboardSettings.
 import { createAddonUi } from "./addonUi.js";
 import { clearPendingAttachment } from "./composerAttachments.js";
-import { closeMenu, renderQueue } from "./controls.js";
+import { closeMenu } from "./menuView.js";
+import { renderQueue } from "./queueView.js";
 import { fetchInfo, listSessions } from "./dashboardApi.js";
 import { renderList } from "./dashboardList.js";
 import { resetSurface } from "./surface.js";

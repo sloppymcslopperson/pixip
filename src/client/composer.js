@@ -3,10 +3,11 @@ import { optimisticContent, slashPayload, textPayload } from "./attachments.js";
 import { clearPendingAttachment } from "./composerAttachments.js";
 import { submitBash } from "./composerBash.js";
 import { classifyInput, isAllowed } from "./commands.js";
-import { appendBlock, closeMenu, resize, scrollToEnd } from "./controls.js";
+import { clearInput } from "./composerInput.js";
+import { scrollToEnd } from "./scroll.js";
+import { appendBlock } from "./transcriptView.js";
 import { renderUserBody } from "./render.js";
 import { formatSession } from "./sessionInfo.js";
-import { refreshSendState } from "./sendState.js";
 import { notice, textSheet, toast } from "./toast.js";
 import { send } from "./transport.js";
 import { state } from "./kernel/state.js";
@@ -79,13 +80,6 @@ export const builtinHandlers = {
 		send({ t: "export" });
 	},
 };
-
-export function clearInput() {
-	ui.input.value = "";
-	closeMenu();
-	resize();
-	refreshSendState();
-}
 
 export function attachmentBlocksCommand(label) {
 	if (!state.pendingAttachment) return false;

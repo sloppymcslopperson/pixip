@@ -1,7 +1,10 @@
 // Client menu module; shared state lives in kernel/state.js.
 import { commandQuery, filterCommands, menuCatalog, menuInsertText } from "./commands.js";
 import { submit } from "./composer.js";
-import { closeMenu, renderQueue, resize, scheduleScroll } from "./controls.js";
+import { resize } from "./composerInput.js";
+import { closeMenu } from "./menuView.js";
+import { renderQueue } from "./queueView.js";
+import { scheduleScroll } from "./scroll.js";
 import { queueCount, queueFromEvent, restoreText } from "./queue.js";
 import { toast } from "./toast.js";
 import { state } from "./kernel/state.js";

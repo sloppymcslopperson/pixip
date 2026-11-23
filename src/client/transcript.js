@@ -1,14 +1,8 @@
 // Client transcript module; shared state lives in kernel/state.js.
-import {
-	appendBlock,
-	applyInfo,
-	hideThinkingIndicator,
-	renderQueue,
-	scheduleScroll,
-	scrollToEnd,
-	setBusy,
-	showThinkingIndicator,
-} from "./controls.js";
+import { appendBlock, hideThinkingIndicator, showThinkingIndicator } from "./transcriptView.js";
+import { renderQueue } from "./queueView.js";
+import { scheduleScroll, scrollToEnd } from "./scroll.js";
+import { applyInfo, setBusy } from "./sessionView.js";
 import { queueCount, queueFromEvent } from "./queue.js";
 import {
 	ansiToHtml,

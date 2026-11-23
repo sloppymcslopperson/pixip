@@ -1,8 +1,12 @@
 // Client session module; shared state lives in kernel/state.js.
 import { createAddonUi } from "./addonUi.js";
 import { clearPendingAttachment } from "./composerAttachments.js";
-import { applyInfo, closeMenu, renderFooter, renderQueue, resize, updateJump } from "./controls.js";
+import { resize } from "./composerInput.js";
+import { closeMenu } from "./menuView.js";
+import { renderQueue } from "./queueView.js";
 import { pendingErrorHtml, pendingSessionHtml } from "./render.js";
+import { updateJump } from "./scroll.js";
+import { applyInfo, renderFooter } from "./sessionView.js";
 import { resetSurface } from "./surface.js";
 import { readingDistance, restoreSession, snapshotSession } from "./sessionCache.js";
 import { renderTranscript } from "./transcript.js";

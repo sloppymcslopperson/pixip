@@ -6,7 +6,7 @@ import { applyPolicy } from "./composer.js";
 import { finishBash } from "./composerBash.js";
 import { handleOpened, handleRestarting, handleSnapshot, handleStatus } from "./sessionEffects.js";
 import { failPendingSession } from "./session.js";
-import { renderFooter } from "./controls.js";
+import { renderFooter } from "./sessionView.js";
 import { listSessions } from "./dashboardApi.js";
 import { renderList } from "./dashboardList.js";
 import { state } from "./kernel/state.js";

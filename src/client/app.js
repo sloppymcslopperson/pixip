@@ -1,16 +1,8 @@
 import { looksLikeImage } from "./attachments.js";
 import { submit } from "./composer.js";
 import { chooseAttachment, setAttachMenu } from "./composerAttachments.js";
-import {
-	bindScaleButton,
-	closeMenu,
-	readScale,
-	resize,
-	setBarMenu,
-	setScale,
-	softRefresh,
-	updateJump,
-} from "./controls.js";
+import { resize } from "./composerInput.js";
+import { bindScaleButton, readScale, setBarMenu, setScale, softRefresh } from "./controls.js";
 import { showList } from "./dashboard.js";
 import { openSettingsSheet } from "./dashboardSettings.js";
 import { handleFrame } from "./frames.js";
@@ -18,7 +10,9 @@ import { handleTransportClose } from "./sessionEffects.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
 import { chooseMenu, moveMenu, renderMenu } from "./menu.js";
+import { closeMenu } from "./menuView.js";
 import { configureNavigation, route } from "./navigation.js";
+import { updateJump } from "./scroll.js";
 import { refreshSendState } from "./sendState.js";
 import { beginNewSession, cacheCurrentSession, forgetCachedSession, openSession } from "./session.js";
 import { dismissSheet } from "./sheetShell.js";
