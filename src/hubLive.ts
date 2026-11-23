@@ -165,6 +165,10 @@ export async function stop(this: any, id: string): Promise<SessionInfo> {
 	this.clearPendingUi(live);
 	this.live.delete(id);
 	live.info.state = "stopped";
+	// Stopping must not drop a name that only the live session knows about.
+	// Keep the index as the durable copy; the JSONL is authoritative when it
+	// actually carries a session_info name.
+	await this.persistName(live);
 	await live.proc.close();
 	this.emitStatus(live);
 	this.broadcast(live, frameStatus(live.info));

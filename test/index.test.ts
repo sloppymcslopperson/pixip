@@ -87,6 +87,47 @@ describe("session index", () => {
 		assert.match(listed[0]?.sessionFile ?? "", /_01a1fb3f-aaaa/);
 	});
 
+	it("falls back to the index name when the JSONL window has no name", async () => {
+		const paths = await fixtureRoot("pixip-index-");
+		const { path } = await sessionFile(paths, [], { id: PI_ID, cwd: "/tmp/project" });
+		await writeFile(
+			paths.indexPath,
+			JSON.stringify([
+				{
+					logicalId: "logical-1",
+					piId: PI_ID,
+					piIds: [PI_ID],
+					cwd: "/tmp/project",
+					name: "index name",
+					nameSource: "auto",
+					sessionFile: path,
+					createdAt: "2026-11-21T00:00:00.000Z",
+				},
+			]),
+		);
+		const hub = hubFor(paths);
+		const listed = await hub.list();
+		assert.equal(listed.length, 1);
+		assert.equal(listed[0]?.name, "index name");
+		await hub.shutdown();
+	});
+
+	it("keeps a live name after stop when the JSONL has no session_info name", async () => {
+		const paths = await fixtureRoot("pixip-index-");
+		const { id } = await sessionFile(paths, [], { id: PI_ID, cwd: paths.dir });
+		const hub = hubFor(paths);
+		const attached = await hub.attach(id);
+		await hub.setName(attached.id, "Survives stop");
+		await hub.stop(attached.id);
+
+		const restarted = hubFor(paths);
+		const listed = await restarted.list();
+		const row = listed.find((session) => session.logicalId === attached.logicalId);
+		assert.equal(row?.state, "stopped");
+		assert.equal(row?.name, "Survives stop");
+		await restarted.shutdown();
+	});
+
 	it("survives a corrupt index and still lists JSONL sessions", async () => {
 		const paths = await fixtureRoot("pixip-index-");
 		await sessionFile(paths, [infoEntry("disk name")], { id: PI_ID, cwd: "/tmp/project" });

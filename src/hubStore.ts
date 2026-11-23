@@ -142,12 +142,14 @@ export async function list(this: any): Promise<SessionInfo[]> {
 		if (seen.has(header.id)) continue;
 		seen.add(header.id);
 		// JSONL wins for state, name and activity; the index only adds the
-		// logical id that ties a reattached Pi session to the same session.
+		// logical id that ties a reattached Pi session to the same session and
+		// supplies the name when the bounded scan misses a late session_info.
+		const record = recordFor(header.id);
 		infos.push({
 			id: header.id,
-			logicalId: recordFor(header.id)?.logicalId,
+			logicalId: record?.logicalId,
 			cwd: header.cwd,
-			name: header.name,
+			name: header.name ?? record?.name,
 			state: "stopped",
 			sessionFile: path,
 			lastActivity: Date.parse(header.timestamp) || 0,
@@ -325,9 +327,12 @@ export async function upsertIndex(
 		const existing = records.find((record) => record.logicalId === logicalId);
 		const piIds = existing ? [...existing.piIds] : [];
 		if (!piIds.includes(info.id)) piIds.push(info.id);
-		const name = info.name ?? existing?.name;
+		// A blank or missing info.name must not erase a name already on the
+		// record; Pi can emit an empty session_info while shutting down.
+		const providedName = typeof info.name === "string" && info.name.trim() ? info.name : undefined;
+		const name = providedName ?? existing?.name;
 		const source =
-			nameSource ?? (info.name !== undefined && existing?.name !== info.name ? "manual" : existing?.nameSource);
+			nameSource ?? (providedName !== undefined && existing?.name !== providedName ? "manual" : existing?.nameSource);
 		const next: SessionIndexRecord = {
 			logicalId,
 			piId: info.id,
