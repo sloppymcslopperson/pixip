@@ -6,7 +6,7 @@ Let a session be created in a fresh git worktree, or in any directory or existin
 
 ### Design reference
 
-Product decisions are settled in `backlog/60-worktrees-for-aoe-parity.md` (`### Grilled decisions` and `### Amendment`). Implement them; do not reopen them without a reason. This ticket is the create and persistence half; the dashboard and CLI halves are `open/61-worktree-dashboard.md` and `open/62-worktree-cli-docs.md`.
+Product decisions are settled in `backlog/60-worktrees-for-aoe-parity.md` (`### Grilled decisions` and `### Amendment`). Implement them; do not reopen them without a reason. This ticket is the create and persistence half; the dashboard and CLI halves are `open/07-worktree-dashboard.md` and `open/08-worktree-cli-docs.md`.
 
 ### Scope
 

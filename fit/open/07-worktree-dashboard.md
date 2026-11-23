@@ -6,7 +6,7 @@ The dashboard needs hierarchical repo and worktree groups, `new` / `new with wor
 
 ### Design reference
 
-All product decisions are in `backlog/60-worktrees-for-aoe-parity.md` (`### Grilled decisions` and `### Amendment`). This is the client and REST half; the hub primitives are `open/60-worktree-create-join.md`, docs are `open/62-worktree-cli-docs.md`.
+All product decisions are in `backlog/60-worktrees-for-aoe-parity.md` (`### Grilled decisions` and `### Amendment`). This is the client and REST half; the hub primitives are `open/06-worktree-create-join.md`, docs are `open/08-worktree-cli-docs.md`.
 
 ### Scope
 

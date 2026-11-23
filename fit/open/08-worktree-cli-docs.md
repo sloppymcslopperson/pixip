@@ -6,7 +6,7 @@ Add the `pixip worktree` CLI verbs and document the worktree model, its lifecycl
 
 ### Design reference
 
-Decisions are in `backlog/60-worktrees-for-aoe-parity.md`. CLI and docs only; creation is `open/60-worktree-create-join.md`, UI is `open/61-worktree-dashboard.md`.
+Decisions are in `backlog/60-worktrees-for-aoe-parity.md`. CLI and docs only; creation is `open/06-worktree-create-join.md`, UI is `open/07-worktree-dashboard.md`.
 
 ### Scope
 
