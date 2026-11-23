@@ -185,8 +185,10 @@ export class Hub {
 		return await hubStore.deleteSession.apply(this, arguments as any);
 	}
 
-	/** Archive every stopped session, skipping failures so one bad file cannot block the batch. */
-	async archiveInactive(): Promise<{ archived: SessionInfo[]; failed: Array<{ id: string; error: string }> }> {
+	/** Archive the requested stopped sessions (all of them when `ids` is omitted), skipping failures so one bad file cannot block the batch. */
+	async archiveInactive(
+		ids?: string[],
+	): Promise<{ archived: SessionInfo[]; failed: Array<{ id: string; error: string }> }> {
 		return await hubStore.archiveInactive.apply(this, arguments as any);
 	}
 

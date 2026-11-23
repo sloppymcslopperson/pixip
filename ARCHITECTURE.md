@@ -259,11 +259,12 @@ moves all of them plus its `sessions.json` record.
 - **restore** moves the files back to their original paths, adding
   `.restored-N` only when a path is now occupied, then re-inserts the index
   record. Identity, name and cwd are preserved.
-- **bulk archive** takes every stopped session across all groups and continues
-  on per-session failures. Busy/starting sessions are refused; idle ones are
-  stopped first for a single action. A live session that is archived or deleted
-  from another tab disappears from the `sessions` frame, and that tab returns to
-  the dashboard with a toast.
+- **bulk archive** takes stopped sessions across all groups and continues on
+  per-session failures. A group with no active session keeps its newest stopped
+  session, so archiving cannot make that cwd group disappear. Busy/starting
+  sessions are refused; idle ones are stopped first for a single action. A live
+  session that is archived or deleted from another tab disappears from the
+  `sessions` frame, and that tab returns to the dashboard with a toast.
 
 The settings sheet reads the archive/trash metadata and offers restore and
 permanent delete. Nothing enters the transcript or the model context.

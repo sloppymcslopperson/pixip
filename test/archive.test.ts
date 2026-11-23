@@ -139,6 +139,32 @@ describe("archive and trash", () => {
 		await assert.rejects(busyHub.deleteSession(busy.id), /busy/);
 		await busyHub.shutdown();
 	});
+
+	it("archives only the requested ids for a bulk call", async () => {
+		const paths = await fixtureRoot("pixip-archive-");
+		const hub = hubFor(paths);
+		const first = await hub.create(paths.dir, "one");
+		const second = await hub.create(paths.dir, "two");
+		await writeSession(paths, first.id, "one");
+		await writeSession(paths, second.id, "two");
+		await hub.stop(first.id);
+		await hub.stop(second.id);
+
+		const result = await hub.archiveInactive([first.id]);
+		assert.equal(result.archived.length, 1);
+		assert.equal(result.archived[0]?.id, first.id);
+		assert.deepEqual(result.failed, []);
+		const listed = await hub.list();
+		assert.equal(
+			listed.some((session) => session.id === first.id),
+			false,
+		);
+		assert.equal(
+			listed.some((session) => session.id === second.id),
+			true,
+		);
+		await hub.shutdown();
+	});
 });
 
 describe("archive REST routes", () => {
@@ -178,8 +204,17 @@ describe("archive REST routes", () => {
 			const two = await hub.create(paths.dir, "two");
 			await writeSession(paths, two.id, "two");
 			await hub.stop(two.id);
+			const selective = (await (
+				await fetch(new URL("api/sessions/archive-inactive", base), {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ ids: [two.id] }),
+				})
+			).json()) as { archived: number };
+			assert.equal(selective.archived, 1);
+			assert.equal(((await get("api/sessions")) as unknown[]).length, 1);
 			const bulk = (await (await post("api/sessions/archive-inactive")).json()) as { archived: number };
-			assert.equal(bulk.archived, 2);
+			assert.equal(bulk.archived, 1);
 			assert.equal(((await get("api/sessions")) as unknown[]).length, 0);
 			assert.equal(((await get("api/archived")) as unknown[]).length, 2);
 		} finally {

@@ -4,7 +4,7 @@ import { initialDirectory } from "./directoryPicker.js";
 import { listSessions } from "./dashboardApi.js";
 import { archiveInactive, openSessionActions } from "./dashboardSettings.js";
 import { openDirectorySheet } from "./dashboardPicker.js";
-import { draftInputValue, groupDisplay, inactiveSessions } from "./dashboardModel.js";
+import { bulkArchiveTargets, draftInputValue, groupDisplay } from "./dashboardModel.js";
 import { beginNewSession } from "./navigation.js";
 import { escapeHtml, relativeTime } from "./render.js";
 import {
@@ -43,14 +43,14 @@ export function renderList(sessions, defaultCwd = state.defaultCwd, home = state
 	});
 	ui.list.append(form);
 
-	const inactive = inactiveSessions(state.sessions);
-	if (inactive.length > 0) {
+	const targets = bulkArchiveTargets(state.sessions);
+	if (targets.length > 0) {
 		const bulk = document.createElement("button");
 		bulk.type = "button";
 		bulk.className = "bulk-archive";
-		bulk.textContent = `archive inactive (${inactive.length})`;
-		bulk.title = "Archive every stopped session on the dashboard";
-		bulk.addEventListener("click", () => void archiveInactive(inactive.length));
+		bulk.textContent = `archive inactive (${targets.length})`;
+		bulk.title = "Archive stopped sessions, keeping the newest in a group with no active sessions";
+		bulk.addEventListener("click", () => void archiveInactive(targets));
 		ui.list.append(bulk);
 	}
 

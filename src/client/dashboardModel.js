@@ -2,7 +2,7 @@
 // (dashboardList, dashboardPicker, dashboardSettings) call these and paint.
 import { filterDirEntries, parentDirectory } from "./directoryPicker.js";
 import { relativeTime } from "./render.js";
-import { groupLabel, groupView } from "./sessionGroups.js";
+import { groupLabel, groupSessions, groupView } from "./sessionGroups.js";
 
 /** Keep a cwd the user is typing when a list refresh repaints the form. */
 export function draftInputValue(draft, fallback) {
@@ -12,6 +12,22 @@ export function draftInputValue(draft, fallback) {
 /** Stopped sessions the bulk-archive action would hide. */
 export function inactiveSessions(sessions) {
 	return Array.isArray(sessions) ? sessions.filter((session) => session.state === "stopped") : [];
+}
+
+/**
+ * Stop the bulk action from emptying a cwd group. A group with an active
+ * session can lose every stopped row; a group with only stopped sessions keeps
+ * its newest row so the group itself stays visible.
+ */
+export function bulkArchiveTargets(sessions) {
+	const targets = [];
+	for (const group of groupSessions(sessions)) {
+		const inactive = group.sessions.filter((session) => session.state === "stopped");
+		if (inactive.length === 0) continue;
+		const keep = inactive.length === group.sessions.length ? inactive[0] : undefined;
+		for (const session of inactive) if (session !== keep) targets.push(session);
+	}
+	return targets;
 }
 
 /** Collapse state plus whether a toggle would actually hide a row. */

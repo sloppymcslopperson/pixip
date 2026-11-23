@@ -93,18 +93,23 @@ export async function deleteSession(session) {
 	}
 }
 
-export function archiveInactive(count) {
-	if (!Number.isFinite(count) || count <= 0) return;
-	const message = `Archive ${count} inactive session${count === 1 ? "" : "s"}?`;
+export function archiveInactive(targets) {
+	const sessions = Array.isArray(targets) ? targets.filter((session) => session?.id) : [];
+	if (sessions.length === 0) return;
+	const message = `Archive ${sessions.length} inactive session${sessions.length === 1 ? "" : "s"}? Groups with no active sessions keep their newest session.`;
 	confirmSheet("archive", message, "archive", () => {
 		closeSheet();
-		void archiveInactiveConfirmed();
+		void archiveInactiveConfirmed(sessions);
 	});
 }
 
-async function archiveInactiveConfirmed() {
+async function archiveInactiveConfirmed(sessions) {
 	try {
-		const result = await apiJson("/api/sessions/archive-inactive", { method: "POST" });
+		const result = await apiJson("/api/sessions/archive-inactive", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ ids: sessions.map((session) => session.id) }),
+		});
 		if (Array.isArray(result.archived)) for (const session of result.archived) forgetCachedSession(session);
 		await refreshDashboard();
 		const failed = Array.isArray(result.failed) ? result.failed.length : 0;

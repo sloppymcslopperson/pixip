@@ -267,7 +267,12 @@ async function handleHttp(
 			return;
 		}
 		if (req.method === "POST" && url.pathname === "/api/sessions/archive-inactive") {
-			const result = await hub.archiveInactive();
+			const body = await readBody(req);
+			const parsed = JSON.parse(body || "{}") as { ids?: unknown };
+			const ids = Array.isArray(parsed.ids)
+				? parsed.ids.filter((id): id is string => typeof id === "string")
+				: undefined;
+			const result = await hub.archiveInactive(ids);
 			send(
 				200,
 				JSON.stringify({

@@ -209,12 +209,15 @@ export async function deleteSession(
 
 export async function archiveInactive(
 	this: any,
+	ids?: string[],
 ): Promise<{ archived: SessionInfo[]; failed: Array<{ id: string; error: string }> }> {
 	const sessions = await this.list();
+	const selected = Array.isArray(ids) ? new Set(ids) : undefined;
 	const archived: SessionInfo[] = [];
 	const failed: Array<{ id: string; error: string }> = [];
 	for (const session of sessions) {
 		if (session.state !== "stopped") continue;
+		if (selected && !selected.has(session.id) && !selected.has(session.logicalId)) continue;
 		try {
 			archived.push((await this.storeSession(session.id, this.archiveRoot)).info);
 		} catch (error) {

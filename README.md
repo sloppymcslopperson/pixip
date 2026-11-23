@@ -138,7 +138,8 @@ do in the TUI.
   keeping hot/warm and newest sessions visible in collapsed groups, plus
   `archived` and `trash` views (restore or permanently delete);
 - session archive/delete from each row's actions menu, with a short delete undo,
-  and an `archive inactive` action for every stopped session;
+  and an `archive inactive` action that keeps the newest session in any group
+  that has no active sessions;
 - extension dialogs (`select`/`confirm`/`input`/`editor`) rendered as a sheet and
   answered from the phone; `notify` as a toast;
 - reconnect with backoff, durable entry-cursor resume and a stable pixip logical

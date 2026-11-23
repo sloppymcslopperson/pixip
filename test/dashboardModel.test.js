@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+	bulkArchiveTargets,
 	draftInputValue,
 	groupDisplay,
 	inactiveSessions,
@@ -31,6 +32,39 @@ describe("inactiveSessions", () => {
 	it("tolerates a missing list", () => {
 		assert.deepEqual(inactiveSessions(undefined), []);
 		assert.deepEqual(inactiveSessions(null), []);
+	});
+});
+
+describe("bulkArchiveTargets", () => {
+	it("keeps the newest row of a group whose sessions are all stopped", () => {
+		const sessions = [
+			{ id: "a-new", cwd: "/a", state: "stopped", lastActivity: 300 },
+			{ id: "a-old", cwd: "/a", state: "stopped", lastActivity: 100 },
+			{ id: "b-old", cwd: "/b", state: "stopped", lastActivity: 50 },
+			{ id: "b-live", cwd: "/b", state: "idle", lastActivity: 200 },
+			{ id: "c", cwd: "/c", state: "stopped", lastActivity: 10 },
+		];
+		assert.deepEqual(
+			bulkArchiveTargets(sessions).map((session) => session.id),
+			["a-old", "b-old"],
+		);
+	});
+
+	it("archives every stopped row when the group still has an active session", () => {
+		const sessions = [
+			{ id: "d-live", cwd: "/d", state: "busy", lastActivity: 400 },
+			{ id: "d-new", cwd: "/d", state: "stopped", lastActivity: 300 },
+			{ id: "d-old", cwd: "/d", state: "stopped", lastActivity: 200 },
+		];
+		assert.deepEqual(
+			bulkArchiveTargets(sessions).map((session) => session.id),
+			["d-new", "d-old"],
+		);
+	});
+
+	it("leaves a one-session group alone and tolerates a missing list", () => {
+		assert.deepEqual(bulkArchiveTargets([{ id: "only", cwd: "/e", state: "stopped" }]), []);
+		assert.deepEqual(bulkArchiveTargets(undefined), []);
 	});
 });
 
