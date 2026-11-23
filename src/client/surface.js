@@ -494,3 +494,12 @@ export function surfaceStatus() {
 		collapsed,
 	};
 }
+
+/** Put a cached request/queue back after returning to a parked session. */
+export function restoreSurface(status) {
+	queue.active = status?.active ?? null;
+	queue.queued = Array.isArray(status?.queued) ? [...status.queued] : [];
+	collapsed = status?.collapsed === true;
+	renderedId = null;
+	renderSurface({ force: Boolean(queue.active) });
+}

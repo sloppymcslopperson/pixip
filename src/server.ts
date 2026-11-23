@@ -406,128 +406,181 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 		return;
 	}
 
-	let subscriptions: Array<() => void> = [];
+	const sessionKey = sessionId;
+	// A session socket can be parked: the WebSocket stays open, but its session
+	// subscription and list watcher are removed so a busy session sends nothing.
+	let sessionSubs: Array<() => void> = [];
+	let parked = false;
+	let closed = false;
+	let generation = 0;
 	// The socket starts on the URL's id; an index-only session reattaches under a
 	// fresh Pi id, and every later command must follow that id instead.
-	const active: { id: string | null } = { id: sessionId };
-	// A `/new` in any tab re-keys the session; this socket follows instantly and
-	// tells the client, which then asks for a replacement snapshot.
-	subscriptions.push(
-		hub.onRekey((from, info) => {
-			if (active.id !== from) return;
-			active.id = info.id;
-			send(frameOpened(info, true));
-		}),
-	);
-	ws.on("close", () => {
-		for (const unsubscribe of subscriptions) unsubscribe();
-		subscriptions = [];
+	const active: { id: string | null } = { id: sessionKey };
+	const clearSubs = () => {
+		for (const unsubscribe of sessionSubs) unsubscribe();
+		sessionSubs = [];
+	};
+	// A `/new` in any tab re-keys the session; even a parked socket keeps this
+	// listener so it can tell the client to invalidate and reconnect.
+	const rekeyUnsub = hub.onRekey((from, info) => {
+		if (active.id !== from) return;
+		active.id = info.id;
+		send(frameOpened(info, true));
 	});
+	ws.on("close", () => {
+		closed = true;
+		generation += 1;
+		rekeyUnsub();
+		clearSubs();
+	});
+
+	/** Attach (or re-attach) and send the snapshot; `wake` is a park resume. */
+	async function attach(since: string | undefined, resuming: boolean, notifyOpened: boolean): Promise<void> {
+		const gen = ++generation;
+		clearSubs();
+		try {
+			const cursor = typeof since === "string" && since.length > 0 ? since : undefined;
+			// A reconnect that carries a cursor already has a transcript: skip the
+			// provisional repaint and resume from the durable entry cursor instead.
+			// Otherwise paint the bounded JSONL window before the child boots.
+			const base = !resuming && !cursor ? await hub.window(sessionKey) : null;
+			if (gen !== generation || closed || parked) return;
+			const hasBase = Boolean(base && (base.leafId !== null || base.entries.length > 0));
+			if (hasBase && base) {
+				// A stopped session is about to be attached; saying `starting` avoids a
+				// flash of the wake card. A live green/yellow session keeps its real
+				// state so the composer can be used immediately.
+				const info = base.info.state === "stopped" ? { ...base.info, state: "starting" as const } : base.info;
+				send(frameSnapshot(info, base.entries, base.leafId, base.more));
+			}
+			const info = await hub.attach(active.id ?? sessionKey);
+			if (gen !== generation || closed || parked) return;
+			active.id = info.id;
+			// The index-only path lands on a new Pi id: tell the client before the
+			// snapshot so its URL and session key keep pointing at this transcript.
+			// A park/resume wake keeps the same key, so it sends no `opened`.
+			if (notifyOpened && info.id !== sessionKey) send(frameOpened(info));
+			// Policy is per session (cwd + data dir + CLI), so it goes on the session
+			// socket, not on the list; the composer needs it before the first submit.
+			send(framePolicy(hub.policy(info.id)));
+			// Addon status/widgets are fire-and-forget: replay the current cache so a
+			// late tab sees the same footer without waiting for the extension to emit.
+			for (const frame of hub.addonUiFrames(info.id)) send(frame);
+
+			// Subscribe *before* `get_entries` and buffer what the child emits in
+			// between, so a client connecting mid-turn cannot miss the start of a
+			// message. Records without an entry identity (status, UI dialogs) are
+			// order-independent and go out immediately.
+			const buffer: Array<{ frame: string; key: string }> = [];
+			let bytes = 0;
+			let overflowed = false;
+			let buffering = true;
+			sessionSubs.push(
+				hub.subscribe(info.id, (frame, key) => {
+					if (!key || !buffering) {
+						send(frame);
+						return;
+					}
+					buffer.push({ frame, key });
+					bytes += frame.length;
+					if (bytes > LIVE_BUFFER_BYTES || buffer.length > LIVE_BUFFER_FRAMES) {
+						// Bounded recovery below: close the gap with the durable cursor
+						// instead of holding an unbounded turn in memory.
+						overflowed = true;
+						buffer.length = 0;
+						bytes = 0;
+					}
+				}),
+			);
+			sessionSubs.push(hub.watch((frame) => send(frame)));
+
+			let resumeFrom = cursor ?? (hasBase ? (base?.leafId ?? undefined) : undefined);
+			const piWindow = !cursor && !hasBase;
+			for (let attempt = 0; ; attempt += 1) {
+				const snapshot = await requestSnapshot(hub, info.id, resumeFrom, log, piWindow && attempt === 0);
+				if (gen !== generation || closed || parked) return;
+				if (hasBase && base) snapshot.covered = [...new Set([...coverageKeys(base.entries), ...snapshot.covered])];
+				const more = snapshot.resume ? snapshot.more : Boolean((hasBase && base?.more) || snapshot.more);
+				send(frameSnapshot(snapshot.info, snapshot.entries, snapshot.leafId, more, snapshot.resume));
+				const covered = new Set(snapshot.covered);
+				for (const item of buffer) {
+					if (!covered.has(item.key)) send(item.frame);
+				}
+				buffer.length = 0;
+				bytes = 0;
+				const overflow = overflowed;
+				overflowed = false;
+				if (!overflow || attempt >= 2) break;
+				// Overflowed while waiting: ask the cursor for exactly what was dropped.
+				// With no leaf yet (empty session) the next pass takes a fresh window.
+				resumeFrom = snapshot.leafId ?? undefined;
+			}
+			buffering = false;
+
+			// Requests that timed out while this browser was away: offer the recorded
+			// re-ask card without pretending Pi is still waiting.
+			for (const request of await hub.pendingReasks(info.id)) {
+				if (gen !== generation || closed || parked) return;
+				send(frameReask(request));
+			}
+
+			void hub
+				.footer(info.id)
+				.then((footer) => {
+					if (gen === generation && !closed) send(JSON.stringify({ t: "footer", footer }));
+				})
+				.catch(() => {
+					// Detached between attach and footer: the status frame already says so.
+				});
+
+			// Discoverable commands for the `/` menu: fetched once per attach (the
+			// client caches them) and off the snapshot path.
+			void hub
+				.commands(info.id)
+				.then((commands) => {
+					if (gen === generation && !closed) send(frameCommands(commands));
+				})
+				.catch(() => {
+					// A child that just went away simply leaves the menu on the static catalog.
+				});
+		} catch (error) {
+			if (gen === generation && !closed) send(frameError((error as Error).message));
+		}
+	}
+
 	// Bind before the attach await: "load earlier" may arrive while the child
 	// is still booting, and a listener added later would drop that frame.
 	ws.on("message", (data) => {
-		void handleCommand(String(data), active, hub, send, log);
+		const raw = String(data);
+		let message: Record<string, unknown>;
+		try {
+			message = JSON.parse(raw) as Record<string, unknown>;
+		} catch {
+			void handleCommand(raw, active, hub, send, log);
+			return;
+		}
+		if (message["t"] === "park") {
+			if (closed || parked) return;
+			parked = true;
+			generation += 1;
+			clearSubs();
+			return;
+		}
+		if (message["t"] === "resume") {
+			if (closed) return;
+			parked = false;
+			void attach(typeof message["since"] === "string" ? message["since"] : undefined, true, false);
+			return;
+		}
+		if (parked) {
+			send(frameError("socket is parked"));
+			return;
+		}
+		void handleCommand(raw, active, hub, send, log);
 	});
 
-	try {
-		// A reconnect that carries a cursor already has a transcript: skip the
-		// provisional repaint and resume from the durable entry cursor instead.
-		// Otherwise paint the bounded JSONL window before the child boots.
-		const cursor = url.searchParams.get("since") ?? undefined;
-		const base = cursor ? null : await hub.window(sessionId);
-		const hasBase = Boolean(base && (base.leafId !== null || base.entries.length > 0));
-		if (hasBase && base) {
-			// A stopped session is about to be attached; saying `starting` avoids a
-			// flash of the wake card. A live green/yellow session keeps its real
-			// state so the composer can be used immediately.
-			const info = base.info.state === "stopped" ? { ...base.info, state: "starting" as const } : base.info;
-			send(frameSnapshot(info, base.entries, base.leafId, base.more));
-		}
-		const info = await hub.attach(sessionId);
-		active.id = info.id;
-		// The index-only path lands on a new Pi id: tell the client before the
-		// snapshot so its URL and session key keep pointing at this transcript.
-		if (info.id !== sessionId) send(frameOpened(info));
-		// Policy is per session (cwd + data dir + CLI), so it goes on the session
-		// socket, not on the list; the composer needs it before the first submit.
-		send(framePolicy(hub.policy(info.id)));
-		// Addon status/widgets are fire-and-forget: replay the current cache so a
-		// late tab sees the same footer without waiting for the extension to emit.
-		for (const frame of hub.addonUiFrames(info.id)) send(frame);
-
-		// Subscribe *before* `get_entries` and buffer what the child emits in
-		// between, so a client connecting mid-turn cannot miss the start of a
-		// message. Records without an entry identity (status, UI dialogs) are
-		// order-independent and go out immediately.
-		const buffer: Array<{ frame: string; key: string }> = [];
-		let bytes = 0;
-		let overflowed = false;
-		let buffering = true;
-		subscriptions.push(
-			hub.subscribe(info.id, (frame, key) => {
-				if (!key || !buffering) {
-					send(frame);
-					return;
-				}
-				buffer.push({ frame, key });
-				bytes += frame.length;
-				if (bytes > LIVE_BUFFER_BYTES || buffer.length > LIVE_BUFFER_FRAMES) {
-					// Bounded recovery below: close the gap with the durable cursor
-					// instead of holding an unbounded turn in memory.
-					overflowed = true;
-					buffer.length = 0;
-					bytes = 0;
-				}
-			}),
-		);
-		subscriptions.push(hub.watch((frame) => send(frame)));
-
-		let resumeFrom = cursor ?? (hasBase ? (base?.leafId ?? undefined) : undefined);
-		const piWindow = !cursor && !hasBase;
-		for (let attempt = 0; ; attempt += 1) {
-			const snapshot = await requestSnapshot(hub, info.id, resumeFrom, log, piWindow && attempt === 0);
-			if (hasBase && base) snapshot.covered = [...new Set([...coverageKeys(base.entries), ...snapshot.covered])];
-			const more = snapshot.resume ? snapshot.more : Boolean((hasBase && base?.more) || snapshot.more);
-			send(frameSnapshot(snapshot.info, snapshot.entries, snapshot.leafId, more, snapshot.resume));
-			const covered = new Set(snapshot.covered);
-			for (const item of buffer) {
-				if (!covered.has(item.key)) send(item.frame);
-			}
-			buffer.length = 0;
-			bytes = 0;
-			const overflow = overflowed;
-			overflowed = false;
-			if (!overflow || attempt >= 2) break;
-			// Overflowed while waiting: ask the cursor for exactly what was dropped.
-			// With no leaf yet (empty session) the next pass takes a fresh window.
-			resumeFrom = snapshot.leafId ?? undefined;
-		}
-		buffering = false;
-
-		// Requests that timed out while this browser was away: offer the recorded
-		// re-ask card without pretending Pi is still waiting.
-		for (const request of await hub.pendingReasks(info.id)) send(frameReask(request));
-
-		void hub
-			.footer(info.id)
-			.then((footer) => {
-				send(JSON.stringify({ t: "footer", footer }));
-			})
-			.catch(() => {
-				// Detached between attach and footer: the status frame already says so.
-			});
-
-		// Discoverable commands for the `/` menu: fetched once per attach (the
-		// client caches them) and off the snapshot path.
-		void hub
-			.commands(info.id)
-			.then((commands) => send(frameCommands(commands)))
-			.catch(() => {
-				// A child that just went away simply leaves the menu on the static catalog.
-			});
-	} catch (error) {
-		send(frameError((error as Error).message));
-	}
+	const cursor = url.searchParams.get("since") ?? undefined;
+	void attach(cursor, Boolean(cursor), true);
 }
 
 async function handleCommand(

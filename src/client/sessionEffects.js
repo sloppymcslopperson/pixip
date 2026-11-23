@@ -5,7 +5,7 @@ import { installDeps } from "./configure.js";
 import { applyInfo } from "./sessionView.js";
 import { closePlan, openedPlan, snapshotPlan, statusPlan } from "./sessionPlan.js";
 import { toast } from "./toast.js";
-import { connect, send } from "./transport.js";
+import { connect, rekeyConnection, send } from "./transport.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
 
@@ -93,6 +93,7 @@ export function handleOpened(frame) {
 		// An index-only session reattached under a new Pi id: keep this socket
 		// and transcript, and move the URL to the new id without reconnecting.
 		if (plan.changed) state.sessionCache.delete(plan.previousId);
+		if (plan.changed) rekeyConnection(plan.previousId, plan.id);
 		state.sessionId = plan.id;
 		if (frame.session) state.info = frame.session;
 		history.replaceState(null, "", `#s=${encodeURIComponent(plan.id)}`);

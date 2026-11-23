@@ -7,6 +7,7 @@ import { finishBash } from "./composerBash.js";
 import { handleOpened, handleRestarting, handleSnapshot, handleStatus } from "./sessionEffects.js";
 import { failPendingSession } from "./session.js";
 import { renderFooter } from "./sessionView.js";
+import { closeSession, connectionState } from "./transport.js";
 import { listSessions } from "./dashboardApi.js";
 import { renderList } from "./dashboardList.js";
 import { state } from "./kernel/state.js";
@@ -17,7 +18,58 @@ import { dropSurface, handleNeedTime, handleReasks } from "./surface.js";
 import { applyFullEntry, handleEvent, prependHistory, renderTranscript } from "./transcript.js";
 import { toast } from "./toast.js";
 
-export function handleFrame(frame) {
+/** A parked session that stopped, errored or vanished no longer owns a socket. */
+function evictStoppedParked(sessions) {
+	const list = Array.isArray(sessions) ? sessions : [];
+	for (const id of connectionState().parked) {
+		if (!id) continue;
+		const match = list.find((session) => session.id === id || session.logicalId === id);
+		if (!match || match.state === "stopped" || match.state === "error") closeSession(id);
+	}
+}
+
+/** Frames from a parked/background session update its cache, never this route. */
+function handleBackgroundFrame(sessionId, frame) {
+	if (frame.t === "opened" && frame.rekey === true) {
+		// `/new` moved this Pi id: the warm socket is stale, so drop it and let
+		// activation reconnect through the normal path.
+		closeSession(sessionId);
+		state.sessionCache.delete(sessionId);
+		return;
+	}
+	const cached = state.sessionCache.get(sessionId);
+	if (!cached) return;
+	switch (frame.t) {
+		case "status":
+			if (frame.session) cached.info = frame.session;
+			break;
+		case "footer":
+			cached.footer = frame.footer;
+			break;
+		case "policy":
+			cached.policy = frame.policy;
+			break;
+		case "commands":
+			cached.commands = Array.isArray(frame.commands) ? [...frame.commands] : [];
+			break;
+		case "queue":
+			cached.queue = {
+				steering: Array.isArray(frame.steering) ? [...frame.steering] : [],
+				followUp: Array.isArray(frame.followUp) ? [...frame.followUp] : [],
+			};
+			break;
+		default:
+			break;
+	}
+}
+
+export function handleFrame(fromSessionId, frame) {
+	// The dashboard socket (null) is global; a session socket that is not the
+	// current route is a parked background socket.
+	if (fromSessionId && fromSessionId !== state.sessionId) {
+		handleBackgroundFrame(fromSessionId, frame);
+		return;
+	}
 	switch (frame.t) {
 		case "hello":
 			if (!state.sessionId) {
@@ -28,6 +80,7 @@ export function handleFrame(frame) {
 			break;
 		case "sessions": {
 			const sessions = Array.isArray(frame.sessions) ? frame.sessions : [];
+			evictStoppedParked(sessions);
 			if (!state.sessionId) {
 				renderList(sessions, state.defaultCwd, state.home);
 				break;

@@ -182,6 +182,46 @@ async function measureSocket(base, id) {
 	return { warm: median(warm), resume: median(resume) };
 }
 
+/** Park an attached socket, then resume it on the same WebSocket. */
+function parkResumeOnce(base, id) {
+	return new Promise((resolve) => {
+		const ws = new WebSocket(`${base}ws?session=${id}`);
+		let attached = false;
+		let cursor = null;
+		let started = null;
+		const finish = (value) => {
+			ws.close();
+			resolve(value);
+		};
+		ws.on("message", (raw) => {
+			const frame = JSON.parse(String(raw));
+			if (frame.t === "snapshot") {
+				cursor = frame.leafId ?? cursor;
+				if (started !== null && frame.resume) finish(performance.now() - started);
+				return;
+			}
+			if (frame.t === "commands" && !attached) {
+				attached = true;
+				started = performance.now();
+				ws.send(JSON.stringify({ t: "park" }));
+				ws.send(JSON.stringify({ t: "resume", since: cursor }));
+			}
+			if (frame.t === "error") finish(null);
+		});
+		ws.on("error", () => finish(null));
+		setTimeout(() => finish(null), 15_000);
+	});
+}
+
+async function measureParkResume(base, id) {
+	const runs = [];
+	for (let run = 0; run < 5; run += 1) {
+		log(`  park/resume run ${run + 1}/5`);
+		runs.push(await parkResumeOnce(base, id));
+	}
+	return median(runs);
+}
+
 async function createOnce(base) {
 	const started = performance.now();
 	const hello = await new Promise((resolve, reject) => {
@@ -231,6 +271,7 @@ async function browserRun(base, id, createBusy) {
 				}),
 		);
 	const switchRuns = [];
+	const parkRuns = [];
 	const reloadRuns = [];
 	for (let run = 0; run < 5; run += 1) {
 		await page.goto(`${base}#s=${id}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
@@ -252,6 +293,18 @@ async function browserRun(base, id, createBusy) {
 		await paint();
 		reloadRuns.push(performance.now() - started);
 	}
+	for (let run = 0; run < 5; run += 1) {
+		await page.goto(`${base}#s=${id}`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+		await page.waitForFunction(() => document.querySelector("#log .block"), { timeout: 30_000 });
+		await page.click("#back");
+		await page.waitForSelector(".group-rows .row-open", { timeout: 30_000 });
+		const started = await page.evaluate(() => performance.now());
+		await page.click(".group-rows .row-open");
+		await page.waitForFunction(() => !document.querySelector("#session").hidden, { timeout: 30_000 });
+		await page.waitForFunction(() => document.querySelector("#log .block"), { timeout: 30_000 });
+		await paint();
+		parkRuns.push(await page.evaluate((start) => performance.now() - start, started));
+	}
 	let createRun = null;
 	if (createBusy) {
 		await page.goto(`${base}`, { waitUntil: "networkidle2", timeout: 30_000 });
@@ -264,7 +317,7 @@ async function browserRun(base, id, createBusy) {
 		createRun = await page.evaluate((start) => performance.now() - start, started);
 	}
 	await browser.close();
-	return { switch: median(switchRuns), reload: median(reloadRuns), create: createRun };
+	return { switch: median(switchRuns), park: median(parkRuns), reload: median(reloadRuns), create: createRun };
 }
 
 // -------------------------------------------------------------------- main
@@ -282,6 +335,8 @@ try {
 	await socketTimings(`${base}ws?session=${fixture.id}`);
 	log("measuring switch/resume...");
 	const socket = await measureSocket(base, fixture.id);
+	log("measuring park/resume on one socket...");
+	socket.parkResume = await measureParkResume(base, fixture.id);
 	log("measuring create alone...");
 	const createAlone = await createOnce(base);
 
@@ -335,10 +390,12 @@ try {
 	};
 	verdict("switch (window)", socket.warm, PASS_MS);
 	verdict("resume (cursor)", socket.resume, PASS_MS);
+	verdict("park/resume (socket)", socket.parkResume, PASS_MS);
 	verdict("create alone", createAlone.ready, 1500);
 	if (createBusy) verdict("create busy", createBusy.ready, 1500);
 	if (browser) {
 		verdict("browser switch", browser.switch, PASS_MS);
+		verdict("browser park return", browser.park, PASS_MS);
 		verdict("browser reload", browser.reload, PASS_MS);
 		verdict("browser create", browser.create, 1500);
 	}

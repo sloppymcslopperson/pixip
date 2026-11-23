@@ -27,6 +27,7 @@ import {
 	failPendingSession,
 	forgetCachedSession,
 	openSession,
+	parkCurrentSession,
 } from "./session.js";
 import { dismissSheet } from "./sheetShell.js";
 import { configureSheets, handleUiRequest, openSessionSheet, sheet } from "./sheets.js";
@@ -365,7 +366,7 @@ ui.log.addEventListener("click", (event) => {
  *  notices get a dismissible sheet instead. */
 
 configureComposer({ surfaceOpen });
-configureDashboard({ clearPendingAttachment, resetSurface });
+configureDashboard({ cacheCurrentSession, clearPendingAttachment, parkCurrentSession, resetSurface });
 configureDashboardList({ archiveInactive, openSessionActions });
 configureDashboardSettings({ sheet });
 configureMenu({ submit });

@@ -48,6 +48,16 @@ export function copyQueue(queue) {
 	};
 }
 
+/** A parked surface keeps its request/queue state, not its live DOM. */
+export function copySurface(surface) {
+	if (!surface) return null;
+	return {
+		active: surface.active ?? null,
+		queued: Array.isArray(surface.queued) ? [...surface.queued] : [],
+		collapsed: surface.collapsed === true,
+	};
+}
+
 /** Normalise the per-session view snapshot before it goes into the cache. */
 export function snapshotSession(view) {
 	return {
@@ -57,9 +67,13 @@ export function snapshotSession(view) {
 		stick: view?.stick !== false,
 		info: view?.info ?? null,
 		footer: view?.footer ?? null,
+		policy: view?.policy ?? null,
+		commands: Array.isArray(view?.commands) ? [...view.commands] : [],
 		addon: view?.addon ?? null,
 		queue: copyQueue(view?.queue),
 		input: typeof view?.input === "string" ? view.input : "",
+		lastEntryId: typeof view?.lastEntryId === "string" ? view.lastEntryId : null,
+		surface: copySurface(view?.surface),
 	};
 }
 
@@ -72,8 +86,12 @@ export function restoreSession(cached) {
 		stick: cached?.stick !== false,
 		info: cached?.info ?? null,
 		footer: cached?.footer ?? null,
+		policy: cached?.policy ?? null,
+		commands: Array.isArray(cached?.commands) ? [...cached.commands] : [],
 		addon: cached?.addon ?? null,
 		queue: copyQueue(cached?.queue),
 		input: typeof cached?.input === "string" ? cached.input : "",
+		lastEntryId: typeof cached?.lastEntryId === "string" ? cached.lastEntryId : null,
+		surface: copySurface(cached?.surface),
 	};
 }

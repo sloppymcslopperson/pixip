@@ -1,5 +1,6 @@
 ---
 project: pixip
+grilled: true
 ---
 
 Park green/yellow session sockets when switching away so returning needs no WebSocket handshake. Paint the cached transcript immediately, mute the parked stream, and resume with a cursor delta when the session becomes active again.
@@ -62,3 +63,26 @@ Measured from the owner's phone over cell: HTTP RTT median **123 ms** (p95 266, 
 
 - Background event application and per-session client state; tracked separately.
 - A multiplexed single socket, a warm child pool, or Pi changes.
+
+### Grilling decisions (2026-11-23)
+
+- Dashboard socket: keep one session-less dashboard socket for the page lifetime, separate from session sockets. Create it lazily on the first dashboard/`#new` need and reuse it; returning to the list does not pay a handshake. A cold `#s=` load may start without it.
+- Resume replay: policy, addon frames, pending re-asks, the resume snapshot through the existing buffer/coverage path, footer, then commands. Skip the provisional JSONL window.
+- Parked frames: follow the ticket literally. `park` fully unsubscribes the session subscription and list watcher, so no event, list, status, footer or policy frames reach a parked socket. The rekey listener is the one exception below.
+- Rekey choice A: keep the socket's `hub.onRekey` listener while parked. A `/new` sends `opened(rekey)`; the client closes that parked socket and deletes its cache, and activation reconnects normally. Old Pi ids can remain listed as stopped, so a sessions-frame disappearance check is not reliable.
+- Parkable states: `idle` and `busy` only. `starting`, `stopped` and `error` close the socket.
+- Pending UI: keep the active surface/request and queue state in the session cache and hidden while parked; restore it on return, with the hub pending-UI replay reconciling. Never answer a request while parked. Store request/queue state, not live A2UI DOM; re-render on return.
+- Verification: build all listed checks: connection-manager unit tests, server park/resume integration tests, a browser-check switch-away/back flow at both viewports, a reconnect-bench switch-away/back case, and the ARCHITECTURE.md update.
+- Routing assumption: `send()` targets the active session socket, or the dashboard socket when no session is active. `park`/`resume` are valid only on session sockets. A parked socket that closes is evicted silently and its cache entry is retained. The LRU cap is the active socket plus two parked sockets.
+
+### Result
+
+Implemented the keyed connection manager, dashboard/session separation, park/resume protocol and server lifecycle, cached policy/commands/surface state, background-frame cache updates, rekey invalidation, and stale-parked eviction from the live session list.
+
+Verification:
+
+- `env -u PIXIP_INSIDE -u PIXIP_SESSION_ID npm run check` green (352 tests, typecheck, lint, Prettier, import guard; browser check skipped because `PIXIP_CHROME` is unset). The daemon tests fail only when the caller's `PIXIP_INSIDE=1` leaks into them, so the check was run with it unset.
+- `node tools/reconnect-bench.mjs --no-busy`: switch 14 ms, cursor resume 10 ms, same-socket park/resume **3 ms**, create alone 903 ms.
+- New coverage: `test/transport.test.js` (keyed sockets, park/resume, LRU, silent parked close, active close, rekey, routing), `test/park-resume.test.ts` (no events/list frames while parked, cursor delta, no new spawn, parked command rejected, rekey frame), and `test/sessionCache.test.js` (parked control fields and surface copy).
+- Added `runParkFlow` to `tools/browser-check.mjs` (counts WebSocket constructions and asserts switch-away/back adds none) and a same-socket park/resume plus browser park-return row to `tools/reconnect-bench.mjs`.
+- `ARCHITECTURE.md` now documents the park/resume path, protocol rows, LRU/park rules, rekey behaviour, and the cell RTT/handshake measurements.

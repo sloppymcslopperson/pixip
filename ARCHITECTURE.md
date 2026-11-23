@@ -158,7 +158,24 @@ an 8.4 MB frame, while the bounded window is tens of milliseconds.
 
 A reconnect that carries a durable cursor skips the JSONL window entirely and
 requests only the delta. Resume deltas are capped and marked the same way. Older
-history comes from the JSONL through `earlier` windows of 200 entries. The client
+history comes from the JSONL through `earlier` windows of 200 entries.
+
+Switching away from a live green/yellow session **parks** its socket instead of
+closing it. The client keeps keyed connections: the session-less dashboard key
+stays separate, and the active session plus up to two parked sessions
+(`PARKED_LIMIT = 2` in `src/client/transport.js`) are live WebSockets. `park`
+removes that socket's session subscription and list watcher but keeps the
+WebSocket and its rekey listener; no event, list, status, footer or policy frame
+reaches a parked socket. `resume {since}` replays policy and addon frames,
+re-subscribes (which also replays unanswered UI requests), requests
+`snapshot(since=<lastEntryId>)` through the same buffer/coverage path used by
+attach, then sends footer and commands. A parked socket that dies is evicted
+silently: only the active socket owns the reconnect/backoff path. A `/new` in
+another tab still reaches a parked socket as `opened` with `rekey`; the client
+closes it, drops the cache entry, and activation reconnects normally. Returning
+repaints the cached transcript synchronously and sends `resume` on the warm
+socket, so the network cost is one round trip plus the delta rather than a
+WebSocket handshake. The client
 keeps windows the user already loaded, dedupes by entry id and holds
 `scrollHeight - scrollTop` constant so a prepend never moves the view. Expanding
 a truncated block asks for that one full entry (`entry` frame), read backwards
@@ -218,6 +235,8 @@ Client → hub:
 | `compact`                                | `instructions?`                             | `compact` (`customInstructions`)                                                                                                                             |
 | `set_session_name`                       | `name`                                      | `set_session_name`                                                                                                                                           |
 | `new_session`                            | –                                           | `new_session`; the hub re-keys and sends `opened` with `rekey`                                                                                               |
+| `park`                                   | –                                           | keep the WebSocket open, remove the session subscription and list watcher; the socket stays eligible for `resume`                                            |
+| `resume`                                 | `since` (entry id, optional)                | re-subscribe, replay policy/addon/pending UI, then send a `resume` snapshot with the cursor delta; footer and commands follow                                |
 | `resnapshot`                             | –                                           | full `snapshot` with `replace: true`                                                                                                                         |
 | `copy`                                   | –                                           | `get_last_assistant_text`, answered with a `copy` frame                                                                                                      |
 | `set_model_query` / `set_thinking_query` | `query`                                     | resolve against `get_available_models` / levels, then set                                                                                                    |
@@ -507,15 +526,22 @@ label is never applied over a name that appeared while the one-shot call ran.
 | reconnect → bounded JSONL window (11 MB / 1,200 entries)        | **8–45 ms**                       |
 | switch green/yellow → window + resume delta                     | **7–43 ms**                       |
 | reconnect with durable cursor → delta                           | **5–24 ms**                       |
+| park/resume on one warm socket → delta (loopback)               | **~3 ms**                         |
 | create → composer ready, alone                                  | **0.94–1.05 s**                   |
 | create → composer ready, another agent busy streaming           | **1.28 s**                        |
 | "load earlier" (200 entries from the JSONL, 17 MB session)      | 54–77 ms                          |
 | cold page load (browser, empty session) → transcript painted    | ~230 ms                           |
 | cold page load (browser, 200-entry window) → transcript painted | ~430–550 ms                       |
 
+The owner's phone over cell measured HTTP RTT median **123 ms** (p95 266, max 490) and a WebSocket handshake median **239 ms**, against a loopback baseline of
+4.7 ms and 13.6 ms. Park/resume removes the handshake from a switch-away/back, so
+that return is roughly one RTT plus the delta instead of a handshake plus the
+window.
+
 The reconnect/create rows are from `tools/reconnect-bench.mjs` on an 11 MB
 synthetic session, median of five socket runs against a local daemon with a real
-`pi` child. Before the bounded window, the authoritative `get_entries` call took
+`pi` child. The bench also measures `park`/`resume` on one socket and a browser
+switch-away/back when Chromium is available. Before the bounded window, the authoritative `get_entries` call took
 4.6 s warm / 7.2 s cold and produced an 8.4 MB frame. The browser paint rows are
 older measurements from a synthetic 17 MB session; the bench measures paint too
 when `PIXIP_CHROME` is set, but the CI box in this checkout had no Chromium
@@ -572,7 +598,8 @@ still the only way to make the child itself fast, and is deliberately not done
 - Idle detach: `agent_settled` (or a fresh attach that is already idle) starts a
   timer; on expiry the child is closed and its JSONL kept.
 - Reattach is on demand: opening the session re-spawns with `--session <file>`.
-- No server-side transcript buffering; one socket per client; no fan-out copies.
+- No server-side transcript buffering; one socket per route (dashboard plus
+  active/parked sessions); no fan-out copies.
 - Measured: hub 92 MB RSS with one live child on this box (Node baseline is most
   of it).
 
@@ -628,7 +655,7 @@ protocol path is still one obvious place to start:
 | `src/client/{addonUi,transcriptScale,transcriptScroll,transcriptWindow}.js` | addon status/widget cache, transcript text scale, pure scroll math, window planning                                        |
 | `src/client/{directoryPicker,sessionCache,sessionInfo,sessionGroups}.js`    | pure path math, session cache persistence, session info, cwd grouping                                                      |
 | `src/client/{markdown,render,attachments,commands,tree,footer}.js`          | pure/markup helpers: markdown, HTML painting, attachment encoding, command catalog, session tree, footer formatting        |
-| `src/client/{menu,controls,toast,transport}.js`                             | menus/queue, scale/refresh controls, notices, websocket                                                                    |
+| `src/client/{menu,controls,toast,transport}.js`                             | menus/queue, scale/refresh controls, notices, keyed websocket manager with park/resume                                     |
 | `tools/check-client-imports.mjs`                                            | client import-graph guard: cycles, `app.js` imports and feature-cluster boundaries                                         |
 | `tools/browser-check.mjs`                                                   | scripted client flows at 390x844 and 1280x900 against an in-process fixture Hub                                            |
 | `tools/shot.mjs` / `tools/build-a2ui.mjs`                                   | screenshot/layout probe, and the pinned A2UI bundle rebuild                                                                |

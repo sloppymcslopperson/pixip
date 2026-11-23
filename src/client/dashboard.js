@@ -14,10 +14,17 @@ import { ui } from "./kernel/ui.js";
 let deps;
 
 export function configureDashboard(next) {
-	deps = installDeps("dashboard", "configureDashboard", next, ["clearPendingAttachment", "resetSurface"]);
+	deps = installDeps("dashboard", "configureDashboard", next, [
+		"cacheCurrentSession",
+		"clearPendingAttachment",
+		"parkCurrentSession",
+		"resetSurface",
+	]);
 }
 
 export async function showList() {
+	deps.cacheCurrentSession();
+	deps.parkCurrentSession();
 	state.sessionId = null;
 	ui.jump.hidden = true;
 	state.info = null;

@@ -336,6 +336,34 @@ async function runHistoryFlow(page, base, sessionId) {
 	await checkNoOverflow(page, "history windows");
 }
 
+async function runParkFlow(page, base, sessionId) {
+	// Count WebSocket constructions: returning to a parked session must not add one.
+	await page.evaluateOnNewDocument(() => {
+		const Native = window.WebSocket;
+		window.__pixipSockets = 0;
+		window.WebSocket = new Proxy(Native, {
+			construct(target, args) {
+				window.__pixipSockets += 1;
+				return new target(...args);
+			},
+		});
+	});
+	await page.goto(`${base}#s=${sessionId}`, { waitUntil: "domcontentloaded", timeout: FLOW_TIMEOUT });
+	await waitForSession(page);
+	const beforeBack = await page.evaluate(() => window.__pixipSockets);
+	await page.click("#back");
+	await page.waitForSelector(`.row[data-id="${sessionId}"] .row-open`, { timeout: FLOW_TIMEOUT });
+	await page.waitForFunction(() => !document.querySelector("#list").hidden, { timeout: FLOW_TIMEOUT });
+	const onList = await page.evaluate(() => window.__pixipSockets);
+	assert.ok(onList > beforeBack, "leaving the session opens the dashboard socket");
+
+	await page.click(`.row[data-id="${sessionId}"] .row-open`);
+	await waitForSession(page);
+	const backInSession = await page.evaluate(() => window.__pixipSockets);
+	assert.equal(backInSession, onList, "returning to a parked session opens no new WebSocket");
+	await checkNoOverflow(page, "parked session return");
+}
+
 async function runViewport(browser, base, fixture, viewport) {
 	const page = await browser.newPage();
 	const problems = [];
@@ -356,6 +384,7 @@ async function runViewport(browser, base, fixture, viewport) {
 		await runSelectFlow(page, base, fixture.sessionId, fixture.hub, fixture.paths);
 		await runPanelFlow(page, base, fixture.sessionId);
 		await runHistoryFlow(page, base, fixture.sessionId);
+		await runParkFlow(page, base, fixture.sessionId);
 		await delay(50);
 		assert.deepEqual(problems, [], `${viewport.width}px browser problems`);
 	} finally {

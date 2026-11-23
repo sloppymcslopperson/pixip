@@ -93,4 +93,25 @@ describe("session snapshot and restore", () => {
 		queue.steering.push("b");
 		assert.deepEqual(copied, { steering: ["a"], followUp: [] });
 	});
+
+	it("keeps the parked control fields and a surface copy", () => {
+		const surface = { active: { id: "ask-1" }, queued: [{ id: "ask-2" }], collapsed: true };
+		const snapshot = snapshotSession({
+			policy: { allow: [], deny: ["rm"], bash: true },
+			commands: [{ name: "fit" }],
+			lastEntryId: "e9",
+			surface,
+		});
+		surface.queued.push({ id: "ask-3" });
+		assert.deepEqual(snapshot.commands, [{ name: "fit" }]);
+		assert.equal(snapshot.lastEntryId, "e9");
+		assert.deepEqual(snapshot.surface.queued, [{ id: "ask-2" }]);
+
+		const restored = restoreSession(snapshot);
+		assert.deepEqual(restored.policy, { allow: [], deny: ["rm"], bash: true });
+		assert.deepEqual(restored.commands, [{ name: "fit" }]);
+		assert.equal(restored.lastEntryId, "e9");
+		assert.equal(restored.surface.active.id, "ask-1");
+		assert.equal(restored.surface.collapsed, true);
+	});
 });

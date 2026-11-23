@@ -8,7 +8,8 @@ import { pendingErrorHtml, pendingSessionHtml } from "./render.js";
 import { updateJump } from "./scroll.js";
 import { applyInfo, renderFooter } from "./sessionView.js";
 import { readingDistance, restoreSession, snapshotSession } from "./sessionCache.js";
-import { connect, send } from "./transport.js";
+import { restoreSurface, surfaceStatus } from "./surface.js";
+import { closeSession, connect, park, resume, send } from "./transport.js";
 import { lastEntryId } from "./transcriptWindow.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
@@ -24,10 +25,14 @@ export function configureSession(next) {
 }
 
 export function beginNewSession(cwd) {
+	cacheCurrentSession();
+	parkCurrentSession();
+	// The dashboard socket is session-less and always kept separate; the
+	// `opened` frame will carry the new id.
+	connect(null);
 	state.pendingCreate = { cwd };
 	history.pushState(null, "", "#new");
 	showPendingSession();
-	// The dashboard socket is still open; the `opened` frame will carry the id.
 	send({ t: "create", cwd });
 }
 
@@ -95,6 +100,7 @@ export function failPendingSession(message) {
 export function openSession(id) {
 	if (state.sessionId === id) return;
 	cacheCurrentSession();
+	parkCurrentSession();
 	state.pendingCreate = null;
 	state.sessionId = id;
 	state.restarting = false;
@@ -138,9 +144,20 @@ export function openSession(id) {
 		restoreCachedSession(cached);
 		// The page already holds this transcript: resume from its last entry
 		// instead of paying for the full window again.
-		cursor = lastEntryId(state.entries);
+		cursor = cached.lastEntryId ?? lastEntryId(state.entries);
 	} else ui.input.value = "";
-	connect(id, cursor);
+	// A warm parked socket needs only `resume`; anything else reconnects (or
+	// attaches a stopped/cold session) through the normal path.
+	if (!resume(id, cursor)) connect(id, cursor);
+}
+
+/** Cache the active view and park or close its socket before leaving the route. */
+export function parkCurrentSession() {
+	const id = state.sessionId;
+	if (!id) return;
+	const kind = state.info?.state;
+	if ((kind === "idle" || kind === "busy") && park(id)) return;
+	closeSession(id);
 }
 
 export function cacheCurrentSession() {
@@ -155,9 +172,13 @@ export function cacheCurrentSession() {
 			stick: state.stick,
 			info: state.info,
 			footer: state.footer,
+			policy: state.policy,
+			commands: state.dynamicCommands,
 			addon: state.addon,
 			queue: state.queue,
 			input: ui.input.value,
+			lastEntryId: lastEntryId(state.entries),
+			surface: surfaceStatus(),
 		}),
 	);
 }
@@ -169,18 +190,22 @@ export function restoreCachedSession(cached) {
 	state.stick = restored.stick;
 	state.info = restored.info;
 	state.footer = restored.footer;
+	state.policy = restored.policy;
+	state.dynamicCommands = restored.commands;
 	state.addon = restored.addon ?? createAddonUi();
 	state.queue = restored.queue;
 	ui.input.value = restored.input;
 	deps.renderTranscript(restored.distance ?? (state.stick ? ui.log.clientHeight : null));
 	renderQueue();
 	renderFooter();
+	restoreSurface(restored.surface);
 	if (state.info) applyInfo();
 	resize();
 }
 
 export function forgetCachedSession(session) {
 	if (!session) return;
+	closeSession(session.id);
 	state.sessionCache.delete(session.id);
 	if (typeof session.logicalId === "string") state.sessionCache.delete(session.logicalId);
 }
