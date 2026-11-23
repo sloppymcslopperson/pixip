@@ -5,6 +5,7 @@ import { markdownToHtml } from "../src/client/markdown.js";
 import {
 	ansiToHtml,
 	bashCardHtml,
+	bashStartCard,
 	escapeHtml,
 	pendingErrorHtml,
 	pendingSessionHtml,
@@ -225,5 +226,22 @@ describe("pending new session", () => {
 			pendingErrorHtml("<boom>"),
 			'<div class="block meta error pending-session">could not start session: &lt;boom&gt;</div>',
 		);
+	});
+});
+
+describe("bash start card", () => {
+	it("carries the command, exclusion and running state", () => {
+		const state = bashStartCard("ls -la", true);
+		assert.deepEqual(state, {
+			command: "ls -la",
+			output: "",
+			exitCode: null,
+			cancelled: false,
+			truncated: false,
+			excludeFromContext: true,
+			running: true,
+		});
+		assert.match(bashCardHtml(state), /running…/);
+		assert.match(bashCardHtml(state), /excluded/);
 	});
 });

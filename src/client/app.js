@@ -1,5 +1,6 @@
 import { looksLikeImage } from "./attachments.js";
-import { chooseAttachment, setAttachMenu, submit } from "./composer.js";
+import { submit } from "./composer.js";
+import { chooseAttachment, setAttachMenu } from "./composerAttachments.js";
 import {
 	bindScaleButton,
 	closeMenu,
@@ -12,7 +13,8 @@ import {
 } from "./controls.js";
 import { showList } from "./dashboard.js";
 import { openSettingsSheet } from "./dashboardSettings.js";
-import { handleFrame, handleTransportClose } from "./frames.js";
+import { handleFrame } from "./frames.js";
+import { handleTransportClose } from "./sessionEffects.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
 import { chooseMenu, moveMenu, renderMenu } from "./menu.js";

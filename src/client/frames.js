@@ -2,26 +2,19 @@
 // never import this module; the composition root installs it as the transport's
 // frame/close handler.
 import { copyText } from "./clipboard.js";
-import { applyPolicy, clearPendingAttachment, finishBash, renderReplace } from "./composer.js";
-import { applyInfo, renderFooter } from "./controls.js";
+import { applyPolicy } from "./composer.js";
+import { finishBash } from "./composerBash.js";
+import { handleOpened, handleRestarting, handleSnapshot, handleStatus } from "./sessionEffects.js";
+import { failPendingSession } from "./session.js";
+import { renderFooter } from "./controls.js";
 import { listSessions } from "./dashboardApi.js";
 import { renderList } from "./dashboardList.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
 import { renderMenu, restoreClearedQueue } from "./menu.js";
-import { failPendingSession, openSession } from "./session.js";
 import { openExportSheet, openModelSheet, openThinkingSheet, openTreeSheet } from "./sheets.js";
-import {
-	appendRestartNotice,
-	handleEvent,
-	lastEntryId,
-	prependHistory,
-	renderResume,
-	renderSnapshot,
-	renderTranscript,
-} from "./transcript.js";
+import { handleEvent, prependHistory, renderTranscript } from "./transcript.js";
 import { toast } from "./toast.js";
-import { connect, send } from "./transport.js";
 
 export function handleFrame(frame) {
 	switch (frame.t) {
@@ -50,91 +43,21 @@ export function handleFrame(frame) {
 			}
 			break;
 		}
-		case "snapshot": {
-			const wasRestarting = state.restarting;
-			const interrupted = wasRestarting && state.restartWasBusy;
-			if (wasRestarting) {
-				state.restarting = false;
-				state.restartWasBusy = false;
-				state.restartNoticePending = true;
-				// The old child was aborted: drop the live/optimistic DOM references,
-				// then repaint from entries so a half-rendered turn or a prompt that
-				// never reached Pi cannot survive as a ghost block.
-				state.streaming = null;
-				state.pendingUser = null;
-			}
-			state.info = frame.session;
-			if (frame.resume === true) renderResume(frame.entries ?? []);
-			else if (frame.replace === true) renderReplace(frame.entries ?? [], frame.more === true);
-			else renderSnapshot(frame.entries ?? [], frame.more === true);
-			if (wasRestarting) renderTranscript();
-			applyInfo();
-			if (state.restartNoticePending) {
-				state.restartNoticePending = false;
-				appendRestartNotice(interrupted);
-			}
+		case "snapshot":
+			handleSnapshot(frame);
 			break;
-		}
 		case "restarting":
-			state.restarting = true;
-			state.restartWasBusy = Boolean(state.streaming || state.info?.state === "busy" || state.pendingUser);
-			applyInfo();
-			toast("pixip restarting…");
+			handleRestarting();
 			break;
 		case "history":
 			prependHistory(frame.entries ?? [], frame.more === true);
 			break;
 		case "status":
-			if (frame.session?.id === state.sessionId || !state.sessionId) {
-				state.info = frame.session;
-				applyInfo();
-				if (state.quitting && frame.session.state === "stopped") {
-					state.quitting = false;
-					location.hash = "";
-				}
-			}
+			handleStatus(frame);
 			break;
-		case "opened": {
-			const id = frame.session?.id;
-			if (typeof id !== "string") break;
-			if (state.pendingCreate) {
-				// The pending view already owns the screen; swap the URL and connect.
-				state.pendingCreate = null;
-				state.sessionId = null;
-				history.replaceState(null, "", `#s=${encodeURIComponent(id)}`);
-				openSession(id);
-				break;
-			}
-			if (state.sessionId && state.ws) {
-				// An index-only session reattached under a new Pi id: keep this socket
-				// and transcript, and move the URL to the new id without reconnecting.
-				const previousId = state.sessionId;
-				const changed = previousId !== id;
-				if (changed) state.sessionCache.delete(previousId);
-				state.sessionId = id;
-				if (frame.session) state.info = frame.session;
-				history.replaceState(null, "", `#s=${encodeURIComponent(id)}`);
-				if (frame.rekey === true && changed) {
-					// `/new` in the same child: the old transcript belongs to a
-					// different session, so ask for a replacement window.
-					state.sessionCache.delete(id);
-					state.entries = [];
-					state.more = false;
-					state.tools.clear();
-					state.streaming = null;
-					state.pendingUser = null;
-					clearPendingAttachment();
-					state.bashRunning = false;
-					state.bash.clear();
-					ui.log.textContent = "";
-					send({ t: "resnapshot" });
-				}
-				applyInfo();
-			} else {
-				location.hash = `s=${encodeURIComponent(id)}`;
-			}
+		case "opened":
+			handleOpened(frame);
 			break;
-		}
 		case "copy":
 			void copyText(frame.text);
 			break;
@@ -200,16 +123,4 @@ export function handleFrame(frame) {
 		default:
 			break;
 	}
-}
-
-/** Socket close: reconnect with the durable cursor, or fail a pending create. */
-export function handleTransportClose() {
-	if (state.pendingCreate) {
-		failPendingSession("daemon disconnected");
-		return;
-	}
-	if (!state.sessionId) return;
-	const delay = Math.min(2000, 200 * 2 ** state.retries++);
-	toast(state.restarting ? `pixip restarting — reconnecting… (${delay}ms)` : `reconnecting… (${delay}ms)`);
-	setTimeout(() => connect(state.sessionId, lastEntryId()), delay);
 }

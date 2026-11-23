@@ -1,9 +1,10 @@
 // Client session module; shared state lives in kernel/state.js.
 import { createAddonUi } from "./addonUi.js";
-import { clearPendingAttachment } from "./composer.js";
+import { clearPendingAttachment } from "./composerAttachments.js";
 import { applyInfo, closeMenu, renderFooter, renderQueue, resize, updateJump } from "./controls.js";
 import { pendingErrorHtml, pendingSessionHtml } from "./render.js";
 import { resetSurface } from "./surface.js";
+import { readingDistance, restoreSession, snapshotSession } from "./sessionCache.js";
 import { renderTranscript } from "./transcript.js";
 import { connect, send } from "./transport.js";
 import { state } from "./kernel/state.js";
@@ -127,31 +128,33 @@ export function openSession(id) {
 export function cacheCurrentSession() {
 	const id = state.sessionId;
 	if (!id) return;
-	state.sessionCache.set(id, {
-		entries: state.entries,
-		more: state.more,
-		distance: state.stick ? ui.log.clientHeight : ui.log.scrollHeight - ui.log.scrollTop,
-		stick: state.stick,
-		info: state.info,
-		footer: state.footer,
-		addon: state.addon,
-		queue: { steering: [...state.queue.steering], followUp: [...state.queue.followUp] },
-		input: ui.input.value,
-	});
+	state.sessionCache.set(
+		id,
+		snapshotSession({
+			entries: state.entries,
+			more: state.more,
+			distance: readingDistance(state.stick, ui.log.clientHeight, ui.log.scrollHeight, ui.log.scrollTop),
+			stick: state.stick,
+			info: state.info,
+			footer: state.footer,
+			addon: state.addon,
+			queue: state.queue,
+			input: ui.input.value,
+		}),
+	);
 }
 
 export function restoreCachedSession(cached) {
-	state.entries = Array.isArray(cached.entries) ? cached.entries : [];
-	state.more = Boolean(cached.more);
-	state.stick = cached.stick !== false;
-	state.info = cached.info ?? null;
-	state.footer = cached.footer ?? null;
-	state.addon = cached.addon ?? createAddonUi();
-	state.queue = cached.queue
-		? { steering: [...cached.queue.steering], followUp: [...cached.queue.followUp] }
-		: { steering: [], followUp: [] };
-	ui.input.value = cached.input ?? "";
-	renderTranscript(cached.distance ?? (state.stick ? ui.log.clientHeight : null));
+	const restored = restoreSession(cached);
+	state.entries = restored.entries;
+	state.more = restored.more;
+	state.stick = restored.stick;
+	state.info = restored.info;
+	state.footer = restored.footer;
+	state.addon = restored.addon ?? createAddonUi();
+	state.queue = restored.queue;
+	ui.input.value = restored.input;
+	renderTranscript(restored.distance ?? (state.stick ? ui.log.clientHeight : null));
 	renderQueue();
 	renderFooter();
 	if (state.info) applyInfo();

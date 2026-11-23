@@ -34,3 +34,46 @@ export function createSessionCache(limit = 8) {
 		},
 	};
 }
+
+/** Distance from the bottom used to restore the reading position. */
+export function readingDistance(stick, clientHeight, scrollHeight, scrollTop) {
+	return stick ? clientHeight : scrollHeight - scrollTop;
+}
+
+/** Queues are copied so a cached session cannot alias the live chip arrays. */
+export function copyQueue(queue) {
+	return {
+		steering: Array.isArray(queue?.steering) ? [...queue.steering] : [],
+		followUp: Array.isArray(queue?.followUp) ? [...queue.followUp] : [],
+	};
+}
+
+/** Normalise the per-session view snapshot before it goes into the cache. */
+export function snapshotSession(view) {
+	return {
+		entries: Array.isArray(view?.entries) ? [...view.entries] : [],
+		more: Boolean(view?.more),
+		distance: Number.isFinite(view?.distance) ? view.distance : null,
+		stick: view?.stick !== false,
+		info: view?.info ?? null,
+		footer: view?.footer ?? null,
+		addon: view?.addon ?? null,
+		queue: copyQueue(view?.queue),
+		input: typeof view?.input === "string" ? view.input : "",
+	};
+}
+
+/** Normalise a cache hit for state and the first repaint. */
+export function restoreSession(cached) {
+	return {
+		entries: Array.isArray(cached?.entries) ? [...cached.entries] : [],
+		more: Boolean(cached?.more),
+		distance: Number.isFinite(cached?.distance) ? cached.distance : null,
+		stick: cached?.stick !== false,
+		info: cached?.info ?? null,
+		footer: cached?.footer ?? null,
+		addon: cached?.addon ?? null,
+		queue: copyQueue(cached?.queue),
+		input: typeof cached?.input === "string" ? cached.input : "",
+	};
+}

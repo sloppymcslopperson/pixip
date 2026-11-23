@@ -2,7 +2,7 @@
 // session list to dashboardList. HTTP, rendering, picker and settings live in
 // dashboardApi, dashboardList, dashboardPicker and dashboardSettings.
 import { createAddonUi } from "./addonUi.js";
-import { clearPendingAttachment } from "./composer.js";
+import { clearPendingAttachment } from "./composerAttachments.js";
 import { closeMenu, renderQueue } from "./controls.js";
 import { fetchInfo, listSessions } from "./dashboardApi.js";
 import { renderList } from "./dashboardList.js";

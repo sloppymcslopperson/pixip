@@ -257,6 +257,19 @@ export function renderMessage(message, entryId) {
  * Used live (optimistic card, then the final frame) and from snapshots, so a
  * reload repaints the same card.
  */
+/** State for the optimistic bash card shown before the hub answers. */
+export function bashStartCard(command, excludeFromContext) {
+	return {
+		command,
+		output: "",
+		exitCode: null,
+		cancelled: false,
+		truncated: false,
+		excludeFromContext,
+		running: true,
+	};
+}
+
 export function bashCardHtml(message) {
 	const command = message.command ?? "";
 	const output = textOf(message.output ?? message.content ?? "");
