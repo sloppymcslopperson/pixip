@@ -563,35 +563,57 @@ still the way to make the child itself fast, and is deliberately not done (1 vCP
 The hub and client are split along the same seams a Rust port needs, so the
 protocol path is still one obvious place to start:
 
-| module                                           | owns                                                                                                                       |
-| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| `src/backend.ts`                                 | the spawn seam; the default backend creates `pi --mode rpc`, and `pixip-pi-host` can replace it without changing hub state |
-| `src/rpc.ts`                                     | LF framing, response correlation, original-record passthrough                                                              |
-| `src/hub.ts`                                     | public `Hub` facade and shared state; one method per operation                                                             |
-| `src/hubLive.ts`                                 | one child: spawn, records/events, pending UI timers, footer, idle detach                                                   |
-| `src/hubStore.ts`                                | `sessions.json`, JSONL disk scan, archive/trash store, restore                                                             |
-| `src/hubControl.ts`                              | snapshot/history, prompt/steer, queue/bash, policy, soft refresh                                                           |
-| `src/hubSession.ts`                              | model/thinking/name, tree/fork/clone/import, `/new` re-key, UI replay                                                      |
-| `src/jsonl.ts`                                   | pure parse/window/truncate/coverage helpers (unit-tested)                                                                  |
-| `src/sessionIndex.ts`                            | index/archive/trash record shapes and normalization                                                                        |
-| `src/wire.ts`                                    | the frame constructors; the protocol table above is authoritative                                                          |
-| `src/client/app.js`                              | composition root: boot, DOM listeners, transport/navigation wiring; imports all features and exports nothing               |
-| `src/client/frames.js`                           | protocol adapter: one frame switch, routed to feature handlers, plus socket-close reconnect                                |
-| `src/client/navigation.js`                       | explicit route/navigation intents (`openSession`, `showList`, session cache helpers) installed by the composition root     |
-| `src/client/kernel/state.js`                     | the one flat shared state container; slices are connection, dashboard, session, composer, addon/panel                      |
-| `src/client/kernel/ui.js`                        | the `$` helper and static element map for the shell in `index.html`                                                        |
-| `src/client/{sheetShell,clipboard,sendState}.js` | small seams: modal shell primitives, clipboard helpers, composer send-state selectors                                      |
-| `src/client/dashboard.js`                        | session list, groups, directory picker, settings/archive                                                                   |
-| `src/client/session.js`                          | open/cache/restore, frame routing, new-session shell                                                                       |
-| `src/client/transcript.js`                       | snapshot/windows, live events, footer, thinking state                                                                      |
-| `src/client/sheets.js`                           | app-owned modal sheets (settings/model/tree/export/directory/notices) and `notify` routing                                 |
-| `src/client/surface.js`                          | inline blocking-request surface: queue, collapse, Replace banner, answer/cancel                                            |
-| `src/client/surfaceQueue.js`                     | DOM-free active/queued request queue used by `surface.js`                                                                  |
-| `src/client/panelHost.js`                        | generic `panel` renderer registry, fallback card, draft snapshot/restore in `sessionStorage`                               |
-| `src/client/a2ui.js`                             | A2UI adapter: lazy bundle import, v1.0 lifecycle, action JSON, fallback and draft hooks                                    |
-| `src/client/vendor/a2ui.esm.js`                  | prebuilt A2UI v1.0 Lit renderer + Basic catalog, lazy-loaded; license and rebuild note beside it                           |
-| `src/client/composer.js`                         | attachments, composer, built-in commands, bash cards                                                                       |
-| `src/client/{menu,controls,toast,transport}.js`  | menus/queue, scale/refresh controls, notices, websocket                                                                    |
+| module                                                                      | owns                                                                                                                       |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `src/backend.ts`                                                            | the spawn seam; the default backend creates `pi --mode rpc`, and `pixip-pi-host` can replace it without changing hub state |
+| `src/rpc.ts`                                                                | LF framing, response correlation, original-record passthrough                                                              |
+| `src/hub.ts`                                                                | public `Hub` facade and shared state; one method per operation                                                             |
+| `src/hubLive.ts`                                                            | one child: spawn, records/events, pending UI timers, footer, idle detach                                                   |
+| `src/hubStore.ts`                                                           | `sessions.json`, JSONL disk scan, archive/trash store, restore                                                             |
+| `src/hubControl.ts`                                                         | snapshot/history, prompt/steer, queue/bash, policy, soft refresh                                                           |
+| `src/hubSession.ts`                                                         | model/thinking/name, tree/fork/clone/import, `/new` re-key, UI replay                                                      |
+| `src/jsonl.ts`                                                              | pure parse/window/truncate/coverage helpers (unit-tested)                                                                  |
+| `src/sessionIndex.ts`                                                       | index/archive/trash record shapes and normalization                                                                        |
+| `src/wire.ts`                                                               | the frame constructors; the protocol table above is authoritative                                                          |
+| `src/client/app.js`                                                         | composition root: boot, DOM listeners, transport/navigation wiring; imports all features and exports nothing               |
+| `src/client/frames.js`                                                      | protocol adapter: one frame switch, routed to feature handlers, plus socket-close reconnect                                |
+| `src/client/navigation.js`                                                  | explicit route/navigation intents (`openSession`, `showList`, session cache helpers) installed by the composition root     |
+| `src/client/kernel/state.js`                                                | the one flat shared state container; slices are connection, dashboard, session, composer, addon/panel                      |
+| `src/client/kernel/ui.js`                                                   | the `$` helper and static element map for the shell in `index.html`                                                        |
+| `src/client/{sheetShell,clipboard,sendState}.js`                            | small seams: modal shell primitives, clipboard helpers, composer send-state selectors                                      |
+| `src/client/dashboard.js`                                                   | dashboard surface: list shell, archive/delete actions, settings entry                                                      |
+| `src/client/dashboardApi.js`                                                | dashboard HTTP surface: sessions, archives, directories, uploads                                                           |
+| `src/client/dashboardList.js`                                               | dashboard session list and cwd groups                                                                                      |
+| `src/client/dashboardPicker.js`                                             | directory picker sheet transitions and DOM                                                                                 |
+| `src/client/dashboardSettings.js`                                           | settings, archive and trash sheets                                                                                         |
+| `src/client/dashboardModel.js`                                              | pure dashboard view model (no DOM, HTTP or kernel state)                                                                   |
+| `src/client/session.js`                                                     | open/cache/restore and the new-session shell                                                                               |
+| `src/client/sessionEffects.js`                                              | snapshot/restart/status/re-key/socket-close frame effects                                                                  |
+| `src/client/sessionPlan.js`                                                 | pure frame-effect plans used by `session.js` and `sessionEffects.js`                                                       |
+| `src/client/transcript.js`                                                  | snapshot/windows, live events, footer, thinking state                                                                      |
+| `src/client/sheets.js`                                                      | app-owned modal sheets (settings/model/tree/export/directory/notices) and `notify` routing                                 |
+| `src/client/surface.js`                                                     | inline blocking-request surface: queue, collapse, Replace banner, answer/cancel                                            |
+| `src/client/surfaceQueue.js`                                                | DOM-free active/queued request queue used by `surface.js`                                                                  |
+| `src/client/panelHost.js`                                                   | generic `panel` renderer registry, fallback card, draft snapshot/restore in `sessionStorage`                               |
+| `src/client/a2ui.js`                                                        | A2UI adapter: lazy bundle import, v1.0 lifecycle, action JSON, fallback and draft hooks                                    |
+| `src/client/vendor/a2ui.esm.js`                                             | prebuilt A2UI v1.0 Lit renderer + Basic catalog, lazy-loaded; license and rebuild note beside it                           |
+| `src/client/composer.js`                                                    | composer orchestration, built-in commands                                                                                  |
+| `src/client/composerAttachments.js`                                         | attachment choose/render/prepare/upload lifecycle                                                                          |
+| `src/client/composerBash.js`                                                | optimistic bash cards plus the hub's authoritative result                                                                  |
+| `src/client/scroll.js`                                                      | shared transcript scroll seam: the only writer of the `#log` reading position                                              |
+| `src/client/menuView.js`                                                    | command-menu visibility seam shared by composer/session/dashboard                                                          |
+| `src/client/composerInput.js`                                               | composer field clear/resize primitives shared by composer and bash                                                         |
+| `src/client/queueView.js`                                                   | queue-chip rendering shared by dashboard/session/menu/transcript                                                           |
+| `src/client/transcriptView.js`                                              | append-only transcript DOM primitives other features may use                                                               |
+| `src/client/sessionView.js`                                                 | header/status/footer chrome and the busy indicator                                                                         |
+| `src/client/configure.js`                                                   | `installDeps` for the per-module `configureX({ ...callbacks })` boundaries                                                 |
+| `src/client/{addonUi,transcriptScale,transcriptScroll,transcriptWindow}.js` | addon status/widget cache, transcript text scale, pure scroll math, window planning                                        |
+| `src/client/{directoryPicker,sessionCache,sessionInfo,sessionGroups}.js`    | pure path math, session cache persistence, session info, cwd grouping                                                      |
+| `src/client/{markdown,render,attachments,commands,tree,footer}.js`          | pure/markup helpers: markdown, HTML painting, attachment encoding, command catalog, session tree, footer formatting        |
+| `src/client/{menu,controls,toast,transport}.js`                             | menus/queue, scale/refresh controls, notices, websocket                                                                    |
+| `tools/check-client-imports.mjs`                                            | client import-graph guard: cycles, `app.js` imports and feature-cluster boundaries                                         |
+| `tools/browser-check.mjs`                                                   | scripted client flows at 390x844 and 1280x900 against an in-process fixture Hub                                            |
+| `tools/shot.mjs` / `tools/build-a2ui.mjs`                                   | screenshot/layout probe, and the pinned A2UI bundle rebuild                                                                |
 
 CSS is split into `base`, `transcript`, `list`, `status`, `composer`, `sheets` and
 `surface` files loaded in that order: one asset set, no bundler and no
@@ -605,12 +627,32 @@ and no per-feature stores. `kernel/ui.js` owns the single element map; feature
 modules import state or UI nodes from the kernel instead of re-querying the DOM
 or reaching into `app.js`.
 
-`src/client/app.js` is the only composition root: it imports the features and
-installs the transport and navigation handlers, then boots. Features import the
-module that owns a symbol (kernel, a pure helper, or the feature that genuinely
-owns it); they never import `app.js` and the dependency graph has no cycles.
-Dashboard <-> session changes go through `navigation.js` intents, and hub frames
-enter through `frames.js`. There is no event bus.
+`src/client/app.js` is the only composition root: it imports the features,
+installs their `configureX({ ...callbacks })` boundaries, wires transport and
+navigation, then boots. `frames.js` is the only protocol adapter: it may import
+feature handlers because it routes each hub frame to them, and features never
+import it. Everyone else — including other features — talks to a feature through
+the callbacks its `configureX` function accepts; there is no global ports
+object, no service locator and no event bus. Shared code moves down into a
+module both sides import (kernel, pure helpers, and the `scroll`, `menuView`,
+`composerInput`, `queueView`, `transcriptView` and `sessionView` seams) rather
+than becoming another callback.
+
+The feature clusters are dashboard (`dashboard`, `dashboardApi`,
+`dashboardList`, `dashboardPicker`, `dashboardSettings`, `dashboardModel`),
+session (`session`, `sessionEffects`, `sessionPlan`) and composer (`composer`,
+`composerAttachments`, `composerBash`). Allowed edges: features may import
+kernel, pure/domain helpers, shared seams, and same-cluster siblings; they must
+not import another cluster. Only `app.js` and `frames.js` may import a feature
+module at all. Nothing imports `app.js`, and the graph has no cycles.
+
+`tools/check-client-imports.mjs` is the executable copy of that rule; the
+cluster map lives in that file and nowhere else. `npm run check:imports` fails
+on a cycle, an `app.js` import, a cross-cluster feature import, or a non-feature
+module importing a feature handler. `tools/browser-check.mjs` is the runtime
+counterpart: it drives the real client through dashboard, composer, inline
+`select`, A2UI panel and transcript-window flows at 390x844 and 1280x900, failing
+on page/console errors or horizontal overflow.
 
 ## Rust port map
 

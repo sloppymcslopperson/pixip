@@ -222,6 +222,11 @@ It runs at 390x844 and 1280x900 and fails on page errors, console errors or
 horizontal overflow. `npm run check` includes it; without `PIXIP_CHROME` it
 prints a skip and exits 0 so a box without Chromium stays green.
 
+`tools/check-client-imports.mjs` is the client import guard (`npm run
+check:imports`): no cycles, nothing imports `app.js`, and only `app.js`/`frames.js`
+may import feature modules. Its cluster map is the source of truth for the
+dashboard/session/composer boundaries; see the module map in `ARCHITECTURE.md`.
+
 ## Layout
 
 ```
@@ -241,6 +246,7 @@ src/wire.ts         hub <-> browser frames (v1)
 src/server.ts       http + ws, static client
 src/client/         index.html, split CSS, and app/dashboard/session/transcript/
                     sheets/composer/menu/controls/toast/transport modules
+tools/              layout/browser checks and the import-graph guard
 test/               shared harness plus protocol/rpc/ANSI/render tests
 ```
 
