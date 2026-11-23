@@ -1,0 +1,1 @@
+Change the questionnaire's A2UI footer action label from "Submit" to "Submit all". Update the questionnaire surface builder, the A2UI questionnaire fixture and any surface tests that assert the label. Scope is the questionnaire only; other surface submit buttons are unchanged.
