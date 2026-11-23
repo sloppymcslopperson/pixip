@@ -5,6 +5,7 @@ import {
 	addPendingReask,
 	parseReaskReply,
 	pendingUiKey,
+	publicReask,
 	readPendingReasks,
 	removePendingReask,
 	type PendingUiRecord,
@@ -33,6 +34,8 @@ describe("pending re-ask records", () => {
 		assert.equal(parseReaskReply("YES"), true);
 		assert.equal(parseReaskReply("No, do not re-ask it."), false);
 		assert.equal(parseReaskReply("maybe later"), undefined);
+		assert.equal(parseReaskReply("Timeout fired; the prompt says YES or NO"), undefined);
+		assert.equal(parseReaskReply("**YES**"), true);
 	});
 
 	it("stores, reads and removes records by logical session", async () => {
@@ -40,6 +43,7 @@ describe("pending re-ask records", () => {
 		const key = pendingUiKey({ id: "pi-1", logicalId: "logical-1" });
 		await addPendingReask(dir, key, record);
 		assert.deepEqual(await readPendingReasks(dir, key), [record]);
+		assert.deepEqual(publicReask({ ...record, draft: { answers: { a: 1 } } }).draft, { answers: { a: 1 } });
 		await removePendingReask(dir, key, "ui-1");
 		assert.deepEqual(await readPendingReasks(dir, key), []);
 	});

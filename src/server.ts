@@ -679,6 +679,11 @@ async function handleCommand(
 				hub.uiResponse(sessionId, requestId, fields);
 				break;
 			}
+			case "ui_more_time": {
+				const requestId = String(message["id"] ?? "");
+				hub.moreTime(sessionId, requestId, message["more"] === true, message["draft"]);
+				break;
+			}
 			case "reask": {
 				const requestId = String(message["id"] ?? "");
 				await hub.reask(active.id ?? sessionId, requestId, String(message["action"] ?? "ask"));

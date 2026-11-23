@@ -31,6 +31,7 @@ import {
 	frameReask,
 	frameRestarting,
 	frameSessions,
+	frameNeedTime,
 	frameStatus,
 	frameUiTimeout,
 } from "./wire.ts";
@@ -79,6 +80,8 @@ export interface HubOptions {
 	 * the timeout; default 10 hours so a work day fits.
 	 */
 	pendingUiOpenTimeoutMs?: number;
+	/** How long the "more time?" card waits for an answer. Default 2 minutes. */
+	pendingUiMoreTimeMs?: number;
 	/** Extra environment for every child; `process.env` is inherited first. */
 	env?: Record<string, string | undefined>;
 	/** Spawn seam for the RPC host; defaults to the real `pi --mode rpc` child. */
@@ -105,6 +108,7 @@ interface PendingUiRequest {
 	raw: string;
 	startedAt: number;
 	timer?: NodeJS.Timeout;
+	moreTimer?: NodeJS.Timeout;
 }
 
 interface ReaskAsk {
@@ -496,12 +500,58 @@ export function armPendingUiTimer(this: any, live: LiveSession, pending: Pending
 		pending.timer = setTimeout(() => {
 			pending.timer = undefined;
 			if (live.pendingUi?.get(id) !== pending) return;
+			if (live.subs.size > 0) {
+				this.offerMoreTime(live, pending, timeoutMs);
+				return;
+			}
 			live.pendingUi.delete(id);
-			void this.expirePendingUi(live, pending, timeoutMs, live.subs.size > 0);
+			void this.expirePendingUi(live, pending, timeoutMs, false);
 		}, remaining);
 		pending.timer.unref();
 		return;
 	}
+}
+
+export function offerMoreTime(this: any, live: LiveSession, pending: PendingUiRequest, timeoutMs: number): void {
+	if (pending.moreTimer) return;
+	const record = pending.request;
+	const title =
+		typeof record.title === "string"
+			? record.title
+			: typeof record.message === "string"
+				? record.message
+				: typeof (record.payload as { title?: unknown } | undefined)?.title === "string"
+					? String((record.payload as { title?: unknown }).title)
+					: pending.method;
+	this.options.log(`ui request ${String(record.id ?? "")} reached its timeout; asking for more time`);
+	this.broadcast(live, frameNeedTime(String(record.id ?? ""), pending.method, title, timeoutMs));
+	pending.moreTimer = setTimeout(() => {
+		pending.moreTimer = undefined;
+		this.finishMoreTime(live, pending, false);
+	}, this.pendingUiMoreTimeMs);
+	pending.moreTimer.unref();
+}
+
+export function finishMoreTime(
+	this: any,
+	live: LiveSession,
+	pending: PendingUiRequest,
+	more: boolean,
+	draft?: unknown,
+): void {
+	if (pending.moreTimer) {
+		clearTimeout(pending.moreTimer);
+		pending.moreTimer = undefined;
+	}
+	if (live.pendingUi?.get(String(pending.request.id ?? "")) !== pending) return;
+	if (more) {
+		pending.startedAt = Date.now();
+		this.armPendingUiTimer(live, pending);
+		this.options.log(`ui request ${String(pending.request.id ?? "")} given more time`);
+		return;
+	}
+	live.pendingUi.delete(String(pending.request.id ?? ""));
+	void this.expirePendingUi(live, pending, this.pendingUiOpenTimeoutMs, true, draft);
 }
 
 export async function expirePendingUi(
@@ -510,6 +560,7 @@ export async function expirePendingUi(
 	pending: PendingUiRequest,
 	timeoutMs: number,
 	attached: boolean,
+	draft?: unknown,
 ): Promise<void> {
 	const record: PendingUiRecord = {
 		id: String(pending.request.id ?? ""),
@@ -518,6 +569,7 @@ export async function expirePendingUi(
 		...(live.info.logicalId ? { logicalId: live.info.logicalId } : {}),
 		cwd: live.info.cwd,
 		request: pending.request,
+		...(draft !== undefined ? { draft } : {}),
 		raw: pending.raw,
 		timedOutAt: new Date().toISOString(),
 		timeoutMs,
@@ -541,7 +593,7 @@ export async function expirePendingUi(
 	this.clearReaskAsk(live);
 	live.reaskAsk = ask;
 	try {
-		await this.prompt(live.info.id, timeoutQuestionPrompt(record));
+		await this.prompt(live.info.id, timeoutQuestionPrompt(record), "followUp");
 	} catch (error) {
 		this.options.log(`ui request ${record.id} timeout prompt failed: ${(error as Error).message}`);
 	}
@@ -586,6 +638,13 @@ export async function pendingReasks(this: any, id: string): Promise<ReturnType<t
 	return records.map(publicReask);
 }
 
+export function moreTime(this: any, id: string, requestId: string, more: boolean, draft?: unknown): void {
+	const live = this.require(id);
+	const pending = live.pendingUi?.get(requestId);
+	if (!pending) return;
+	this.finishMoreTime(live, pending, more, draft);
+}
+
 export async function reask(this: any, id: string, requestId: string, action: string): Promise<void> {
 	const live = this.require(id);
 	const dataDir = this.options.dataDir ?? dirname(this.options.sessionsDir);
@@ -598,7 +657,7 @@ export async function reask(this: any, id: string, requestId: string, action: st
 		return;
 	}
 	if (action !== "ask") throw new Error(`unknown re-ask action ${action}`);
-	await this.prompt(id, reaskPrompt(record));
+	await this.prompt(id, reaskPrompt(record), "followUp");
 	await removePendingReask(dataDir, key, requestId);
 }
 
@@ -616,9 +675,10 @@ export function clearPendingUi(this: any, live: LiveSession, id?: string): void 
 }
 
 export function clearPendingUiTimer(this: any, pending: PendingUiRequest): void {
-	if (!pending.timer) return;
-	clearTimeout(pending.timer);
+	if (pending.timer) clearTimeout(pending.timer);
 	pending.timer = undefined;
+	if (pending.moreTimer) clearTimeout(pending.moreTimer);
+	pending.moreTimer = undefined;
 }
 
 export function cacheAddonUi(

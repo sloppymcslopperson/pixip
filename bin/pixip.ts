@@ -57,6 +57,8 @@ interface Options {
 	pendingUiTimeoutMs: number;
 	/** Blocking UI timeout with a browser attached; 0 disables. */
 	pendingUiOpenTimeoutMs: number;
+	/** How long the "more time?" card waits; 0 disables. */
+	pendingUiMoreTimeMs: number;
 	titleModel: string;
 	dev: boolean;
 	allowCommands: string[];
@@ -88,6 +90,7 @@ function parseArgs(argv: string[]): Options {
 		idleMs: 15 * 60_000,
 		pendingUiTimeoutMs: 5 * 60 * 60_000,
 		pendingUiOpenTimeoutMs: 10 * 60 * 60_000,
+		pendingUiMoreTimeMs: 2 * 60_000,
 		titleModel: process.env["PIXIP_TITLE_MODEL"] ?? "",
 		dev: false,
 		allowCommands: [],
@@ -144,6 +147,9 @@ function parseArgs(argv: string[]): Options {
 				break;
 			case "--pending-ui-open-timeout-ms":
 				options.pendingUiOpenTimeoutMs = Number(next());
+				break;
+			case "--pending-ui-more-time-ms":
+				options.pendingUiMoreTimeMs = Number(next());
 				break;
 			case "--title-model":
 				options.titleModel = next();
@@ -202,6 +208,9 @@ function parseArgs(argv: string[]): Options {
 	if (!Number.isFinite(options.pendingUiOpenTimeoutMs) || options.pendingUiOpenTimeoutMs < 0) {
 		throw new Error("--pending-ui-open-timeout-ms must be 0 or more");
 	}
+	if (!Number.isFinite(options.pendingUiMoreTimeMs) || options.pendingUiMoreTimeMs < 0) {
+		throw new Error("--pending-ui-more-time-ms must be 0 or more");
+	}
 	if (!Number.isInteger(options.lines) || options.lines < 1) throw new Error("--lines must be 1 or more");
 	if (!Number.isFinite(options.timeoutS) || options.timeoutS < 0) throw new Error("--timeout must be 0 or more");
 	if (options.piHost === undefined && process.env["PIXIP_PI_HOST"]) {
@@ -228,6 +237,9 @@ function printHelp(): void {
   --pending-ui-open-timeout-ms <ms>
                       expire a blocking question while a browser is attached
                       (default 36000000 = 10h; 0 disables)
+  --pending-ui-more-time-ms <ms>
+                      how long the "more time?" card waits for an answer
+                      (default 120000 = 2m; 0 disables)
   --title-model <p/id> model for the automatic 3-5 word session label
                       (default: the session's current model; env: PIXIP_TITLE_MODEL)
   --dev               re-read client assets per request (no restart on CSS/JS edits)
@@ -287,6 +299,8 @@ function serveArgs(options: Options): string[] {
 		String(options.pendingUiTimeoutMs),
 		"--pending-ui-open-timeout-ms",
 		String(options.pendingUiOpenTimeoutMs),
+		"--pending-ui-more-time-ms",
+		String(options.pendingUiMoreTimeMs),
 	];
 	if (options.piHost !== undefined) {
 		args.push("--pi-host");
@@ -366,6 +380,7 @@ async function serve(options: Options): Promise<void> {
 		idleMs: options.idleMs,
 		pendingUiGraceMs: options.pendingUiTimeoutMs,
 		pendingUiOpenTimeoutMs: options.pendingUiOpenTimeoutMs,
+		pendingUiMoreTimeMs: options.pendingUiMoreTimeMs,
 		titleModel: options.titleModel,
 		extraPiArgs: [],
 		cliCommands: {

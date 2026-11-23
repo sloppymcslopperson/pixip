@@ -160,6 +160,25 @@ export function openPanel(request, body, api) {
 	return id;
 }
 
+/** Persist the current draft for a mounted panel without closing it. */
+export function savePanelDraft(id) {
+	try {
+		pending.get(id)?.save?.();
+	} catch {
+		// best effort: a broken renderer must not block the timeout path
+	}
+}
+
+/** Read a saved draft, for replay after a shelved panel is shown again. */
+export function panelDraft(id) {
+	return readDraft(id);
+}
+
+/** Seed a draft for a new panel id, used when a re-ask re-issues the same call. */
+export function setPanelDraft(id, draft) {
+	if (draft !== undefined) writeDraft(id, draft);
+}
+
 /** Remove a panel. `discard` drops its draft; otherwise it is kept for replay. */
 export function closePanel(id, { discard = false } = {}) {
 	const entry = pending.get(id);

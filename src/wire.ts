@@ -104,6 +104,16 @@ export function frameSnapshot(
 	return JSON.stringify(frame);
 }
 
+/** A blocking request is about to expire; ask the user whether to keep it. */
+export function frameNeedTime(id: string, method: string, title: string, timeoutMs: number): string {
+	return JSON.stringify({ t: "ui_need_time", id, method, title, timeoutMs });
+}
+
+/** Give the restored panel a draft saved when a timed-out panel was shelved. */
+export function framePanelDraft(id: string, draft: unknown): string {
+	return JSON.stringify({ t: "panel_draft", id, draft });
+}
+
 /** A blocking request expired; the client must drop its surface without answering. */
 export function frameUiTimeout(id: string): string {
 	return JSON.stringify({ t: "ui_timeout", id });

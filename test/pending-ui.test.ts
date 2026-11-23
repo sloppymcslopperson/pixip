@@ -49,10 +49,12 @@ async function boot(
 	paths: TestPaths,
 	pendingUiGraceMs = 1000,
 	env: Record<string, string> = {},
+	extra: Record<string, unknown> = {},
 ): Promise<{ hub: Hub; server: RunningServer; id: string; logicalId?: string; url: string }> {
 	const hub = hubFor(paths, {
 		pendingUiGraceMs,
 		reaskReplyMs: 1000,
+		...extra,
 		env: { FAKE_PI_ON_PROMPT: JSON.stringify(REQUEST), ...env },
 	});
 	const server = await startServer({
@@ -186,12 +188,45 @@ describe("pending extension UI", () => {
 						(record) => record["type"] === "prompt" && String(record["text"] ?? "").includes("Re-issue this same call"),
 					),
 				);
+				const reaskPrompt = (await spawns(paths)).find(
+					(record) => record["type"] === "prompt" && String(record["text"] ?? "").includes("Re-issue this same call"),
+				);
+				assert.equal(reaskPrompt?.["streamingBehavior"], "followUp");
 				await waitFor(async () => !(await exists(recordFile)));
 			} finally {
 				second.close();
 			}
 		} finally {
 			first.close();
+			await server.close();
+			await hub.shutdown();
+		}
+	});
+
+	it("offers more time before cancelling a visible dialog", async () => {
+		const paths = await fixtureRoot("pixip-pending-ui-", { logName: "rpc.jsonl" });
+		const { hub, server, id, url } = await boot(
+			paths,
+			1000,
+			{},
+			{
+				pendingUiOpenTimeoutMs: 80,
+				pendingUiMoreTimeMs: 1000,
+			},
+		);
+		const inbox = await connect(url, id);
+		try {
+			await waitFor(() => inbox.frames.some((frame) => frame["t"] === "snapshot"));
+			inbox.send({ t: "prompt", text: "go" });
+			await waitFor(() => uiRequests(inbox).length === 1);
+			await waitFor(() => inbox.frames.some((frame) => frame["t"] === "ui_need_time"));
+			// The dialog is still waiting: no cancelled response has been sent yet.
+			assert.equal((await loggedResponses(paths)).length, 0);
+			inbox.send({ t: "ui_more_time", id: "ui-1", more: true });
+			await new Promise((resolve) => setTimeout(resolve, 120));
+			assert.equal((await loggedResponses(paths)).length, 0);
+		} finally {
+			inbox.close();
 			await server.close();
 			await hub.shutdown();
 		}

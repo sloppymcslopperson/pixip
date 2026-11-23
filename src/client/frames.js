@@ -13,7 +13,7 @@ import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
 import { renderMenu, restoreClearedQueue } from "./menu.js";
 import { openExportSheet, openModelSheet, openThinkingSheet, openTreeSheet } from "./sheets.js";
-import { dropSurface, handleReasks } from "./surface.js";
+import { dropSurface, handleNeedTime, handleReasks } from "./surface.js";
 import { handleEvent, prependHistory, renderTranscript } from "./transcript.js";
 import { toast } from "./toast.js";
 
@@ -53,9 +53,14 @@ export function handleFrame(frame) {
 		case "history":
 			prependHistory(frame.entries ?? [], frame.more === true);
 			break;
+		case "ui_need_time":
+			handleNeedTime(frame);
+			toast("Question needs more time — keep it or shelve it");
+			break;
 		case "ui_timeout":
 			dropSurface(`reask:${String(frame.id ?? "")}`);
 			dropSurface(String(frame.id ?? ""));
+			toast("Question timed out — re-ask it if you still need it");
 			break;
 		case "reasks":
 			handleReasks(frame.requests ?? []);

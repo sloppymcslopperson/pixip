@@ -92,12 +92,6 @@
 	padding: 4px 10px;
 	font-size: 12px;
 }
-.reask-panel {
-	/* The recorded panel is evidence, not an input: only re-ask/dismiss act. */
-	pointer-events: none;
-	opacity: 0.86;
-	margin-bottom: 10px;
-}
 .surface-body {
 	/* Shrink to the panel cap and scroll instead of pushing the surface past
 	   its max-height; a short body keeps its content height. */

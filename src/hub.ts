@@ -60,6 +60,8 @@ export interface HubOptions {
 	 * the timeout; default 10 hours.
 	 */
 	pendingUiOpenTimeoutMs?: number;
+	/** How long the "more time?" card waits for an answer. Default 2 minutes. */
+	pendingUiMoreTimeMs?: number;
 	/** How long the timeout follow-up waits for the agent's YES/NO. Default 60 s. */
 	reaskReplyMs?: number;
 	/** Extra environment for every child; `process.env` is inherited first. */
@@ -88,6 +90,7 @@ interface PendingUiRequest {
 	raw: string;
 	startedAt: number;
 	timer?: NodeJS.Timeout;
+	moreTimer?: NodeJS.Timeout;
 }
 
 interface ReaskAsk {
@@ -148,6 +151,7 @@ export class Hub {
 	private readonly trashGraceMs: number;
 	private readonly pendingUiGraceMs: number;
 	private readonly pendingUiOpenTimeoutMs: number;
+	private readonly pendingUiMoreTimeMs: number;
 	private readonly reaskReplyMs: number;
 	/** Startup cleanup runs once; trash operations wait for it. */
 	private readonly startupTrash: Promise<void>;
@@ -162,6 +166,7 @@ export class Hub {
 		this.trashGraceMs = options.trashGraceMs ?? 60_000;
 		this.pendingUiGraceMs = options.pendingUiGraceMs ?? PENDING_UI_GRACE_MS;
 		this.pendingUiOpenTimeoutMs = options.pendingUiOpenTimeoutMs ?? PENDING_UI_OPEN_MS;
+		this.pendingUiMoreTimeMs = options.pendingUiMoreTimeMs ?? 120_000;
 		this.reaskReplyMs = options.reaskReplyMs ?? REASK_REPLY_MS;
 		this.startupTrash = this.purgeTrashOnStart();
 	}
@@ -530,6 +535,11 @@ export class Hub {
 		return await hubLive.pendingReasks.apply(this, arguments as any);
 	}
 
+	/** Answer the "more time?" card for one pending request. */
+	moreTime(id: string, requestId: string, more: boolean, draft?: unknown): void {
+		hubLive.moreTime.apply(this, arguments as any);
+	}
+
 	/** Re-ask or dismiss one recorded timed-out request. */
 	async reask(id: string, requestId: string, action: string): Promise<void> {
 		return await hubLive.reask.apply(this, arguments as any);
@@ -575,6 +585,14 @@ export class Hub {
 
 	private clearPendingUiTimer(pending: PendingUiRequest): void {
 		hubLive.clearPendingUiTimer.apply(this, arguments as any);
+	}
+
+	private offerMoreTime(live: LiveSession, pending: PendingUiRequest, timeoutMs: number): void {
+		hubLive.offerMoreTime.apply(this, arguments as any);
+	}
+
+	private finishMoreTime(live: LiveSession, pending: PendingUiRequest, more: boolean, draft?: unknown): void {
+		hubLive.finishMoreTime.apply(this, arguments as any);
 	}
 
 	private async expirePendingUi(

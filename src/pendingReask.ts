@@ -24,6 +24,8 @@ export interface PendingUiRecord {
 	cwd: string;
 	/** The extension request as Pi sent it, still re-issuable by the agent. */
 	request: Record<string, unknown>;
+	/** Unsent A2UI draft captured when the user shelved the request. */
+	draft?: unknown;
 	/** The original line, preserved verbatim. */
 	raw: string;
 	timedOutAt: string;
@@ -36,6 +38,7 @@ export interface ReaskRequest {
 	id: string;
 	method: string;
 	request: Record<string, unknown>;
+	draft?: unknown;
 	timedOutAt: string;
 	timeoutMs: number;
 	attached: boolean;
@@ -65,6 +68,7 @@ export function publicReask(record: PendingUiRecord): ReaskRequest {
 		id: record.id,
 		method: record.method,
 		request: record.request,
+		...(record.draft !== undefined ? { draft: record.draft } : {}),
 		timedOutAt: record.timedOutAt,
 		timeoutMs: record.timeoutMs,
 		attached: record.attached,
@@ -152,9 +156,11 @@ function isRecord(value: unknown): value is PendingUiRecord {
 
 /** `undefined` means the reply was not a clear yes/no; the caller defaults to yes. */
 export function parseReaskReply(text: string): boolean | undefined {
-	if (/\bno\b/i.test(text)) return false;
-	if (/\byes\b/i.test(text)) return true;
-	return undefined;
+	// Only the first word counts. Assistant prose often contains "YES or NO"
+	// (including this prompt's own wording), which must not read as a "no".
+	const match = /^\W*(yes|no)\b/i.exec(text);
+	if (!match) return undefined;
+	return match[1]?.toLowerCase() === "yes";
 }
 
 export function describeRequest(request: Record<string, unknown>): string {
