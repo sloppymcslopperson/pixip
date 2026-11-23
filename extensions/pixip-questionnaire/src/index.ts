@@ -2,7 +2,7 @@
  * Questionnaire tool for Pi.
  *
  * Transport order:
- * 1. `ctx.ui.panel(payload, { timeout })` from `pixip-pi-host`: build an A2UI
+ * 1. `ctx.ui.panel(payload, { signal })` from `pixip-pi-host`: build an A2UI
  *    v1.0 surface for pixip's inline panel and wait for the action. The A2UI
  *    Cancel button is an explicit cancel; a panel that closes with no message is
  *    an error, not a dismissal.
@@ -56,7 +56,6 @@ const QuestionnaireParams = Type.Object({
 	questions: Type.Array(QuestionSchema, { description: "Questions to ask in this questionnaire" }),
 });
 
-const PANEL_TIMEOUT_MS = 15 * 60 * 1000;
 const OTHER_CHOICE = "Type your own answer";
 const CHAT_CHOICE = "Answer this in chat";
 const ADD_CHOICE = "Add an item in chat";
@@ -137,7 +136,6 @@ export async function askWithPanel(
 	}
 	try {
 		const raw = await ui.panel(buildSurface(questions), {
-			timeout: PANEL_TIMEOUT_MS,
 			...(signal ? { signal } : {}),
 		});
 		return decodePanelValue(questions, raw);

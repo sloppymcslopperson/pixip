@@ -30,7 +30,7 @@ function queueUi(selects: Array<string | undefined>, inputs: Array<string | unde
 describe("askWithPanel", () => {
 	const list = questions({ id: "color", prompt: "Color", options: [{ value: "red", label: "Red" }] });
 
-	it("sends the surface with the 15 minute timeout and normalizes the action", async () => {
+	it("sends the surface without a panel timeout and normalizes the action", async () => {
 		let received: unknown;
 		const result = await askWithPanel(
 			{
@@ -46,7 +46,7 @@ describe("askWithPanel", () => {
 			list,
 			undefined,
 		);
-		assert.deepEqual(received, { timeout: 900_000 });
+		assert.deepEqual(received, {});
 		assert.equal(result.kind, "answered");
 		if (result.kind === "answered") assert.equal(result.answers[0]?.selected[0], "red");
 	});

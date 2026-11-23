@@ -11,7 +11,29 @@ import { type NameSource } from "./sessionIndex.ts";
 import { isBlockingUiMethod, SYMBOL_PENDING, coverageKey } from "./jsonl.ts";
 import { resolveSessionPolicy, type CommandLayer } from "./commands.ts";
 import { messageText } from "./titles.ts";
-import { frameError, frameEvent, frameFooter, frameRestarting, frameSessions, frameStatus } from "./wire.ts";
+import {
+	PENDING_UI_GRACE_MS,
+	PENDING_UI_OPEN_MS,
+	addPendingReask,
+	parseReaskReply,
+	pendingUiKey,
+	publicReask,
+	readPendingReasks,
+	reaskPrompt,
+	removePendingReask,
+	timeoutQuestionPrompt,
+	type PendingUiRecord,
+} from "./pendingReask.ts";
+import {
+	frameError,
+	frameEvent,
+	frameFooter,
+	frameReask,
+	frameRestarting,
+	frameSessions,
+	frameStatus,
+	frameUiTimeout,
+} from "./wire.ts";
 import type { CommandPolicy, FooterData, SessionInfo } from "./wire.ts";
 
 const run = promisify(execFile);
@@ -47,11 +69,16 @@ export interface HubOptions {
 	 */
 	promptTimeoutMs?: number;
 	/**
-	 * How long a blocking extension UI request waits after the last client
-	 * detaches before it is cancelled. A reconnect inside this window replays the
-	 * request instead. `0` disables the safety cancel; default 2 minutes.
+	 * How long a blocking extension UI request waits while no client is attached.
+	 * A reconnect inside this window replays the request instead. `0` disables the
+	 * timeout; default 5 hours.
 	 */
 	pendingUiGraceMs?: number;
+	/**
+	 * How long a blocking request waits while a browser is attached. `0` disables
+	 * the timeout; default 10 hours so a work day fits.
+	 */
+	pendingUiOpenTimeoutMs?: number;
 	/** Extra environment for every child; `process.env` is inherited first. */
 	env?: Record<string, string | undefined>;
 	/** Spawn seam for the RPC host; defaults to the real `pi --mode rpc` child. */
@@ -73,7 +100,16 @@ interface AddonUiCache {
 
 interface PendingUiRequest {
 	frame: string;
+	method: string;
+	request: Record<string, unknown>;
+	raw: string;
+	startedAt: number;
 	timer?: NodeJS.Timeout;
+}
+
+interface ReaskAsk {
+	record: PendingUiRecord;
+	timer: NodeJS.Timeout;
 }
 
 interface LiveSession {
@@ -84,6 +120,8 @@ interface LiveSession {
 	addonUi?: AddonUiCache;
 	/** Unanswered select/confirm/input/editor/panel requests, replayed on reattach. */
 	pendingUi?: Map<string, PendingUiRequest>;
+	/** A timeout prompt is waiting for the agent's YES/NO reply. */
+	reaskAsk?: ReaskAsk;
 	/** Consumed `hello` from `pixip-pi-host`; never forwarded as a transcript event. */
 	host?: { protocol?: number; piVersion?: string; capabilities?: string[] };
 	idleTimer?: NodeJS.Timeout;
@@ -110,8 +148,7 @@ type Subscriber = (frame: string, key?: string) => void;
 
 const SESSION_FILE = /\.jsonl$/;
 
-/** A blocking dialog with no attached client is cancelled after this long. */
-export const PENDING_UI_GRACE_MS = 120_000;
+export { PENDING_UI_GRACE_MS, PENDING_UI_OPEN_MS } from "./pendingReask.ts";
 
 /** How far back one "load earlier" request may read before it gives up. */
 const EARLIER_BYTES_CAP = 4 * 1024 * 1024;
@@ -393,7 +430,10 @@ export function onRecord(this: any, info: SessionInfo, raw: string, record: unkn
 		case "message_end": {
 			const message = typed.message as { role?: string } | undefined;
 			if (message?.role === "user") target.info.messageCount = (target.info.messageCount ?? 0) + 1;
-			if (message?.role === "assistant") this.scheduleFooter(target);
+			if (message?.role === "assistant") {
+				this.noteReaskReply(target, message);
+				this.scheduleFooter(target);
+			}
 			break;
 		}
 		case "thinking_level_changed": {
@@ -423,11 +463,23 @@ export function cacheBlockingUi(
 	if (!isBlockingUiMethod(request.method)) return;
 	const id = typeof request.id === "string" ? request.id : "";
 	if (!id) return;
+	let parsed: Record<string, unknown>;
+	try {
+		parsed = JSON.parse(raw) as Record<string, unknown>;
+	} catch {
+		parsed = { ...request, type: "extension_ui_request" } as Record<string, unknown>;
+	}
 	live.pendingUi ??= new Map();
 	this.clearPendingUi(live, id);
-	const pending: PendingUiRequest = { frame: frameEvent(raw) };
+	const pending: PendingUiRequest = {
+		frame: frameEvent(raw),
+		method: String(request.method),
+		request: parsed,
+		raw,
+		startedAt: Date.now(),
+	};
 	live.pendingUi.set(id, pending);
-	if (live.subs.size === 0) this.armPendingUiTimer(live, pending);
+	this.armPendingUiTimer(live, pending);
 }
 
 export function armPendingUiTimers(this: any, live: LiveSession): void {
@@ -435,26 +487,123 @@ export function armPendingUiTimers(this: any, live: LiveSession): void {
 }
 
 export function armPendingUiTimer(this: any, live: LiveSession, pending: PendingUiRequest): void {
-	if (this.pendingUiGraceMs <= 0 || pending.timer) return;
+	this.clearPendingUiTimer(pending);
+	const timeoutMs = live.subs.size > 0 ? this.pendingUiOpenTimeoutMs : this.pendingUiGraceMs;
+	if (timeoutMs <= 0) return;
+	const remaining = Math.max(0, pending.startedAt + timeoutMs - Date.now());
 	for (const [id, entry] of live.pendingUi ?? []) {
 		if (entry !== pending) continue;
 		pending.timer = setTimeout(() => {
 			pending.timer = undefined;
-			if (live.subs.size > 0 || live.pendingUi?.get(id) !== pending) return;
+			if (live.pendingUi?.get(id) !== pending) return;
 			live.pendingUi.delete(id);
-			this.options.log(`ui request ${id} has no client; cancelling it so pi can settle`);
-			try {
-				live.proc.send({ type: "extension_ui_response", id, cancelled: true });
-			} catch (error) {
-				this.options.log(`ui request ${id} cancel failed: ${(error as Error).message}`);
-			}
-		}, this.pendingUiGraceMs);
+			void this.expirePendingUi(live, pending, timeoutMs, live.subs.size > 0);
+		}, remaining);
 		pending.timer.unref();
 		return;
 	}
 }
 
+export async function expirePendingUi(
+	this: any,
+	live: LiveSession,
+	pending: PendingUiRequest,
+	timeoutMs: number,
+	attached: boolean,
+): Promise<void> {
+	const record: PendingUiRecord = {
+		id: String(pending.request.id ?? ""),
+		method: pending.method,
+		sessionId: live.info.id,
+		...(live.info.logicalId ? { logicalId: live.info.logicalId } : {}),
+		cwd: live.info.cwd,
+		request: pending.request,
+		raw: pending.raw,
+		timedOutAt: new Date().toISOString(),
+		timeoutMs,
+		attached,
+	};
+	this.options.log(`ui request ${record.id} timed out after ${timeoutMs}ms; cancelling it so pi can settle`);
+	this.broadcast(live, frameUiTimeout(record.id));
+	try {
+		live.proc.send({ type: "extension_ui_response", id: record.id, cancelled: true });
+	} catch (error) {
+		this.options.log(`ui request ${record.id} cancel failed: ${(error as Error).message}`);
+	}
+
+	const ask: ReaskAsk = {
+		record,
+		timer: setTimeout(() => {
+			void this.finishReaskAsk(live, ask, true);
+		}, this.reaskReplyMs),
+	};
+	ask.timer.unref();
+	this.clearReaskAsk(live);
+	live.reaskAsk = ask;
+	try {
+		await this.prompt(live.info.id, timeoutQuestionPrompt(record));
+	} catch (error) {
+		this.options.log(`ui request ${record.id} timeout prompt failed: ${(error as Error).message}`);
+	}
+}
+
+export function noteReaskReply(this: any, live: LiveSession, message: unknown): void {
+	const ask = live.reaskAsk;
+	if (!ask) return;
+	const answer = parseReaskReply(messageText(message));
+	if (answer === undefined) return;
+	void this.finishReaskAsk(live, ask, answer);
+}
+
+export async function finishReaskAsk(this: any, live: LiveSession, ask: ReaskAsk, accepted: boolean): Promise<void> {
+	if (live.reaskAsk !== ask) return;
+	this.clearReaskAsk(live);
+	if (!accepted) {
+		this.options.log(`ui request ${ask.record.id} will not be re-offered on resume`);
+		return;
+	}
+	const dataDir = this.options.dataDir ?? dirname(this.options.sessionsDir);
+	try {
+		await addPendingReask(dataDir, pendingUiKey(live.info), ask.record);
+		this.broadcast(live, frameReask(publicReask(ask.record)));
+		this.options.log(`ui request ${ask.record.id} recorded for re-ask on resume`);
+	} catch (error) {
+		this.options.log(`ui request ${ask.record.id} could not be recorded: ${(error as Error).message}`);
+	}
+}
+
+export function clearReaskAsk(this: any, live: LiveSession): void {
+	if (!live.reaskAsk) return;
+	clearTimeout(live.reaskAsk.timer);
+	live.reaskAsk = undefined;
+}
+
+export async function pendingReasks(this: any, id: string): Promise<ReturnType<typeof publicReask>[]> {
+	const live = this.live.get(id);
+	if (!live) return [];
+	const dataDir = this.options.dataDir ?? dirname(this.options.sessionsDir);
+	const records = await readPendingReasks(dataDir, pendingUiKey(live.info));
+	return records.map(publicReask);
+}
+
+export async function reask(this: any, id: string, requestId: string, action: string): Promise<void> {
+	const live = this.require(id);
+	const dataDir = this.options.dataDir ?? dirname(this.options.sessionsDir);
+	const key = pendingUiKey(live.info);
+	const records = await readPendingReasks(dataDir, key);
+	const record = records.find((entry) => entry.id === requestId);
+	if (!record) throw new Error(`unknown timed-out request ${requestId}`);
+	if (action === "dismiss") {
+		await removePendingReask(dataDir, key, requestId);
+		return;
+	}
+	if (action !== "ask") throw new Error(`unknown re-ask action ${action}`);
+	await this.prompt(id, reaskPrompt(record));
+	await removePendingReask(dataDir, key, requestId);
+}
+
 export function clearPendingUi(this: any, live: LiveSession, id?: string): void {
+	if (id === undefined && live.reaskAsk) this.clearReaskAsk(live);
 	if (!live.pendingUi) return;
 	if (id !== undefined) {
 		const pending = live.pendingUi.get(id);

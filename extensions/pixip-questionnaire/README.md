@@ -9,8 +9,9 @@ by installing this one.
 
 The tool picks the first transport the host offers:
 
-1. **A2UI panel** — `ctx.ui.panel(payload, { timeout: 15 min })` from
-   `pixip-pi-host`. The payload is `{title, mode: "a2ui", surfaceId, messages}`
+1. **A2UI panel** — `ctx.ui.panel(payload, { signal })` from
+   `pixip-pi-host`. The hub owns the pending-request lifetime; the extension
+   does not impose its own timeout. The payload is `{title, mode: "a2ui", surfaceId, messages}`
    with one `createSurface` and the Basic catalog. Every question gets a
    `ChoicePicker` (choice widgets) and/or a `TextField` ("Type your own answer"),
    one `Tabs` entry per question, a per-question "I need more information"

@@ -53,6 +53,10 @@ interface Options {
 	/** `--pi-host [path]` / `PIXIP_PI_HOST`; `""` means resolve the installed host bin. */
 	piHost?: string;
 	idleMs: number;
+	/** Blocking UI timeout with no browser attached; 0 disables. */
+	pendingUiTimeoutMs: number;
+	/** Blocking UI timeout with a browser attached; 0 disables. */
+	pendingUiOpenTimeoutMs: number;
 	titleModel: string;
 	dev: boolean;
 	allowCommands: string[];
@@ -82,6 +86,8 @@ function parseArgs(argv: string[]): Options {
 		piBin: "pi",
 		piHost: undefined,
 		idleMs: 15 * 60_000,
+		pendingUiTimeoutMs: 5 * 60 * 60_000,
+		pendingUiOpenTimeoutMs: 10 * 60 * 60_000,
 		titleModel: process.env["PIXIP_TITLE_MODEL"] ?? "",
 		dev: false,
 		allowCommands: [],
@@ -132,6 +138,12 @@ function parseArgs(argv: string[]): Options {
 			}
 			case "--idle-ms":
 				options.idleMs = Number(next());
+				break;
+			case "--pending-ui-timeout-ms":
+				options.pendingUiTimeoutMs = Number(next());
+				break;
+			case "--pending-ui-open-timeout-ms":
+				options.pendingUiOpenTimeoutMs = Number(next());
 				break;
 			case "--title-model":
 				options.titleModel = next();
@@ -184,6 +196,12 @@ function parseArgs(argv: string[]): Options {
 		throw new Error("--port must be an integer between 0 and 65535");
 	}
 	if (!Number.isFinite(options.idleMs) || options.idleMs < 0) throw new Error("--idle-ms must be 0 or more");
+	if (!Number.isFinite(options.pendingUiTimeoutMs) || options.pendingUiTimeoutMs < 0) {
+		throw new Error("--pending-ui-timeout-ms must be 0 or more");
+	}
+	if (!Number.isFinite(options.pendingUiOpenTimeoutMs) || options.pendingUiOpenTimeoutMs < 0) {
+		throw new Error("--pending-ui-open-timeout-ms must be 0 or more");
+	}
 	if (!Number.isInteger(options.lines) || options.lines < 1) throw new Error("--lines must be 1 or more");
 	if (!Number.isFinite(options.timeoutS) || options.timeoutS < 0) throw new Error("--timeout must be 0 or more");
 	if (options.piHost === undefined && process.env["PIXIP_PI_HOST"]) {
@@ -204,6 +222,12 @@ function printHelp(): void {
                       (env: PIXIP_PI_HOST). Legacy --pi stays the default.
   --idle-ms <ms>      detach an idle session after this long, keeping its JSONL
                       for resume (default 900000; 0 disables)
+  --pending-ui-timeout-ms <ms>
+                      expire a blocking question with no browser attached
+                      (default 18000000 = 5h; 0 disables)
+  --pending-ui-open-timeout-ms <ms>
+                      expire a blocking question while a browser is attached
+                      (default 36000000 = 10h; 0 disables)
   --title-model <p/id> model for the automatic 3-5 word session label
                       (default: the session's current model; env: PIXIP_TITLE_MODEL)
   --dev               re-read client assets per request (no restart on CSS/JS edits)
@@ -259,6 +283,10 @@ function serveArgs(options: Options): string[] {
 		options.piBin,
 		"--idle-ms",
 		String(options.idleMs),
+		"--pending-ui-timeout-ms",
+		String(options.pendingUiTimeoutMs),
+		"--pending-ui-open-timeout-ms",
+		String(options.pendingUiOpenTimeoutMs),
 	];
 	if (options.piHost !== undefined) {
 		args.push("--pi-host");
@@ -336,6 +364,8 @@ async function serve(options: Options): Promise<void> {
 		dataDir: options.dataDir,
 		indexPath: join(options.dataDir, "sessions.json"),
 		idleMs: options.idleMs,
+		pendingUiGraceMs: options.pendingUiTimeoutMs,
+		pendingUiOpenTimeoutMs: options.pendingUiOpenTimeoutMs,
 		titleModel: options.titleModel,
 		extraPiArgs: [],
 		cliCommands: {

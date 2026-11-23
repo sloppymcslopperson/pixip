@@ -21,6 +21,7 @@ import {
 } from "./sessionIndex.ts";
 import { moveFile, nameFromLines, pathExists, readFromEnd, readHead, uniquePath, SYMBOL_PENDING } from "./jsonl.ts";
 import { type CommandLayer } from "./commands.ts";
+import { clearPendingReasks } from "./pendingReask.ts";
 import type { CommandPolicy, SessionInfo } from "./wire.ts";
 
 const run = promisify(execFile);
@@ -80,6 +81,10 @@ interface AddonUiCache {
 
 interface PendingUiRequest {
 	frame: string;
+	method: string;
+	request: Record<string, unknown>;
+	raw: string;
+	startedAt: number;
 	timer?: NodeJS.Timeout;
 }
 
@@ -186,7 +191,9 @@ export function watch(this: any, subscriber: Subscriber): () => void {
 }
 
 export async function archive(this: any, id: string): Promise<SessionInfo> {
-	const { info } = await this.storeSession(id, this.archiveRoot);
+	const { info, record } = await this.storeSession(id, this.archiveRoot);
+	const dataDir = this.options.dataDir ?? dirname(this.options.sessionsDir);
+	await clearPendingReasks(dataDir, record.logicalId);
 	await this.broadcastSessions();
 	return info;
 }
@@ -197,6 +204,8 @@ export async function deleteSession(
 ): Promise<{ info: SessionInfo; token: string; expiresAt: number }> {
 	await this.startupTrash;
 	const { info, record, dir } = await this.storeSession(id, this.trashRoot);
+	const dataDir = this.options.dataDir ?? dirname(this.options.sessionsDir);
+	await clearPendingReasks(dataDir, record.logicalId);
 	const expiresAt = Date.now() + this.trashGraceMs;
 	setTimeout(() => {
 		void rm(dir, { recursive: true, force: true }).catch((error: unknown) => {

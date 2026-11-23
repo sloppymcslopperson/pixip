@@ -104,6 +104,16 @@ export function frameSnapshot(
 	return JSON.stringify(frame);
 }
 
+/** A blocking request expired; the client must drop its surface without answering. */
+export function frameUiTimeout(id: string): string {
+	return JSON.stringify({ t: "ui_timeout", id });
+}
+
+/** A timed-out request recorded for a possible re-ask after resume. */
+export function frameReask(request: unknown): string {
+	return JSON.stringify({ t: "reasks", requests: [request] });
+}
+
 /** One older window of entries, answering an `earlier` frame. */
 export function frameHistory(entries: unknown[], more: boolean): string {
 	return JSON.stringify({ t: "history", entries, more });

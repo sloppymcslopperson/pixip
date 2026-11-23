@@ -273,8 +273,12 @@ function handle(line) {
 				images: command.images ?? null,
 				streamingBehavior: command.streamingBehavior ?? null,
 			});
+			const timeoutPrompt = String(command.message ?? "").includes("Should it be offered again");
 			// Fire-and-forget records a test wants to arrive while a subscriber is live.
-			for (const event of JSON.parse(env.FAKE_PI_ON_PROMPT ?? "[]")) send(event);
+			// The hub's timeout follow-up is separate so it can answer YES/NO without
+			// replaying the original extension request.
+			const replay = timeoutPrompt ? env.FAKE_PI_ON_TIMEOUT_PROMPT : env.FAKE_PI_ON_PROMPT;
+			for (const event of JSON.parse(replay ?? "[]")) send(event);
 			const settle = JSON.parse(env.FAKE_PI_SETTLE ?? "[]");
 			if (settle.length) {
 				setTimeout(

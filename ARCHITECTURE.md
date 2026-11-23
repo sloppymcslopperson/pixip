@@ -26,12 +26,20 @@ remote terminal.
    is exercised today (the smoke test observes extension UI requests arriving over
    the socket). Blocking UI requests (`select`, `confirm`, `input`, `editor`,
    and `panel` when the host backend is active) are cached on the live session
-   and replayed to a reattaching client before its snapshot; if the last client
-   has been gone for two minutes, the hub answers the request with
-   `cancelled: true` so a backgrounded browser cannot leave Pi waiting forever.
-   The client renders these in a collapsible inline surface between `#log` and
-   the composer, not as a modal: history stays scrollable and a second pending
-   request is queued behind a Replace banner. App-owned sheets stay modal.
+   and replayed to a reattaching client before its snapshot. Timeout is owned
+   by the hub, not by A2UI or the extension: a request waits 5 hours with no
+   browser attached and 10 hours while one is attached
+   (`--pending-ui-timeout-ms` / `--pending-ui-open-timeout-ms`, `0` disables).
+   On timeout the hub sends `cancelled: true`, asks the agent whether the
+   request should be offered again on resume, waits 60 seconds for a YES/NO
+   (default yes), and records the raw request under
+   `<data-dir>/pending-ui/<logical-id>.json`. Reopening the session shows a
+   read-only re-ask card; the button prompts the agent to issue the same call
+   again. The client renders active requests in a collapsible inline surface
+   between `#log` and the composer, not as a modal: history stays scrollable,
+   the composer is hidden while any blocking request is up, and a second
+   pending request is queued behind a Replace banner. App-owned sheets stay
+   modal.
 6. **Isolation for development.** `--data-dir` sets `--session-dir`; nothing in
    `~/.pi/agent/sessions` is read or written by tests.
 
@@ -42,7 +50,11 @@ not a modal and not part of the append-only transcript. It is expanded by
 default, collapses to its header, keeps `#log` as the only scroll container,
 queues a second blocking request behind a Replace banner, and is replayed from
 the hub's pending-UI cache when a client reattaches. Only unanswered requests
-replay; answered panels are dropped.
+replay; answered panels are dropped. Timed-out requests are stored separately
+and appear as re-ask cards, never as a live Pi dialog. The composer is hidden
+for every blocking method and an unsent draft is preserved; a submit while the
+surface is up is refused. A2UI panels hide an in-panel `Text` node that repeats
+the surface header title.
 
 `src/client/panelHost.js` is the transport boundary. A renderer registers with
 `registerPanelRenderer({ modes, mount })`; `mount(payload, api)` returns

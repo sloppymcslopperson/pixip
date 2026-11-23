@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { after, describe, it } from "node:test";
+import { join } from "node:path";
 
 import WebSocket from "ws";
 
 import type { Hub } from "../src/hub.ts";
 import { startServer, type RunningServer } from "../src/server.ts";
-import { cleanupRoots, fixtureRoot, hubFor, spawns, waitFor, type TestPaths } from "./helpers/harness.ts";
+import { cleanupRoots, exists, fixtureRoot, hubFor, spawns, waitFor, type TestPaths } from "./helpers/harness.ts";
 
 const REQUEST = [
 	{
@@ -47,10 +48,12 @@ async function connect(url: string, id: string): Promise<Inbox> {
 async function boot(
 	paths: TestPaths,
 	pendingUiGraceMs = 1000,
-): Promise<{ hub: Hub; server: RunningServer; id: string; url: string }> {
+	env: Record<string, string> = {},
+): Promise<{ hub: Hub; server: RunningServer; id: string; logicalId?: string; url: string }> {
 	const hub = hubFor(paths, {
 		pendingUiGraceMs,
-		env: { FAKE_PI_ON_PROMPT: JSON.stringify(REQUEST) },
+		reaskReplyMs: 1000,
+		env: { FAKE_PI_ON_PROMPT: JSON.stringify(REQUEST), ...env },
 	});
 	const server = await startServer({
 		host: "127.0.0.1",
@@ -60,7 +63,7 @@ async function boot(
 		log: () => {},
 	});
 	const created = await hub.create(paths.dir);
-	return { hub, server, id: created.id, url: server.url };
+	return { hub, server, id: created.id, logicalId: created.logicalId, url: server.url };
 }
 
 const uiRequests = (inbox: Inbox) =>
@@ -136,6 +139,59 @@ describe("pending extension UI", () => {
 			assert.equal(response?.["cancelled"], true);
 		} finally {
 			inbox.close();
+			await server.close();
+			await hub.shutdown();
+		}
+	});
+
+	it("records a timed-out request when the agent agrees and re-asks it on demand", async () => {
+		const paths = await fixtureRoot("pixip-pending-ui-", { logName: "rpc.jsonl" });
+		const yes = [
+			{
+				type: "message_end",
+				message: { role: "assistant", content: [{ type: "text", text: "YES" }] },
+			},
+		];
+		const { hub, server, id, logicalId, url } = await boot(paths, 80, {
+			FAKE_PI_ON_TIMEOUT_PROMPT: JSON.stringify(yes),
+		});
+		const recordFile = join(paths.dataDir, "pending-ui", `${logicalId}.json`);
+		const first = await connect(url, id);
+		try {
+			await waitFor(() => first.frames.some((frame) => frame["t"] === "snapshot"));
+			first.send({ t: "prompt", text: "go" });
+			await waitFor(() => uiRequests(first).length === 1);
+			first.close();
+
+			await waitFor(async () =>
+				(await spawns(paths)).some(
+					(record) =>
+						record["type"] === "prompt" && String(record["text"] ?? "").includes("Should it be offered again"),
+				),
+			);
+			await waitFor(() => exists(recordFile));
+
+			const second = await connect(url, id);
+			try {
+				await waitFor(() => second.frames.some((frame) => frame["t"] === "snapshot"));
+				await waitFor(() => second.frames.some((frame) => frame["t"] === "reasks"));
+				const reaskFrame = second.frames.find((frame) => frame["t"] === "reasks");
+				const requests = reaskFrame?.["requests"] as Array<Record<string, unknown>>;
+				assert.equal(requests[0]?.["id"], "ui-1");
+				assert.equal(requests[0]?.["method"], "select");
+
+				second.send({ t: "reask", id: "ui-1", action: "ask" });
+				await waitFor(async () =>
+					(await spawns(paths)).some(
+						(record) => record["type"] === "prompt" && String(record["text"] ?? "").includes("Re-issue this same call"),
+					),
+				);
+				await waitFor(async () => !(await exists(recordFile)));
+			} finally {
+				second.close();
+			}
+		} finally {
+			first.close();
 			await server.close();
 			await hub.shutdown();
 		}

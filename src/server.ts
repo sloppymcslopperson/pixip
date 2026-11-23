@@ -23,6 +23,7 @@ import {
 	frameOpened,
 	framePolicy,
 	frameQueue,
+	frameReask,
 	frameSnapshot,
 	frameThinking,
 	frameTree,
@@ -485,6 +486,10 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 		}
 		buffering = false;
 
+		// Requests that timed out while this browser was away: offer the recorded
+		// re-ask card without pretending Pi is still waiting.
+		for (const request of await hub.pendingReasks(info.id)) send(frameReask(request));
+
 		void hub
 			.footer(info.id)
 			.then((footer) => {
@@ -672,6 +677,11 @@ async function handleCommand(
 					if (key in message) fields[key] = message[key];
 				}
 				hub.uiResponse(sessionId, requestId, fields);
+				break;
+			}
+			case "reask": {
+				const requestId = String(message["id"] ?? "");
+				await hub.reask(active.id ?? sessionId, requestId, String(message["action"] ?? "ask"));
 				break;
 			}
 			default:

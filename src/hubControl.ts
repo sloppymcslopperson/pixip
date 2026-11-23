@@ -85,6 +85,10 @@ interface AddonUiCache {
 
 interface PendingUiRequest {
 	frame: string;
+	method: string;
+	request: Record<string, unknown>;
+	raw: string;
+	startedAt: number;
 	timer?: NodeJS.Timeout;
 }
 

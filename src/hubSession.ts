@@ -76,6 +76,10 @@ interface AddonUiCache {
 
 interface PendingUiRequest {
 	frame: string;
+	method: string;
+	request: Record<string, unknown>;
+	raw: string;
+	startedAt: number;
 	timer?: NodeJS.Timeout;
 }
 
@@ -552,6 +556,8 @@ export function subscribe(this: any, id: string, subscriber: Subscriber): () => 
 			break;
 		}
 	}
+	// A newly attached browser extends the deadline to the open-browser value.
+	this.armPendingUiTimers(live);
 	return () => {
 		live.subs.delete(subscriber);
 		if (live.subs.size === 0) this.armPendingUiTimers(live);

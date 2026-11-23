@@ -43,6 +43,9 @@ the transcript and the composer, not as a modal. A2UI v1.0 surfaces use a
 vendored renderer that is fetched only when the first panel arrives; extension
 dialogs stay a bottom sheet. The hub never parses A2UI, and completed surfaces
 are not written to session history (a pending panel replays on reattach).
+Questions are not cancelled just because the browser is closed: the hub waits
+5 hours detached or 10 hours with a browser attached, then records a timed-out
+request so the session can offer a re-ask when it is reopened.
 
 `extensions/pixip-questionnaire` registers the `questionnaire` tool with a
 widget-shaped schema (`choice` or `text`). Transport order is A2UI inline panel

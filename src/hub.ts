@@ -4,6 +4,7 @@ import * as hubControl from "./hubControl.ts";
 import * as hubLive from "./hubLive.ts";
 import * as hubSession from "./hubSession.ts";
 import * as hubStore from "./hubStore.ts";
+import { PENDING_UI_GRACE_MS, PENDING_UI_OPEN_MS, REASK_REPLY_MS } from "./pendingReask.ts";
 import type { PiBackend } from "./backend.ts";
 import { WINDOW_BYTES, WINDOW_ENTRIES } from "./jsonl.ts";
 import type { CommandLayer } from "./commands.ts";
@@ -49,11 +50,18 @@ export interface HubOptions {
 	 */
 	promptTimeoutMs?: number;
 	/**
-	 * How long a blocking extension UI request waits after the last client
-	 * detaches before it is cancelled. A reconnect inside this window replays the
-	 * request instead. `0` disables the safety cancel; default 2 minutes.
+	 * How long a blocking extension UI request waits while no client is attached.
+	 * A reconnect inside this window replays the request instead. `0` disables the
+	 * timeout; default 5 hours.
 	 */
 	pendingUiGraceMs?: number;
+	/**
+	 * How long a blocking request waits while a browser is attached. `0` disables
+	 * the timeout; default 10 hours.
+	 */
+	pendingUiOpenTimeoutMs?: number;
+	/** How long the timeout follow-up waits for the agent's YES/NO. Default 60 s. */
+	reaskReplyMs?: number;
 	/** Extra environment for every child; `process.env` is inherited first. */
 	env?: Record<string, string | undefined>;
 	/** Spawn seam for the RPC host; defaults to the real `pi --mode rpc` child. */
@@ -75,7 +83,16 @@ interface AddonUiCache {
 
 interface PendingUiRequest {
 	frame: string;
+	method: string;
+	request: Record<string, unknown>;
+	raw: string;
+	startedAt: number;
 	timer?: NodeJS.Timeout;
+}
+
+interface ReaskAsk {
+	record: import("./pendingReask.ts").PendingUiRecord;
+	timer: NodeJS.Timeout;
 }
 
 interface LiveSession {
@@ -86,6 +103,8 @@ interface LiveSession {
 	addonUi?: AddonUiCache;
 	/** Unanswered select/confirm/input/editor/panel requests, replayed on reattach. */
 	pendingUi?: Map<string, PendingUiRequest>;
+	/** A timeout prompt is waiting for the agent's YES/NO reply. */
+	reaskAsk?: ReaskAsk;
 	/** Consumed `hello` from `pixip-pi-host`; never forwarded as a transcript event. */
 	host?: { protocol?: number; piVersion?: string; capabilities?: string[] };
 	idleTimer?: NodeJS.Timeout;
@@ -110,8 +129,7 @@ interface LiveSession {
 
 type Subscriber = (frame: string, key?: string) => void;
 
-/** A blocking dialog with no attached client is cancelled after this long. */
-export const PENDING_UI_GRACE_MS = 120_000;
+export { PENDING_UI_GRACE_MS, PENDING_UI_OPEN_MS, REASK_REPLY_MS } from "./pendingReask.ts";
 
 export class Hub {
 	private readonly options: HubOptions;
@@ -129,6 +147,8 @@ export class Hub {
 	private readonly trashRoot: string;
 	private readonly trashGraceMs: number;
 	private readonly pendingUiGraceMs: number;
+	private readonly pendingUiOpenTimeoutMs: number;
+	private readonly reaskReplyMs: number;
 	/** Startup cleanup runs once; trash operations wait for it. */
 	private readonly startupTrash: Promise<void>;
 	/** Branch per cwd, so list refreshes do not run git every time. */
@@ -141,6 +161,8 @@ export class Hub {
 		this.trashRoot = join(dataDir, "trash");
 		this.trashGraceMs = options.trashGraceMs ?? 60_000;
 		this.pendingUiGraceMs = options.pendingUiGraceMs ?? PENDING_UI_GRACE_MS;
+		this.pendingUiOpenTimeoutMs = options.pendingUiOpenTimeoutMs ?? PENDING_UI_OPEN_MS;
+		this.reaskReplyMs = options.reaskReplyMs ?? REASK_REPLY_MS;
 		this.startupTrash = this.purgeTrashOnStart();
 	}
 
@@ -503,6 +525,16 @@ export class Hub {
 		return hubSession.subscribe.apply(this, arguments as any);
 	}
 
+	/** Timed-out requests recorded for a possible re-ask after resume. */
+	async pendingReasks(id: string): Promise<import("./pendingReask.ts").ReaskRequest[]> {
+		return await hubLive.pendingReasks.apply(this, arguments as any);
+	}
+
+	/** Re-ask or dismiss one recorded timed-out request. */
+	async reask(id: string, requestId: string, action: string): Promise<void> {
+		return await hubLive.reask.apply(this, arguments as any);
+	}
+
 	// ----------------------------------------------------------------- spawn
 
 	private async spawn(input: {
@@ -543,6 +575,27 @@ export class Hub {
 
 	private clearPendingUiTimer(pending: PendingUiRequest): void {
 		hubLive.clearPendingUiTimer.apply(this, arguments as any);
+	}
+
+	private async expirePendingUi(
+		live: LiveSession,
+		pending: PendingUiRequest,
+		timeoutMs: number,
+		attached: boolean,
+	): Promise<void> {
+		return await hubLive.expirePendingUi.apply(this, arguments as any);
+	}
+
+	private noteReaskReply(live: LiveSession, message: unknown): void {
+		hubLive.noteReaskReply.apply(this, arguments as any);
+	}
+
+	private async finishReaskAsk(live: LiveSession, ask: ReaskAsk, accepted: boolean): Promise<void> {
+		return await hubLive.finishReaskAsk.apply(this, arguments as any);
+	}
+
+	private clearReaskAsk(live: LiveSession): void {
+		hubLive.clearReaskAsk.apply(this, arguments as any);
 	}
 
 	private cacheAddonUi(
