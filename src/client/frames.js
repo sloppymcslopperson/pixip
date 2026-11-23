@@ -4,7 +4,8 @@
 import { copyText } from "./clipboard.js";
 import { applyPolicy, clearPendingAttachment, finishBash, renderReplace } from "./composer.js";
 import { applyInfo, renderFooter } from "./controls.js";
-import { listSessions, renderList } from "./dashboard.js";
+import { listSessions } from "./dashboardApi.js";
+import { renderList } from "./dashboardList.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
 import { renderMenu, restoreClearedQueue } from "./menu.js";

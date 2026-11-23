@@ -10,7 +10,8 @@ import {
 	softRefresh,
 	updateJump,
 } from "./controls.js";
-import { openSettingsSheet, showList } from "./dashboard.js";
+import { showList } from "./dashboard.js";
+import { openSettingsSheet } from "./dashboardSettings.js";
 import { handleFrame, handleTransportClose } from "./frames.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
