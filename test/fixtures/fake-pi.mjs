@@ -91,6 +91,8 @@ if (env.FAKE_PI_LOG) {
 			args: argv,
 			sessionId,
 			pixipSessionId: env.PIXIP_SESSION_ID ?? null,
+			piSessionId: env.PI_SESSION_ID ?? null,
+			piSessionFile: env.PI_SESSION_FILE ?? null,
 		})}\n`,
 	);
 }

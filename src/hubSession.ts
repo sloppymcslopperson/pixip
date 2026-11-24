@@ -14,6 +14,7 @@ import { type CommandLayer } from "./commands.ts";
 import { resolveModelArgument, resolveThinkingArgument } from "./client/commands.js";
 import { exportFileName } from "./client/sessionInfo.js";
 import { fallbackTitle, normalizeTitle, titlePrompt } from "./titles.ts";
+import { spawnEnv } from "./spawnEnv.ts";
 import { detectRepo, detectWorktree } from "./worktree.ts";
 import { frameEvent } from "./wire.ts";
 import type { CommandPolicy, DynamicCommand, ModelSummary, SessionInfo } from "./wire.ts";
@@ -297,7 +298,7 @@ export async function runTitlePi(this: any, live: LiveSession, prompt: string, m
 			args,
 			{
 				cwd: live.info.cwd,
-				env: { ...process.env, ...this.options.env },
+				env: spawnEnv(this.options.env),
 				timeout: this.options.titleTimeoutMs ?? 15_000,
 				maxBuffer: 256 * 1024,
 			},

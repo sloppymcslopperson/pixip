@@ -1,6 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 
+import { spawnEnv } from "./spawnEnv.ts";
+
 /**
  * Thin `pi --mode rpc` peer.
  *
@@ -100,7 +102,7 @@ export class RpcChild {
 		this.child = spawn(options.command, options.args, {
 			cwd: options.cwd,
 			stdio: ["pipe", "pipe", "pipe"],
-			env: { ...process.env, ...options.env },
+			env: spawnEnv(options.env),
 		});
 		this.child.stdout.on("data", (chunk: Buffer) => {
 			for (const line of this.lines.push(chunk)) this.handleLine(line);

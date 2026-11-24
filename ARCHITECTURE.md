@@ -107,6 +107,15 @@ diagnostics and never forwarded as a transcript event; `panel` joins
 Automatic titles use the host's `--print` one-shot mode when the host backend is
 active. The hub remains the only process that owns the browser protocol.
 
+Every Pi-speaking child is spawned through `src/spawnEnv.ts`: it copies the
+inherited environment, drops `PI_SESSION_ID` and `PI_SESSION_FILE` (which
+describe whichever Pi session started or restarted the daemon), and then applies
+per-child values such as `PIXIP_SESSION_ID`. Pi fills in its own session
+variables for its own shell tools, so no child starts with another session's
+identity; config, provider auth, PATH and proxy variables pass through untouched.
+The CLI restart helper and `startDaemon` use the same helper, so a daemon started
+from inside a Pi session is clean as well.
+
 Measured on this box (2026-11-21, Node 22.23.5, real Pi 1.5.2 vs workspace host,
 three cold/warm attaches per backend):
 

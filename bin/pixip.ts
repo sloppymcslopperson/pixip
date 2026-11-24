@@ -28,6 +28,7 @@ import {
 	writeDaemonState,
 } from "../src/daemon.ts";
 import type { SessionInfo } from "../src/wire.ts";
+import { spawnEnv } from "../src/spawnEnv.ts";
 
 /**
  * pixip — supervisor + web UI for Pi sessions.
@@ -597,8 +598,10 @@ function spawnRestartHelper(options: Options): void {
 	const logFd = openSync(daemonPaths(options.dataDir).log, "a");
 	try {
 		// Strip the caller marker: the helper is not a session, and the new
-		// daemon's own children get a fresh one from the hub anyway.
-		const env = { ...process.env };
+		// daemon's own children get a fresh one from the hub anyway. `spawnEnv`
+		// also drops the caller's Pi session identity, so the restarted daemon
+		// does not hand it to every later child.
+		const env = spawnEnv();
 		delete env["PIXIP_SESSION_ID"];
 		const child = spawn(
 			process.execPath,

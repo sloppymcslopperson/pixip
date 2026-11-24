@@ -298,6 +298,38 @@ describe("hard restart", () => {
 		await run(["stop", "--data-dir", dir]);
 	});
 
+	it("does not leak the caller's Pi session env to children across a restart", async () => {
+		const dir = await tempRoot("pixip-daemon-");
+		const log = join(dir, "fake-pi.log");
+		const { pid } = await start(dir);
+		// The CLI that triggers the restart carries the session identity of the Pi
+		// shell that ran it. Neither the helper nor the new daemon may pass it on.
+		const restarted = await run(["restart", "--data-dir", dir, "--force"], {
+			PI_SESSION_ID: "01a1fb3f-cccc-7664-b952-f6673a2c7a8c",
+			PI_SESSION_FILE: "/sessions/some-caller.jsonl",
+			FAKE_PI_LOG: log,
+		});
+		assert.equal(restarted.code, 0, restarted.stderr);
+		const state = await readDaemonState(dir);
+		assert.ok(state && state.pid !== pid);
+		const created = await createSession(state.url, dir);
+		const logicalId = String(created["logicalId"]);
+
+		const spawns: Array<Record<string, unknown>> = [];
+		await waitFor(async () => {
+			const text = await readFile(log, "utf8").catch(() => "");
+			for (const line of text.split("\n").filter(Boolean)) {
+				const record = JSON.parse(line) as Record<string, unknown>;
+				if (record["type"] === "spawn") spawns.push(record);
+			}
+			return spawns.length > 0;
+		}, 10_000);
+		assert.equal(spawns[0]?.["piSessionId"], null);
+		assert.equal(spawns[0]?.["piSessionFile"], null);
+		assert.equal(spawns[0]?.["pixipSessionId"], logicalId);
+		await run(["stop", "--data-dir", dir]);
+	});
+
 	it("does the stop/start in a detached helper that survives its caller", async () => {
 		const dir = await tempRoot("pixip-daemon-");
 		const { pid } = await start(dir);

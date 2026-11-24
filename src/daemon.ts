@@ -22,6 +22,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { SessionInfo } from "./wire.ts";
+import { spawnEnv } from "./spawnEnv.ts";
 
 export const PID_FILE = "pixip.pid";
 export const STATE_FILE = "pixip.state.json";
@@ -248,7 +249,7 @@ export async function startDaemon(input: {
 			detached: true,
 			stdio: ["ignore", log.fd, log.fd],
 			cwd: process.cwd(),
-			env: process.env,
+			env: spawnEnv(),
 		});
 		child.unref();
 		let exited = false;
