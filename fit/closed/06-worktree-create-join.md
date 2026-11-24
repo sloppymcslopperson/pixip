@@ -1,5 +1,6 @@
 ---
 project: pixip
+grilled: true
 ---
 
 Let a session be created in a fresh git worktree, or in any directory or existing worktree that already has live agents, and carry that worktree plus peer information on the session record.
@@ -41,3 +42,14 @@ Product decisions are settled in `backlog/60-worktrees-for-aoe-parity.md` (`### 
 ### Grilling
 
 Further grilling is welcome and often necessary for implementation gaps (exact git invocation, error shapes, peer refresh timing). The product decisions in the parent ticket are settled; grill only what those do not answer.
+
+### Grilled answers (2026-11-23)
+
+- **Create request:** `hub.create(cwd, name?, worktree?)` where `worktree` is `{ branch, base? }`. `branch` is the slug, so `branch: "fix-reconnect"` creates directory `.../fix-reconnect` and git branch `pixip/fix-reconnect`. A leading `pixip/` is accepted defensively and stripped for the directory slug.
+- **Base:** optional commit-ish, resolved in the main repo root; default is the main repo's current `HEAD` (which may be a feature branch). A bad base returns git's error.
+- **Metadata:** `worktree` is `{ repo, path, branch, pixipActive }`. `repo` and `path` are absolute roots; `path` is the worktree root even when the session cwd is a subdirectory; `branch` is the full branch name. Main-repo and non-repo sessions have no `worktree`.
+- **Ownership flag:** use `pixipActive` only, not `createdByPixip`. It is true when pixip created the worktree or when a pixip session is/was mounted in it, so pre-existing worktrees used through pixip also count. Delete safety remains ticket 07/08's concern.
+- **Peers:** live sessions only, matched by realpath cwd, reciprocal, self excluded. Refreshed on create/stop/archive (and child exit). After a daemon restart there are no peers until sessions are live again; worktree/cwd metadata still persists. A peer's `id` is its stable logical id; `name` falls back to `Untitled session`.
+- **Stopped rows:** `hub.list()` takes `worktree` from the index or a live session; JSONL-only rows pick it up on the next attach. No filesystem-wide worktree detection during list.
+- **Scratch:** implement the full helper set now: create/add, detect, list, remove with force, prune, dirty count, and merged check (`HEAD` ancestor of main repo `HEAD`).
+- **Errors:** git failures surface trimmed stderr (`fatal: ...`) verbatim, without Node's `Command failed:` wrapper.

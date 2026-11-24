@@ -219,6 +219,7 @@ export async function window(
 				name: found.header.name,
 				state: "stopped",
 				sessionFile: found.path,
+				...(record?.worktree ? { worktree: record.worktree } : {}),
 				lastActivity: Date.parse(found.header.timestamp) || 0,
 			};
 			path = found.path;
@@ -232,6 +233,7 @@ export async function window(
 				name: record.name,
 				state: "stopped",
 				sessionFile: record.sessionFile,
+				...(record.worktree ? { worktree: record.worktree } : {}),
 				lastActivity: Date.parse(record.createdAt) || 0,
 			};
 			path = record.sessionFile;
@@ -297,19 +299,22 @@ export async function provisional(
 			name: record.name,
 			state: "starting",
 			sessionFile: record.sessionFile,
+			...(record.worktree ? { worktree: record.worktree } : {}),
 			lastActivity: Date.parse(record.createdAt) || 0,
 		};
 		return { info, entries: [], leafId: null, more: false };
 	}
 
 	const disk = await readDiskWindow(found.path, limit, maxBytes);
+	const record = await this.findRecord(found.header.id);
 	const info: SessionInfo = {
 		id: found.header.id,
-		logicalId: (await this.findRecord(found.header.id))?.logicalId,
+		logicalId: record?.logicalId,
 		cwd: found.header.cwd,
 		name: found.header.name,
 		state: "starting",
 		sessionFile: found.path,
+		...(record?.worktree ? { worktree: record.worktree } : {}),
 		lastActivity: Date.parse(found.header.timestamp) || 0,
 	};
 	return { info, ...disk };

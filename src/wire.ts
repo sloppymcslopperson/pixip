@@ -60,6 +60,25 @@ export interface DynamicCommand {
 
 export type SessionState = "starting" | "idle" | "busy" | "stopped" | "error";
 
+/** A linked git worktree a session runs in; absent for main-repo and plain dirs. */
+export interface WorktreeInfo {
+	/** Absolute main repository root. */
+	repo: string;
+	/** Absolute worktree root (even when the session cwd is a subdirectory). */
+	path: string;
+	/** Full git branch name, e.g. `pixip/fix-reconnect`. */
+	branch: string;
+	/** True when pixip created or mounted a session in this worktree. */
+	pixipActive: boolean;
+}
+
+/** Another live session in the same realpath cwd. */
+export interface SessionPeer {
+	/** Stable pixip logical id. */
+	id: string;
+	name: string;
+}
+
 export interface SessionInfo {
 	id: string;
 	/** Stable pixip id for the logical session; survives Pi allocating a new id. */
@@ -73,6 +92,10 @@ export interface SessionInfo {
 	sessionFile?: string;
 	/** Current git branch (or detached short SHA) for the dashboard chip. */
 	branch?: string;
+	/** Linked worktree metadata; absent for main-repo and plain directories. */
+	worktree?: WorktreeInfo;
+	/** Other live sessions sharing this realpath cwd; refreshed on lifecycle changes. */
+	peers?: SessionPeer[];
 	lastActivity: number;
 }
 

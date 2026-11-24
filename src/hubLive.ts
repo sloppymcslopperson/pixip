@@ -1,9 +1,7 @@
 // @ts-nocheck -- these methods are written against the Hub instance as `this`; the public Hub declarations and tests are typed.
 // Hub methods split by concern; each function runs with the Hub instance as `this`.
-import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { dirname, resolve } from "node:path";
-import { promisify } from "node:util";
+import { dirname } from "node:path";
 
 import type { RpcChild } from "./rpc.ts";
 import { piRpcBackend, type PiBackend } from "./backend.ts";
@@ -11,6 +9,13 @@ import { type NameSource } from "./sessionIndex.ts";
 import { isBlockingUiMethod, SYMBOL_PENDING, coverageKey } from "./jsonl.ts";
 import { resolveSessionPolicy, type CommandLayer } from "./commands.ts";
 import { messageText } from "./titles.ts";
+import {
+	createWorktree,
+	detectWorktree,
+	normalizeWorktreeRequest,
+	realCwd,
+	type CreateWorktreeRequest,
+} from "./worktree.ts";
 import {
 	PENDING_UI_GRACE_MS,
 	PENDING_UI_OPEN_MS,
@@ -35,9 +40,7 @@ import {
 	frameStatus,
 	frameUiTimeout,
 } from "./wire.ts";
-import type { CommandPolicy, FooterData, SessionInfo } from "./wire.ts";
-
-const run = promisify(execFile);
+import type { CommandPolicy, FooterData, SessionInfo, WorktreeInfo } from "./wire.ts";
 
 /**
  * The supervisor. One `pi --mode rpc` child per live session, nothing else.
@@ -162,10 +165,18 @@ const HEAD_BYTES = 8 * 1024;
 const NAME_HEAD_LINES = 20;
 const NAME_TAIL_BYTES = 16 * 1024;
 
-export async function create(this: any, cwd: string, name?: string): Promise<SessionInfo> {
+export async function create(
+	this: any,
+	cwd: string,
+	name?: string,
+	worktree?: CreateWorktreeRequest,
+): Promise<SessionInfo> {
+	const requested = normalizeWorktreeRequest(worktree);
+	const created = requested ? await createWorktree(cwd, requested) : undefined;
 	return await this.spawn({
-		cwd,
+		cwd: created?.path ?? cwd,
 		logicalId: randomUUID(),
+		worktree: created,
 		args: ["--mode", "rpc", "--session-dir", this.options.sessionsDir, ...(name ? ["--name", name] : [])],
 	});
 }
@@ -180,6 +191,7 @@ export async function attach(this: any, id: string): Promise<SessionInfo> {
 			cwd: found.header.cwd,
 			logicalId: record?.logicalId,
 			createdAt: record?.createdAt,
+			worktree: record?.worktree,
 			args: ["--mode", "rpc", "--session", found.path],
 		});
 	}
@@ -192,7 +204,13 @@ export async function attach(this: any, id: string): Promise<SessionInfo> {
 	const args = record.sessionFile
 		? ["--mode", "rpc", "--session-dir", this.options.sessionsDir, "--session", record.sessionFile, ...name]
 		: ["--mode", "rpc", "--session-dir", this.options.sessionsDir, ...name];
-	return await this.spawn({ cwd: record.cwd, logicalId: record.logicalId, createdAt: record.createdAt, args });
+	return await this.spawn({
+		cwd: record.cwd,
+		logicalId: record.logicalId,
+		createdAt: record.createdAt,
+		worktree: record.worktree,
+		args,
+	});
 }
 
 export async function stop(this: any, id: string): Promise<SessionInfo> {
@@ -206,6 +224,7 @@ export async function stop(this: any, id: string): Promise<SessionInfo> {
 	this.clearPendingUi(live);
 	this.live.delete(id);
 	live.info.state = "stopped";
+	live.info.peers = [];
 	// Stopping must not drop a name that only the live session knows about.
 	// Keep the index as the durable copy; the JSONL is authoritative when it
 	// actually carries a session_info name.
@@ -213,6 +232,7 @@ export async function stop(this: any, id: string): Promise<SessionInfo> {
 	await live.proc.close();
 	this.emitStatus(live);
 	this.broadcast(live, frameStatus(live.info));
+	await this.refreshPeers();
 	return live.info;
 }
 
@@ -232,6 +252,7 @@ export async function spawn(
 		args: string[];
 		logicalId?: string;
 		createdAt?: string;
+		worktree?: WorktreeInfo;
 	},
 ): Promise<SessionInfo> {
 	const started = Date.now();
@@ -246,11 +267,14 @@ export async function spawn(
 	// later `onExit` rejection from becoming an unhandled rejection.
 	ready.catch(() => {});
 
+	const worktree = input.worktree ?? (await detectWorktree(input.cwd));
 	const info: SessionInfo = {
 		id: "",
 		logicalId,
 		cwd: input.cwd,
 		state: "starting",
+		peers: [],
+		...(worktree ? { worktree } : {}),
 		lastActivity: started,
 	};
 
@@ -273,6 +297,7 @@ export async function spawn(
 				live.info.state = "error";
 				this.broadcast(live, frameError(`pi exited (${code ?? signal})`));
 				this.emitStatus(live);
+				void this.refreshPeers().catch(() => {});
 			}
 			rejectState(new Error(`pi exited during startup (${code ?? signal})`));
 		},
@@ -344,6 +369,7 @@ export async function spawn(
 	});
 
 	this.options.log(`attached ${info.id} (${info.cwd}) in ${Date.now() - started}ms`);
+	await this.refreshPeers();
 	this.emitStatus(live);
 	if (info.state === "idle") this.scheduleIdle(live);
 	resolveState(info);
@@ -784,6 +810,28 @@ export function scheduleFooter(this: any, live: LiveSession): void {
 		live.footerTimer = undefined;
 		void this.sendFooter(this.live.get(live.info.id) ?? live);
 	}, 150);
+}
+
+export async function refreshPeers(this: any): Promise<void> {
+	const byCwd = new Map<string, SessionInfo[]>();
+	for (const live of this.live.values()) {
+		if (!live.info.id) continue;
+		const key = await realCwd(live.info.cwd);
+		const list = byCwd.get(key) ?? [];
+		list.push(live.info);
+		byCwd.set(key, list);
+	}
+	for (const live of this.live.values()) {
+		if (!live.info.id) continue;
+		const key = await realCwd(live.info.cwd);
+		const peers = (byCwd.get(key) ?? [])
+			.filter((other) => other.logicalId !== live.info.logicalId && other.id !== live.info.id)
+			.map((other) => ({ id: other.logicalId ?? other.id, name: other.name || "Untitled session" }));
+		const before = JSON.stringify(live.info.peers ?? []);
+		const after = JSON.stringify(peers);
+		live.info.peers = peers;
+		if (before !== after && live.subs.size > 0) this.emitStatus(live);
+	}
 }
 
 export function require(this: any, id: string): LiveSession {

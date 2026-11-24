@@ -22,6 +22,7 @@ import {
 import { moveFile, nameFromLines, pathExists, readFromEnd, readHead, uniquePath, SYMBOL_PENDING } from "./jsonl.ts";
 import { type CommandLayer } from "./commands.ts";
 import { clearPendingReasks } from "./pendingReask.ts";
+import { realCwd } from "./worktree.ts";
 import type { CommandPolicy, SessionInfo } from "./wire.ts";
 
 const run = promisify(execFile);
@@ -157,6 +158,7 @@ export async function list(this: any): Promise<SessionInfo[]> {
 			name: header.name ?? record?.name,
 			state: "stopped",
 			sessionFile: path,
+			...(record?.worktree ? { worktree: record.worktree } : {}),
 			lastActivity: Date.parse(header.timestamp) || 0,
 		});
 	}
@@ -170,17 +172,32 @@ export async function list(this: any): Promise<SessionInfo[]> {
 			name: record.name,
 			state: "stopped",
 			sessionFile: record.sessionFile,
+			...(record.worktree ? { worktree: record.worktree } : {}),
 			lastActivity: Date.parse(record.createdAt) || 0,
 		});
 	}
 	infos.sort((a, b) => b.lastActivity - a.lastActivity);
 	// One git call per distinct cwd, shared by every session in that repo.
 	const branches = new Map<string, string | undefined>();
+	const realCwds = new Map<string, string>();
+	const liveByCwd = new Map<string, SessionInfo[]>();
+	for (const live of this.live.values()) {
+		if (!live.info.id) continue;
+		const key = await realCwd(live.info.cwd);
+		const sessions = liveByCwd.get(key) ?? [];
+		sessions.push(live.info);
+		liveByCwd.set(key, sessions);
+	}
 	for (const info of infos) {
 		if (!info.cwd) continue;
 		if (!branches.has(info.cwd)) branches.set(info.cwd, await this.gitBranch(info.cwd));
 		const branch = branches.get(info.cwd);
 		if (branch) info.branch = branch;
+		if (!realCwds.has(info.cwd)) realCwds.set(info.cwd, await realCwd(info.cwd));
+		const key = realCwds.get(info.cwd) as string;
+		info.peers = (liveByCwd.get(key) ?? [])
+			.filter((other) => other.id !== info.id && other.logicalId !== info.logicalId)
+			.map((other) => ({ id: other.logicalId ?? other.id, name: other.name || "Untitled session" }));
 	}
 	return infos;
 }
@@ -194,6 +211,7 @@ export async function archive(this: any, id: string): Promise<SessionInfo> {
 	const { info, record } = await this.storeSession(id, this.archiveRoot);
 	const dataDir = this.options.dataDir ?? dirname(this.options.sessionsDir);
 	await clearPendingReasks(dataDir, record.logicalId);
+	await this.refreshPeers();
 	await this.broadcastSessions();
 	return info;
 }
@@ -353,6 +371,7 @@ export async function upsertIndex(
 			name,
 			nameSource: source,
 			sessionFile: info.sessionFile ?? existing?.sessionFile,
+			worktree: info.worktree ?? existing?.worktree,
 			createdAt: existing?.createdAt ?? createdAt ?? new Date().toISOString(),
 		};
 		const index = records.findIndex((record) => record.logicalId === logicalId);
@@ -424,6 +443,7 @@ export async function resolveTarget(this: any, id: string): Promise<SessionTarge
 			cwd: info.cwd,
 			name: info.name,
 			sessionFile: info.sessionFile,
+			...(info.worktree ? { worktree: info.worktree } : {}),
 			createdAt: new Date(info.lastActivity || Date.now()).toISOString(),
 		};
 	}
@@ -446,6 +466,7 @@ export async function resolveTarget(this: any, id: string): Promise<SessionTarge
 		name: record.name,
 		state: "stopped",
 		sessionFile: record.sessionFile,
+		...(record.worktree ? { worktree: record.worktree } : {}),
 		lastActivity: Date.parse(record.createdAt) || 0,
 	};
 	return { info: resolved, record, files };
@@ -519,6 +540,7 @@ export async function restoreStored(this: any, root: string, id: string): Promis
 		name: record.name,
 		nameSource: record.nameSource,
 		sessionFile: record.sessionFile,
+		worktree: record.worktree,
 		createdAt: record.createdAt,
 	};
 	const mapping = new Map<string, string>();
@@ -551,6 +573,7 @@ export async function restoreStored(this: any, root: string, id: string): Promis
 		name: restored.name,
 		state: "stopped",
 		sessionFile: restored.sessionFile,
+		...(restored.worktree ? { worktree: restored.worktree } : {}),
 		lastActivity: Date.now(),
 	};
 }

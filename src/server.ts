@@ -31,6 +31,7 @@ import {
 	WIRE_VERSION,
 } from "./wire.ts";
 import type { SessionInfo } from "./wire.ts";
+import { normalizeWorktreeRequest } from "./worktree.ts";
 
 export interface ServerOptions {
 	host: string;
@@ -261,9 +262,9 @@ async function handleHttp(
 		}
 		if (req.method === "POST" && url.pathname === "/api/sessions") {
 			const body = await readBody(req);
-			const parsed = JSON.parse(body || "{}") as { cwd?: string; name?: string };
+			const parsed = JSON.parse(body || "{}") as { cwd?: string; name?: string; worktree?: unknown };
 			const cwd = parsed.cwd ?? process.cwd();
-			const info = await hub.create(cwd, parsed.name);
+			const info = await hub.create(cwd, parsed.name, normalizeWorktreeRequest(parsed.worktree));
 			send(200, JSON.stringify(info));
 			return;
 		}
@@ -605,7 +606,8 @@ async function handleCommand(
 			case "create": {
 				const cwd = typeof message["cwd"] === "string" ? message["cwd"] : process.cwd();
 				const name = typeof message["name"] === "string" ? message["name"] : undefined;
-				const info = await hub.create(cwd, name);
+				const worktree = normalizeWorktreeRequest(message["worktree"]);
+				const info = await hub.create(cwd, name, worktree);
 				send(frameOpened(info));
 				return;
 			}

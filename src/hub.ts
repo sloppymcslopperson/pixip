@@ -8,6 +8,7 @@ import { PENDING_UI_GRACE_MS, PENDING_UI_OPEN_MS, REASK_REPLY_MS } from "./pendi
 import type { PiBackend } from "./backend.ts";
 import { WINDOW_BYTES, WINDOW_ENTRIES } from "./jsonl.ts";
 import type { CommandLayer } from "./commands.ts";
+import type { CreateWorktreeRequest } from "./worktree.ts";
 import type { RpcChild } from "./rpc.ts";
 import type {
 	NameSource,
@@ -181,9 +182,14 @@ export class Hub {
 		return hubStore.watch.apply(this, arguments as any);
 	}
 
+	/** Recompute live peer lists after a create, stop, archive or child exit. */
+	private async refreshPeers(): Promise<void> {
+		return await hubLive.refreshPeers.apply(this, arguments as any);
+	}
+
 	// ------------------------------------------------------------- lifecycle
 
-	async create(cwd: string, name?: string): Promise<SessionInfo> {
+	async create(cwd: string, name?: string, worktree?: CreateWorktreeRequest): Promise<SessionInfo> {
 		return await hubLive.create.apply(this, arguments as any);
 	}
 
@@ -835,4 +841,4 @@ export type {
 	StoredSessionRecord,
 	SessionTarget,
 } from "./sessionIndex.ts";
-export type { SessionInfo, SessionState } from "./wire.ts";
+export type { SessionInfo, SessionPeer, SessionState, WorktreeInfo } from "./wire.ts";

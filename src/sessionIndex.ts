@@ -1,5 +1,5 @@
 // Index and stored-session shapes shared by the Hub and its store modules.
-import type { SessionInfo } from "./wire.ts";
+import type { SessionInfo, WorktreeInfo } from "./wire.ts";
 
 /** Who owns the session name; a manual rename always wins over the auto label. */
 export type NameSource = "auto" | "manual";
@@ -25,6 +25,7 @@ export interface SessionIndexRecord {
 	/** Whether `name` came from the first-prompt label or a user rename. */
 	nameSource?: NameSource;
 	sessionFile?: string;
+	worktree?: WorktreeInfo;
 	createdAt: string;
 }
 
@@ -64,6 +65,20 @@ export interface SessionTarget {
  * the entry the record belongs to. Pi's RPC events carry no entry id, so the key
  * is the only way a socket can tell "already in the snapshot" from "newer".
  */
+function normalizeWorktree(raw: unknown): WorktreeInfo | undefined {
+	if (!raw || typeof raw !== "object") return undefined;
+	const worktree = raw as Partial<WorktreeInfo>;
+	if (typeof worktree.repo !== "string" || typeof worktree.path !== "string" || typeof worktree.branch !== "string") {
+		return undefined;
+	}
+	return {
+		repo: worktree.repo,
+		path: worktree.path,
+		branch: worktree.branch,
+		pixipActive: worktree.pixipActive === true,
+	};
+}
+
 export function normalizeRecord(raw: unknown, fallbackCwd: string): SessionIndexRecord[] {
 	if (!raw || typeof raw !== "object") return [];
 	const record = raw as Partial<SessionIndexRecord>;
@@ -78,6 +93,7 @@ export function normalizeRecord(raw: unknown, fallbackCwd: string): SessionIndex
 			name: typeof record.name === "string" ? record.name : undefined,
 			nameSource: record.nameSource === "auto" || record.nameSource === "manual" ? record.nameSource : undefined,
 			sessionFile: typeof record.sessionFile === "string" ? record.sessionFile : undefined,
+			worktree: normalizeWorktree(record.worktree),
 			createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
 		},
 	];
@@ -93,6 +109,7 @@ export function storedInfo(record: StoredSessionRecord, kind: "archive" | "trash
 		name: record.name,
 		state: "stopped",
 		sessionFile: record.sessionFile,
+		worktree: record.worktree,
 		lastActivity: at,
 		...(kind === "archive" ? { archivedAt: record.storedAt } : { deletedAt: record.storedAt, expiresAt: at + graceMs }),
 	};
