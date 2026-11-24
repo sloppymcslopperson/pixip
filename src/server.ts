@@ -249,10 +249,8 @@ async function handleHttp(
 			return;
 		}
 		if (req.method === "GET" && url.pathname === "/api/worktrees") {
-			if (!isLoopback(req)) {
-				send(403, JSON.stringify({ error: "worktrees are loopback-only" }));
-				return;
-			}
+			// Worktree management is a normal dashboard feature, not a host-local
+			// admin verb: it must work when pixip is bound to a LAN/Tailscale address.
 			const cwd = url.searchParams.get("cwd");
 			if (!cwd) {
 				send(400, JSON.stringify({ error: "cwd is required" }));
@@ -266,10 +264,6 @@ async function handleHttp(
 			return;
 		}
 		if (req.method === "DELETE" && url.pathname === "/api/worktrees") {
-			if (!isLoopback(req)) {
-				send(403, JSON.stringify({ error: "worktrees are loopback-only" }));
-				return;
-			}
 			const parsed = JSON.parse((await readBody(req)) || "{}") as {
 				cwd?: unknown;
 				worktree?: { branch?: unknown };

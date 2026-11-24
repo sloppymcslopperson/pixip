@@ -256,8 +256,9 @@ REST is only for discovery, process verbs and downloads: `GET /api/sessions`,
 (JSON `{cwd, worktree: {branch}, force?}`),
 `GET /api/sessions/:id/export.html` and `GET /api/sessions/:id/export.jsonl`
 (both `Content-Disposition: attachment`), `GET /api/info`, `GET /health`
-(`pid`, `startedAt`, `reloads`) and `POST /api/refresh`. The worktree routes and
-refresh are loopback-only because they mutate the filesystem or process state.
+(`pid`, `startedAt`, `reloads`) and `POST /api/refresh`. Refresh is loopback-only;
+the worktree routes follow the server bind like the rest of the dashboard, because
+managing a tree is a normal session action rather than a host-local admin verb.
 Streaming never uses HTTP requests.
 
 ## New-session directory picker
