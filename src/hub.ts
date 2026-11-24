@@ -73,6 +73,11 @@ export interface HubOptions {
 	backend?: PiBackend;
 	/** How long deleted sessions stay restorable in the trash. Default 60 s. */
 	trashGraceMs?: number;
+	/**
+	 * Skip the constructor's trash purge. Read-only tools (the worktree CLI's
+	 * offline fallback) must not delete a daemon's restorable deletes.
+	 */
+	skipStartupTrash?: boolean;
 	/** Model for automatic session labels (`provider/id`); defaults to the session's model. */
 	titleModel?: string;
 	/** One-shot title call timeout. Default 15 s. */
@@ -171,7 +176,7 @@ export class Hub {
 		this.pendingUiOpenTimeoutMs = options.pendingUiOpenTimeoutMs ?? PENDING_UI_OPEN_MS;
 		this.pendingUiMoreTimeMs = options.pendingUiMoreTimeMs ?? 120_000;
 		this.reaskReplyMs = options.reaskReplyMs ?? REASK_REPLY_MS;
-		this.startupTrash = this.purgeTrashOnStart();
+		this.startupTrash = options.skipStartupTrash ? Promise.resolve() : this.purgeTrashOnStart();
 	}
 
 	// ---------------------------------------------------------------- listing

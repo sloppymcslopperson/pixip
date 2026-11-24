@@ -108,11 +108,12 @@ do in the TUI.
 
 ## What works today
 
-- session list grouped by cwd with collapsible sections (collapsed by default),
-  live state (idle/busy/stopped/error), create from a typed path, from the
-  home-fenced directory picker (`browse`), or from a group's `+`, open, stop,
-  wake/reattach; collapsing keeps hot/warm sessions and each group's newest
-  session visible by default, configurable from the header gear;
+- session list grouped by repository and worktree with collapsible sections
+  (collapsed by default), live state (idle/busy/stopped/error), create from a
+  typed path, from the home-fenced directory picker (`browse`), from a group's
+  `+`, or as `new with worktree`, open, stop, wake/reattach; collapsing keeps
+  hot/warm sessions and each group's newest session visible by default,
+  configurable from the header gear;
 - first-prompt session labels: a separate one-shot Pi call summarizes the
   substantive task in the first prompt to 3-5 words, ignoring slash-command
   boilerplate (a command is labeled from the user message it expands into;
@@ -186,12 +187,45 @@ stop/start runs in a detached helper that survives the calling session, and
 down (use a shell outside pixip to really stop it). The phone reconnects with
 backoff and its durable cursor, and sessions reattach from their JSONL.
 
+## Worktrees
+
+A session can run in a fresh git worktree, or join any directory that already
+has a live agent. The dashboard's `new with worktree` creates one from the main
+repo's current `HEAD`; a repo group's `+` menu offers it too. The directory is
+`<repo-parent>/pixip_worktrees/<repo-name>/<slug>`, the branch is
+`pixip/<slug>`, and the slug is editable in a confirm step before creation. A
+worktree group's `new` starts another agent in the same directory with no git
+mutation; manually opening a session at a worktree path detects the same
+metadata. Several agents may share any cwd (worktree or plain directory), with
+a dismissible notice naming the peers.
+
+The CLI inspects the same data without the UI:
+
+```bash
+pixip worktree list [<repo-or-path>] [--json]
+pixip worktree remove <path> [--force]
+pixip worktree prune [<repo-or-path>]
+```
+
+`list` defaults to the current directory and shows repo, path, branch, owner
+(`pixip` or `external`), live agent count, dirty state and session names. It uses
+the running daemon when one owns the data dir, and reads the index directly when
+none is running. `remove` takes the exact worktree root; `--force` discards
+uncommitted changes. Removal is never automatic: stop, archive and session
+delete leave the tree alone. A tree referenced by any listed session, or an
+external tree that pixip did not create/mount, is always refused, even with
+`--force`. Refusals exit `2`; usage, git and daemon errors exit `1`.
+
+**Worktrees are not a sandbox.** They are parallel working directories, not
+isolation: agents share your user, network, credentials and the rest of the
+filesystem. Use a container or a separate VPS when you need a security boundary.
+
 ## Not yet
 
 - TUI visual parity: diff/syntax colouring and the TUI's own theme colours (theme
   values are `okhsl`, which browsers do not support without conversion — see
   `85-theme-tokens`);
-- worktree creation, input history and `@file` completion;
+- input history and `@file` completion;
 - virtualised transcript for very long sessions;
 - auth of any kind (bind loopback, or a private VPN interface — same posture as
   `aoe serve --host 100.42.42.1 --auth none`).
@@ -259,5 +293,6 @@ latency, the memory policy, and the Rust-port map.
 ## Relationship to AoE
 
 Eventually this replaces AoE for Pi sessions. Not yet, and not co-running: two
-supervisors over the same repo will disagree about worktrees and session
-ownership. AoE keeps working untouched until pixip covers the same ground.
+supervisors can both manage worktrees, but each owns only the sessions it
+started, so a session cannot be controlled from the other. AoE keeps working
+untouched until pixip covers the same ground.

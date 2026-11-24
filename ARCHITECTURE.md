@@ -288,12 +288,21 @@ relative input is resolved against home.
 ## Worktrees, repo groups and peers
 
 A worktree is a parallel working directory, never a sandbox: agents share the
-user, network and filesystem. `src/worktree.ts` shells out to git and stays the
+user, network and filesystem. Isolation is the administrator's container or VPS,
+not a property of the tree. `src/worktree.ts` shells out to git and stays the
 only git boundary; the hub adds `repo` (main repository root) to sessions in any
 git repo and `worktree` (`{repo, path, branch, pixipActive}`) only for linked
 worktrees. Both are persisted in the session index, so stopped rows keep their
 group after a restart. `pixipActive` means pixip created the tree or mounted a
 session in it; it is not a security boundary.
+
+New trees live at `<repo-parent>/pixip_worktrees/<repo-name>/<slug>`, created
+from the main repo's current `HEAD` (or an explicit base) with branch
+`pixip/<slug>`. The slug is the directory name and is validated before any git
+mutation. Joining an existing tree never runs `worktree add`: the hub detects a
+linked worktree from the session cwd and inherits its metadata, so a manually
+opened path joins the right group. A non-repo worktree request fails with git's
+message and creates no session.
 
 The dashboard groups sessions as one parent per repository with direct
 main-repo rows and one child per worktree. A manually opened worktree row
@@ -307,7 +316,25 @@ Delete is explicit and never automatic: stop, archive and session delete leave
 the tree alone. `DELETE /api/worktrees` refuses a tree referenced by any listed
 session (returning those sessions for its actions), refuses `pixipActive: false`
 trees even with `force`, and requires `force` for a dirty tree after showing the
-changed-file count. The main worktree is never removable.
+changed-file count. The main worktree is never removable. The CLI applies the
+same rules (`pixip worktree remove <path> [--force]`), except that `--force`
+only overrides dirty state: references and external trees always refuse.
+
+The CLI keeps git logic in `src/worktree.ts` rather than duplicating commands:
+
+- `pixip worktree list [<path>] [--json]` resolves the repository, lists every
+  tree with owner (`pixip`/`external`), live agent count, dirty count and session
+  names. With a running data-dir daemon it fetches `GET /api/worktrees` plus
+  `GET /api/sessions`; offline it instantiates the `Hub` with startup trash
+  cleanup disabled and calls the same list functions.
+- `pixip worktree remove <path>` requires the exact worktree root, resolves the
+  repo and delegates to the hub remove path (REST when a daemon is running,
+  otherwise the offline Hub). Safe refusals exit `2`; usage/git/daemon errors exit
+  `1`.
+- `pixip worktree prune [<path>]` resolves the repo and runs `git worktree prune`
+  through `src/worktree.ts`, printing the pruned repository. Prune only clears git
+  admin records for trees whose directories disappeared; it never deletes a live
+  worktree and is not part of normal session teardown.
 
 Peers are a directory property: live sessions are compared by realpath cwd and
 each `SessionInfo` carries reciprocal `peers: [{id, name}]`, refreshed on
@@ -773,8 +800,9 @@ per child, and raw bytes/strings on the hot path.
    would remove that wait (see the Pi hot-swap spike in the ticket board).
 2. Hub restart kills live children. Resume-all-on-start (by last activity) or
    leave them stopped?
-3. Worktree CLI verbs and docs are still open; the dashboard and REST surfaces
-   are implemented (see the ticket board).
+3. Worktree create/list/remove/prune are implemented across the dashboard, REST
+   and CLI; the remaining worktree gaps belong to the options TOML and desktop
+   surface tickets, not the lifecycle.
 4. Ordering: snapshot + live events have a small race window; a durable cursor
    (`get_entries?since=<leafId>`) on reconnect closes it properly.
 5. Multi-client: today each socket is independent; two phones on one session both

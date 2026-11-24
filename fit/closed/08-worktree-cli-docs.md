@@ -1,5 +1,6 @@
 ---
 project: pixip
+grilled: true
 ---
 
 Add the `pixip worktree` CLI verbs and document the worktree model, its lifecycle, and the deliberate non-goal of sandboxing.
@@ -30,3 +31,16 @@ Decisions are in `backlog/60-worktrees-for-aoe-parity.md`. CLI and docs only; cr
 ### Grilling
 
 Further grilling is welcome for CLI flags, exit codes and `--force` semantics. Product decisions in the parent ticket are settled.
+
+### Grilled answers (2026-11-24)
+
+- **Data source:** daemon first. When the data-dir daemon is running, use `GET /api/worktrees` plus `GET /api/sessions`; otherwise instantiate the `Hub` over the same data-dir (with startup trash cleanup skipped) so `list` and safety checks still work offline.
+- **Reference override:** never. `--force` only overrides dirty state, matching the dashboard and parent design. Referenced trees (live or stopped) and external `pixipActive: false` trees always refuse. This resolves the earlier conflicting answers in favour of the settled parent rule.
+- **Force semantics:** `--force` discards uncommitted changes after the explicit flag; it never bypasses session references or external ownership.
+- **Output:** human-readable aligned table by default, plus `--json` for machine-readable output, matching `status --json`.
+- **Exit codes:** `0` success; `1` usage/git/daemon errors; `2` safe refusal (referenced, dirty without `--force`, external).
+- **Owner column:** `pixip` when `pixipActive` is true, otherwise `external`.
+- **Arguments:** `worktree list [<repo-or-path>]` and `worktree prune [<repo-or-path>]` default to cwd; `worktree remove <path>` requires the exact worktree root. Any path inside the repo is accepted for list/prune and resolved to its root.
+- **List contents:** repo, path, branch, owner, live agent count, dirty state, and session names/states, so the CLI answers who is in a worktree without the UI.
+- **JSON shape:** `{repo, worktrees: [{...WorktreeEntry, owner, liveAgents, sessions: [{id, name, state, live}]}]}`.
+- **Prune:** run git's prune for the resolved repo and print `pruned <repo>`; no before/after listing.

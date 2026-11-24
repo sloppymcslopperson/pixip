@@ -7,6 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Hub } from "../src/hub.ts";
+import type { RemoveWorktreeResult, WorktreeListing } from "../src/hub.ts";
 import { startServer } from "../src/server.ts";
 import {
 	busySessions,
@@ -27,6 +28,8 @@ import {
 	waitForHealth,
 	writeDaemonState,
 } from "../src/daemon.ts";
+import { detectRepo, pruneWorktrees, realCwd } from "../src/worktree.ts";
+import type { WorktreeEntry } from "../src/worktree.ts";
 import type { SessionInfo } from "../src/wire.ts";
 import { spawnEnv } from "../src/spawnEnv.ts";
 
@@ -42,9 +45,9 @@ import { spawnEnv } from "../src/spawnEnv.ts";
  * serve path; `stop`/`status`/`logs`/`refresh`/`restart` manage it.
  */
 
-type Command = "serve" | "start" | "stop" | "status" | "logs" | "refresh" | "restart";
+type Command = "serve" | "start" | "stop" | "status" | "logs" | "refresh" | "restart" | "worktree";
 
-const SUBCOMMANDS = new Set<string>(["start", "stop", "status", "logs", "refresh", "restart"]);
+const SUBCOMMANDS = new Set<string>(["start", "stop", "status", "logs", "refresh", "restart", "worktree"]);
 
 interface Options {
 	host: string;
@@ -79,6 +82,26 @@ interface Options {
 	timeoutS: number;
 	/** Internal: this process is the detached restart helper. */
 	detached: boolean;
+	/** Non-flag arguments after the subcommand (`worktree list [<path>]`). */
+	positionals: string[];
+}
+
+interface WorktreeSessionView {
+	id: string;
+	name: string;
+	state: SessionInfo["state"];
+	live: boolean;
+}
+
+interface WorktreeView extends WorktreeEntry {
+	owner: "pixip" | "external";
+	liveAgents: number;
+	sessions: WorktreeSessionView[];
+}
+
+interface WorktreeListingResult extends WorktreeListing {
+	sessions: SessionInfo[];
+	source: "daemon" | "offline";
 }
 
 function parseArgs(argv: string[]): Options {
@@ -104,6 +127,7 @@ function parseArgs(argv: string[]): Options {
 		whenIdle: false,
 		timeoutS: 300,
 		detached: false,
+		positionals: [],
 	};
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index];
@@ -196,7 +220,10 @@ function parseArgs(argv: string[]): Options {
 				process.exit(0);
 				break;
 			default:
-				throw new Error(`unknown argument ${arg}`);
+				if (arg === undefined) break;
+				if (arg.startsWith("-")) throw new Error(`unknown argument ${arg}`);
+				options.positionals.push(arg);
+				break;
 		}
 	}
 	if (!Number.isInteger(options.port) || options.port < 0 || options.port > 65_535) {
@@ -271,9 +298,34 @@ Commands:
                       busy unless --force; --when-idle waits for the other
                       sessions (the calling one does not count) up to --timeout
                       (default 300s, exit 2)
+  worktree <list|remove|prune>
+                      inspect or remove git worktrees (see 'pixip worktree --help')
 
 Options:
 ${serveOptions}
+`;
+	process.stdout.write(usage);
+}
+
+function printWorktreeHelp(): void {
+	const usage = `Usage: pixip worktree <command> [options]
+
+Commands:
+  list [<path>] [--json]
+                      trees in the repository containing <path> (default: cwd),
+                      with owner, live agents, dirty state and session names
+  remove <path> [--force]
+                      remove one exact worktree root. --force discards
+                      uncommitted changes; referenced and external trees are
+                      always refused (exit 2)
+  prune [<path>]      run git worktree prune for the repository containing
+                      <path> (default: cwd)
+
+Options:
+  --data-dir <path>   isolation root used by a running daemon, or read offline
+                      when no daemon is running (default ./tmp/dev)
+  --json              machine-readable output
+  --force             allow removing a dirty worktree
 `;
 	process.stdout.write(usage);
 }
@@ -317,7 +369,17 @@ function serveArgs(options: Options): string[] {
 async function main(): Promise<void> {
 	const argv = process.argv.slice(2);
 	const command: Command = SUBCOMMANDS.has(argv[0] ?? "") ? (argv.shift() as Command) : "serve";
+	if (command === "worktree") {
+		const action = argv.shift();
+		if (!action || action === "--help" || action === "-h" || action === "help") {
+			printWorktreeHelp();
+			return;
+		}
+		const options = parseArgs(argv);
+		return await cmdWorktree(action, options);
+	}
 	const options = parseArgs(argv);
+	if (options.positionals.length > 0) throw new Error(`unknown argument ${options.positionals[0]}`);
 	switch (command) {
 		case "start":
 			return await cmdStart(options);
@@ -699,6 +761,247 @@ async function cmdRestart(options: Options): Promise<void> {
 			return;
 		}
 		await delay(100);
+	}
+}
+
+// --------------------------------------------------------------- worktree
+
+function isLiveSession(session: SessionInfo): boolean {
+	return session.state === "starting" || session.state === "idle" || session.state === "busy";
+}
+
+function enrichWorktrees(worktrees: WorktreeEntry[], repo: string, sessions: SessionInfo[]): WorktreeView[] {
+	return worktrees.map((entry) => {
+		const matching = sessions.filter((session) =>
+			entry.path === repo ? session.repo === repo && !session.worktree : session.worktree?.path === entry.path,
+		);
+		const rows = matching.map((session) => ({
+			id: session.logicalId ?? session.id,
+			name: session.name || "Untitled session",
+			state: session.state,
+			live: isLiveSession(session),
+		}));
+		return {
+			...entry,
+			owner: entry.pixipActive ? "pixip" : "external",
+			liveAgents: rows.filter((row) => row.live).length,
+			sessions: rows,
+		};
+	});
+}
+
+function offlineHub(options: Options): Hub {
+	return new Hub({
+		piBin: options.piBin,
+		sessionsDir: join(options.dataDir, "sessions"),
+		dataDir: options.dataDir,
+		indexPath: join(options.dataDir, "sessions.json"),
+		idleMs: 0,
+		extraPiArgs: [],
+		// A read-only CLI command must not purge the daemon's trash as a side effect.
+		skipStartupTrash: true,
+		log: () => {},
+	});
+}
+
+async function fetchJson<T>(url: URL, init?: RequestInit): Promise<T> {
+	const response = await fetch(url, { ...init, signal: AbortSignal.timeout(10_000) });
+	const text = await response.text();
+	let body: unknown = {};
+	try {
+		body = text ? JSON.parse(text) : {};
+	} catch {
+		body = {};
+	}
+	if (!response.ok) {
+		const error = (body as { error?: unknown }).error;
+		throw new Error(typeof error === "string" ? error : `request failed (${response.status})`);
+	}
+	return body as T;
+}
+
+async function loadWorktreeListing(options: Options, cwd: string): Promise<WorktreeListingResult> {
+	const daemon = await runningDaemon(options.dataDir);
+	if (daemon) {
+		const [listing, sessions] = await Promise.all([
+			fetchJson<WorktreeListing>(new URL(`api/worktrees?cwd=${encodeURIComponent(cwd)}`, daemon.url)),
+			fetchSessions(daemon.url),
+		]);
+		return { ...listing, sessions, source: "daemon" };
+	}
+
+	const hub = offlineHub(options);
+	try {
+		const [listing, sessions] = await Promise.all([hub.listWorktrees(cwd), hub.list()]);
+		return { ...listing, sessions, source: "offline" };
+	} finally {
+		await hub.shutdown();
+	}
+}
+
+async function findWorktree(entries: WorktreeEntry[], target: string): Promise<WorktreeEntry | undefined> {
+	const realTarget = await realCwd(target);
+	for (const entry of entries) {
+		if ((await realCwd(entry.path)) === realTarget) return entry;
+	}
+	return entries.find((entry) => resolve(entry.path) === resolve(target));
+}
+
+function formatWorktreeTable(rows: WorktreeView[]): string {
+	const headers = ["PATH", "BRANCH", "OWNER", "LIVE", "DIRTY", "SESSIONS"];
+	const data = rows.map((entry) => [
+		entry.path,
+		entry.branch,
+		entry.owner,
+		String(entry.liveAgents),
+		entry.dirty ? `${entry.changedFiles} changed` : "clean",
+		entry.sessions.length > 0 ? entry.sessions.map((session) => `${session.name} (${session.state})`).join(", ") : "-",
+	]);
+	const widths = headers.map((header, index) => Math.max(header.length, ...data.map((row) => row[index]?.length ?? 0)));
+	const line = (cells: string[]) =>
+		cells.map((cell, index) => (index === cells.length - 1 ? cell : cell.padEnd(widths[index] ?? 0))).join("  ");
+	return [line(headers), line(widths.map((width) => "-".repeat(width))), ...data.map(line)].join("\n") + "\n";
+}
+
+async function cmdWorktreeList(options: Options): Promise<void> {
+	if (options.positionals.length > 1) {
+		throw new Error("usage: pixip worktree list [<repo-or-path>] [--json]");
+	}
+	const cwd = resolve(options.positionals[0] ?? process.cwd());
+	const listing = await loadWorktreeListing(options, cwd);
+	const worktrees = enrichWorktrees(listing.worktrees, listing.repo, listing.sessions);
+	if (options.json) {
+		process.stdout.write(`${JSON.stringify({ repo: listing.repo, worktrees })}\n`);
+		return;
+	}
+	process.stdout.write(`repo: ${listing.repo}\n`);
+	process.stdout.write(formatWorktreeTable(worktrees));
+}
+
+async function removeViaDaemon(
+	url: string,
+	cwd: string,
+	branch: string,
+	force: boolean,
+): Promise<RemoveWorktreeResult> {
+	const response = await fetch(new URL("api/worktrees", url), {
+		method: "DELETE",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ cwd, worktree: { branch }, force }),
+		signal: AbortSignal.timeout(30_000),
+	});
+	const text = await response.text();
+	let body: Record<string, unknown> = {};
+	try {
+		body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+	} catch {
+		body = {};
+	}
+	if (response.ok) return { removed: true, worktree: body["worktree"] as WorktreeEntry };
+	const reason = body["reason"];
+	const worktree = body["worktree"] as WorktreeEntry | undefined;
+	if (response.status === 409 && worktree && reason === "referenced") {
+		return {
+			removed: false,
+			reason,
+			worktree,
+			sessions: Array.isArray(body["sessions"]) ? (body["sessions"] as SessionInfo[]) : [],
+		};
+	}
+	if (response.status === 409 && worktree && (reason === "dirty" || reason === "external")) {
+		return { removed: false, reason, worktree };
+	}
+	const error = body["error"];
+	throw new Error(typeof error === "string" ? error : `remove failed (${response.status})`);
+}
+
+function reportRemoval(result: RemoveWorktreeResult, options: Options): void {
+	if (result.removed) {
+		if (options.json) {
+			process.stdout.write(`${JSON.stringify(result)}\n`);
+		} else {
+			process.stdout.write(`removed ${result.worktree.path} (${result.worktree.branch})\n`);
+		}
+		return;
+	}
+
+	if (options.json) {
+		process.stdout.write(`${JSON.stringify(result)}\n`);
+	} else if (result.reason === "referenced") {
+		process.stderr.write(
+			`refusing to remove ${result.worktree.path}: ${result.sessions.length} session(s) still reference it\n`,
+		);
+		for (const session of result.sessions) {
+			process.stderr.write(`  ${session.name || "Untitled session"} (${session.state})\n`);
+		}
+	} else if (result.reason === "dirty") {
+		process.stderr.write(
+			`refusing to remove ${result.worktree.path}: ${result.worktree.changedFiles} changed file(s); use --force\n`,
+		);
+	} else {
+		process.stderr.write(`refusing to remove ${result.worktree.path}: external worktree; pixip will not remove it\n`);
+	}
+	process.exitCode = 2;
+}
+
+async function cmdWorktreeRemove(options: Options): Promise<void> {
+	if (options.positionals.length !== 1) {
+		throw new Error("usage: pixip worktree remove <path> [--force]");
+	}
+	const target = resolve(options.positionals[0] as string);
+	const daemon = await runningDaemon(options.dataDir);
+
+	if (daemon) {
+		const listing = await fetchJson<WorktreeListing>(
+			new URL(`api/worktrees?cwd=${encodeURIComponent(target)}`, daemon.url),
+		);
+		const entry = await findWorktree(listing.worktrees, target);
+		if (!entry) throw new Error(`unknown worktree ${target}`);
+		const result = await removeViaDaemon(daemon.url, listing.repo, entry.branch, options.force);
+		return reportRemoval(result, options);
+	}
+
+	const hub = offlineHub(options);
+	try {
+		const listing = await hub.listWorktrees(target);
+		const entry = await findWorktree(listing.worktrees, target);
+		if (!entry) throw new Error(`unknown worktree ${target}`);
+		const result = await hub.removeWorktree({
+			cwd: listing.repo,
+			worktree: { branch: entry.branch },
+			force: options.force,
+		});
+		reportRemoval(result, options);
+	} finally {
+		await hub.shutdown();
+	}
+}
+
+async function cmdWorktreePrune(options: Options): Promise<void> {
+	if (options.positionals.length > 1) {
+		throw new Error("usage: pixip worktree prune [<repo-or-path>] [--json]");
+	}
+	const cwd = resolve(options.positionals[0] ?? process.cwd());
+	const repo = await detectRepo(cwd);
+	if (!repo) throw new Error(`not a git repository: ${cwd}`);
+	await pruneWorktrees(repo);
+	if (options.json) {
+		process.stdout.write(`${JSON.stringify({ pruned: repo })}\n`);
+	} else {
+		process.stdout.write(`pruned ${repo}\n`);
+	}
+}
+
+async function cmdWorktree(action: string, options: Options): Promise<void> {
+	switch (action) {
+		case "list":
+			return await cmdWorktreeList(options);
+		case "remove":
+			return await cmdWorktreeRemove(options);
+		case "prune":
+			return await cmdWorktreePrune(options);
+		default:
+			throw new Error(`unknown worktree command ${action}`);
 	}
 }
 
