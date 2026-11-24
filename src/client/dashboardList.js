@@ -4,16 +4,20 @@ import { initialDirectory } from "./directoryPicker.js";
 import { installDeps } from "./configure.js";
 import { listSessions } from "./dashboardApi.js";
 import { openDirectorySheet } from "./dashboardPicker.js";
+import { openNewWorktreeSheet, openWorktreeSheet } from "./dashboardWorktree.js";
 import { bulkArchiveTargets, draftInputValue, groupDisplay } from "./dashboardModel.js";
 import { beginNewSession } from "./navigation.js";
 import { escapeHtml, relativeTime } from "./render.js";
 import {
 	COLLAPSED_STORAGE_KEY,
 	countLabel,
+	groupActions,
 	groupBranch,
 	groupLabel,
-	groupSessions,
+	groupSessionCount,
+	groupSessionTree,
 	serializeCollapsed,
+	worktreeBranchLabel,
 } from "./sessionGroups.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
@@ -30,6 +34,7 @@ export async function refreshDashboard() {
 }
 
 export function renderList(sessions, defaultCwd = state.defaultCwd, home = state.home) {
+	closeGroupMenu();
 	const draft = ui.list.querySelector("#new-row input")?.value;
 	state.sessions = Array.isArray(sessions) ? sessions : [];
 	if (typeof defaultCwd === "string") state.defaultCwd = defaultCwd;
@@ -38,11 +43,13 @@ export function renderList(sessions, defaultCwd = state.defaultCwd, home = state
 	const form = document.createElement("form");
 	form.id = "new-row";
 	const value = draftInputValue(draft, state.defaultCwd);
-	form.innerHTML = `<input name="cwd" value="${escapeHtml(value)}" placeholder="/path/to/project" autocapitalize="off" autocorrect="off" spellcheck="false" /><button type="button" class="browse">browse</button><button type="submit">new</button>`;
+	form.innerHTML = `<input name="cwd" value="${escapeHtml(value)}" placeholder="/path/to/project" autocapitalize="off" autocorrect="off" spellcheck="false" /><button type="button" class="browse">browse</button><button type="submit" class="new-plain">new</button><button type="submit" class="new-worktree">new with worktree</button>`;
 	form.addEventListener("submit", (event) => {
 		event.preventDefault();
 		const cwd = form.querySelector("input")?.value?.trim();
-		if (cwd) beginNewSession(cwd);
+		if (!cwd) return;
+		if (event.submitter?.classList.contains("new-worktree")) void openNewWorktreeSheet(cwd);
+		else beginNewSession(cwd);
 	});
 	form.querySelector(".browse")?.addEventListener("click", () => {
 		void openDirectorySheet(initialDirectory(state.defaultCwd, state.home));
@@ -60,7 +67,7 @@ export function renderList(sessions, defaultCwd = state.defaultCwd, home = state
 		ui.list.append(bulk);
 	}
 
-	const groups = groupSessions(state.sessions);
+	const groups = groupSessionTree(state.sessions);
 	if (groups.length === 0) {
 		const empty = document.createElement("div");
 		empty.className = "row row-state";
@@ -73,13 +80,55 @@ export function renderList(sessions, defaultCwd = state.defaultCwd, home = state
 
 export function renderGroup(group) {
 	const section = document.createElement("section");
-	section.className = "group";
-	section.dataset.cwd = group.key;
+	section.className = group.kind === "worktree" ? "group worktree-group" : "group";
+	section.dataset.cwd = group.cwd;
 	// Open states persist; a group seen for the first time starts collapsed.
 	const collapsed = state.collapsed[group.key] !== false;
-	const { view, canToggle } = groupDisplay(group, collapsed, state.keepActive);
+	const display = groupDisplay({ sessions: group.sessions }, collapsed, state.keepActive);
+	const view = display.view;
+	const hidden = groupSessionCount(group) - view.rows.length;
+	const canToggle = group.kind === "repo" ? hidden > 0 : display.canToggle;
 	const head = document.createElement("div");
 	head.className = "group-head";
+	const control = makeGroupControl(group, collapsed, canToggle, hidden);
+	head.append(control);
+	if (group.kind === "plain") {
+		const add = document.createElement("button");
+		add.type = "button";
+		add.className = "group-new";
+		add.textContent = "+";
+		add.title = "new session here";
+		add.setAttribute("aria-label", `New session in ${groupLabel(group, state.home)}`);
+		add.addEventListener("click", () => beginNewSession(group.cwd));
+		head.append(add);
+	} else {
+		const add = document.createElement("button");
+		add.type = "button";
+		add.className = "group-new";
+		add.textContent = "+";
+		add.title = "session actions";
+		add.setAttribute("aria-label", `Actions for ${groupLabel(group, state.home)}`);
+		add.setAttribute("aria-haspopup", "menu");
+		add.addEventListener("click", (event) => {
+			event.stopPropagation();
+			openGroupMenu(head, group);
+		});
+		head.append(add);
+	}
+	section.append(head);
+	if (view.rows.length > 0) {
+		const rows = document.createElement("div");
+		rows.className = "group-rows";
+		for (const session of view.rows) rows.append(sessionRow(session));
+		section.append(rows);
+	}
+	if (!collapsed && group.kind === "repo") {
+		for (const child of group.worktrees) section.append(renderGroup(child));
+	}
+	return section;
+}
+
+function makeGroupControl(group, collapsed, canToggle, hidden) {
 	const control = document.createElement(canToggle ? "button" : "div");
 	control.className = canToggle ? "group-toggle" : "group-title";
 	if (canToggle) {
@@ -98,39 +147,72 @@ export function renderGroup(group) {
 	const path = document.createElement("span");
 	path.className = "group-path";
 	path.textContent = groupLabel(group, state.home);
-	path.title = group.key || "unknown cwd";
-	const branch = groupBranch(group);
+	path.title = group.cwd || "unknown cwd";
+	const branch =
+		group.kind === "worktree" ? worktreeBranchLabel(group.branch) : group.kind === "repo" ? groupBranch(group) : "";
 	const count = document.createElement("span");
 	count.className = "group-count";
-	count.textContent = countLabel(group.sessions.length, view.hidden);
+	count.textContent = countLabel(groupSessionCount(group), hidden);
 	control.append(path);
 	if (branch) {
 		const chip = document.createElement("span");
 		chip.className = "group-branch";
 		chip.textContent = branch;
-		chip.title = `git branch ${branch}`;
+		chip.title = `git branch ${group.kind === "worktree" ? group.branch : branch}`;
 		control.append(chip);
 	}
 	control.append(count);
-	head.append(control);
-	if (group.cwd) {
-		const add = document.createElement("button");
-		add.type = "button";
-		add.className = "group-new";
-		add.textContent = "+";
-		add.title = "new session here";
-		add.setAttribute("aria-label", `New session in ${groupLabel(group, state.home)}`);
-		add.addEventListener("click", () => beginNewSession(group.cwd));
-		head.append(add);
+	return control;
+}
+
+let groupMenu = null;
+
+function closeGroupMenu() {
+	groupMenu?.remove();
+	groupMenu = null;
+	document.removeEventListener("click", onDocumentClick, true);
+}
+
+function onDocumentClick(event) {
+	if (groupMenu?.contains(event.target)) return;
+	closeGroupMenu();
+}
+
+function openGroupMenu(head, group) {
+	closeGroupMenu();
+	const menu = document.createElement("div");
+	menu.className = "group-menu";
+	menu.setAttribute("role", "menu");
+	for (const action of groupActions(group)) {
+		const button = document.createElement("button");
+		button.type = "button";
+		button.setAttribute("role", "menuitem");
+		if (action === "newWorktree") {
+			button.textContent = "new with worktree";
+			button.addEventListener("click", () => {
+				closeGroupMenu();
+				void openNewWorktreeSheet(group.repo ?? group.cwd);
+			});
+		} else if (action === "delete") {
+			button.textContent = "delete worktree";
+			button.className = "danger";
+			button.addEventListener("click", () => {
+				closeGroupMenu();
+				void openWorktreeSheet(group);
+			});
+		} else {
+			button.textContent = "new session";
+			button.addEventListener("click", () => {
+				closeGroupMenu();
+				beginNewSession(group.cwd);
+			});
+		}
+		menu.append(button);
 	}
-	section.append(head);
-	if (view.rows.length > 0) {
-		const rows = document.createElement("div");
-		rows.className = "group-rows";
-		for (const session of view.rows) rows.append(sessionRow(session));
-		section.append(rows);
-	}
-	return section;
+	head.append(menu);
+	groupMenu = menu;
+	// Defer so the opening click does not immediately close the menu.
+	setTimeout(() => document.addEventListener("click", onDocumentClick, true), 0);
 }
 
 export function sessionRow(session) {

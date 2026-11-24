@@ -200,3 +200,60 @@
 	color: var(--accent);
 	border-color: var(--accent);
 }
+
+/* ---- group actions menu (07) ---- */
+.group-head {
+	position: relative;
+}
+.group-menu {
+	position: absolute;
+	top: calc(100% + 2px);
+	right: 0;
+	z-index: 6;
+	display: flex;
+	flex-direction: column;
+	min-width: 168px;
+	padding: 5px;
+	background: var(--bg-raised);
+	border: 1px solid var(--line);
+	border-radius: 10px;
+	box-shadow: 0 10px 30px #0007;
+}
+.group-menu button {
+	text-align: left;
+	background: none;
+	border: 0;
+	border-radius: 7px;
+	padding: 9px 10px;
+	color: var(--fg);
+	font-size: 13px;
+}
+.group-menu button:hover {
+	background: var(--bg-soft);
+	color: var(--accent);
+}
+.group-menu button.danger:hover {
+	color: var(--err);
+}
+/* Child worktree cards sit under their repo, indented a little rather than
+   stretching into a second column. */
+.worktree-group {
+	margin-left: 10px;
+	padding-left: 9px;
+	border-left: 1px solid var(--line);
+}
+@media (max-width: 430px) {
+	#new-row {
+		flex-wrap: wrap;
+	}
+	#new-row input {
+		flex-basis: 100%;
+	}
+	#new-row button {
+		flex: 1;
+		min-height: 38px;
+		padding: 0 7px;
+		font-size: 12.5px;
+		white-space: nowrap;
+	}
+}

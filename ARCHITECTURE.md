@@ -252,11 +252,13 @@ REST is only for discovery, process verbs and downloads: `GET /api/sessions`,
 `POST /api/sessions/:id/archive`, `POST /api/sessions/archive-inactive`,
 `DELETE /api/sessions/:id`, `GET /api/archived`, `POST /api/archived/:id/restore`,
 `DELETE /api/archived/:id`, `GET /api/trash`, `POST /api/trash/:id/restore`,
-`DELETE /api/trash/:id`,
+`DELETE /api/trash/:id`, `GET /api/worktrees?cwd=`, `DELETE /api/worktrees`
+(JSON `{cwd, worktree: {branch}, force?}`),
 `GET /api/sessions/:id/export.html` and `GET /api/sessions/:id/export.jsonl`
 (both `Content-Disposition: attachment`), `GET /api/info`, `GET /health`
-(`pid`, `startedAt`, `reloads`) and `POST /api/refresh` (loopback-only soft
-refresh). Streaming never uses HTTP requests.
+(`pid`, `startedAt`, `reloads`) and `POST /api/refresh`. The worktree routes and
+refresh are loopback-only because they mutate the filesystem or process state.
+Streaming never uses HTTP requests.
 
 ## New-session directory picker
 
@@ -273,9 +275,41 @@ segment under the current directory (`mkdir`, no `-p`) and rejects traversal,
 collisions and names starting with a dot. Paths are absolute or `~`-relative;
 relative input is resolved against home.
 
+## Worktrees, repo groups and peers
+
+A worktree is a parallel working directory, never a sandbox: agents share the
+user, network and filesystem. `src/worktree.ts` shells out to git and stays the
+only git boundary; the hub adds `repo` (main repository root) to sessions in any
+git repo and `worktree` (`{repo, path, branch, pixipActive}`) only for linked
+worktrees. Both are persisted in the session index, so stopped rows keep their
+group after a restart. `pixipActive` means pixip created the tree or mounted a
+session in it; it is not a security boundary.
+
+The dashboard groups sessions as one parent per repository with direct
+main-repo rows and one child per worktree. A manually opened worktree row
+synthesizes its parent from `worktree.repo`. `+` opens an anchored menu: a repo
+parent offers `new` and `new with worktree`, a worktree child offers `new` (same
+directory, no git mutation) and `delete`. The top new-session form has both
+buttons; `new with worktree` fetches `GET /api/worktrees` first, then shows an
+editable slug with the resulting directory and `pixip/<slug>` branch.
+
+Delete is explicit and never automatic: stop, archive and session delete leave
+the tree alone. `DELETE /api/worktrees` refuses a tree referenced by any listed
+session (returning those sessions for its actions), refuses `pixipActive: false`
+trees even with `force`, and requires `force` for a dirty tree after showing the
+changed-file count. The main worktree is never removable.
+
+Peers are a directory property: live sessions are compared by realpath cwd and
+each `SessionInfo` carries reciprocal `peers: [{id, name}]`, refreshed on
+create/stop/archive/child-exit. The client shows one inline transcript banner per
+open session naming every peer, with a tap to open one and a dismiss that lasts
+for that session. A changed peer set does not resurrect a dismissed banner.
+Sharing one directory means agents can overwrite each other's files.
+
 ## Instant new-session window
 
-Every dashboard new-session affordance (the `new` form button and a group's `+`)
+Every dashboard new-session affordance (the `new` form button, `new with
+worktree`, and a group's `+`)
 does not wait for the child. It pushes a synthetic `#new` route, paints the
 session shell with `starting session…` in the history and a disabled composer,
 then sends the existing `create` frame on the dashboard socket. When the hub
@@ -569,12 +603,14 @@ still the only way to make the child itself fast, and is deliberately not done
 
 ## UI strategy (responsiveness on a phone)
 
-- dashboard sessions are grouped by exact cwd (trailing slashes trimmed; blank
-  cwd is one `unknown cwd` group), ordered by newest activity. A collapsed group
-  keeps every hot (`busy`/`starting`) or warm (`idle`) session plus its newest
-  session visible; the engine is the pure `src/client/sessionGroups.js`. Collapse
-  state and the pinning toggle are device-local (`localStorage`), and group paths
-  are shortened with `home` from `/api/info`/`hello`;
+- dashboard sessions are grouped hierarchically by repository and worktree
+  (`src/client/sessionGroups.js`, pure and unit-tested). A parent repo group
+  counts all descendants and owns direct rows plus child worktree cards; plain
+  directories stay flat. A collapsed group keeps every hot (`busy`/`starting`)
+  or warm (`idle`) direct session plus its newest direct session visible, and
+  hides its worktree children. Collapse state and the pinning toggle are
+  device-local (`localStorage`), and group paths are shortened with `home` from
+  `/api/info`/`hello`;
 - each group header carries the git branch for its cwd. The hub resolves it once
   per distinct cwd on the session-list path (`git rev-parse --abbrev-ref HEAD`,
   cached ~5 s) and sends `branch` on the session info; subdirectories, worktrees
@@ -619,6 +655,7 @@ protocol path is still one obvious place to start:
 | `src/hubSession.ts`                                                         | model/thinking/name, tree/fork/clone/import, `/new` re-key, UI replay                                                      |
 | `src/jsonl.ts`                                                              | pure parse/window/truncate/coverage helpers (unit-tested)                                                                  |
 | `src/sessionIndex.ts`                                                       | index/archive/trash record shapes and normalization                                                                        |
+| `src/worktree.ts` / `src/hubWorktree.ts`                                    | the git boundary (detect/create/list/remove/dirty/merged) and hub list/remove safety rules                                 |
 | `src/wire.ts`                                                               | the frame constructors; the protocol table above is authoritative                                                          |
 | `src/client/app.js`                                                         | composition root: boot, DOM listeners, transport/navigation wiring; imports all features and exports nothing               |
 | `src/client/frames.js`                                                      | protocol adapter: one frame switch, routed to feature handlers, plus socket-close reconnect                                |
@@ -632,6 +669,7 @@ protocol path is still one obvious place to start:
 | `src/client/dashboardPicker.js`                                             | directory picker sheet transitions and DOM                                                                                 |
 | `src/client/dashboardSettings.js`                                           | settings, archive and trash sheets                                                                                         |
 | `src/client/dashboardModel.js`                                              | pure dashboard view model (no DOM, HTTP or kernel state)                                                                   |
+| `src/client/dashboardWorktree.js`                                           | worktree create confirm and manage/delete sheet, including refusal states                                                  |
 | `src/client/session.js`                                                     | open/cache/restore and the new-session shell                                                                               |
 | `src/client/sessionEffects.js`                                              | snapshot/restart/status/re-key/socket-close frame effects                                                                  |
 | `src/client/sessionPlan.js`                                                 | pure frame-effect plans used by `session.js` and `sessionEffects.js`                                                       |
@@ -684,7 +722,8 @@ module both sides import (kernel, pure helpers, and the `scroll`, `menuView`,
 than becoming another callback.
 
 The feature clusters are dashboard (`dashboard`, `dashboardApi`,
-`dashboardList`, `dashboardPicker`, `dashboardSettings`, `dashboardModel`),
+`dashboardList`, `dashboardPicker`, `dashboardSettings`, `dashboardModel`,
+`dashboardWorktree`),
 session (`session`, `sessionEffects`, `sessionPlan`) and composer (`composer`,
 `composerAttachments`, `composerBash`). Allowed edges: features may import
 kernel, pure/domain helpers, shared seams, and same-cluster siblings; they must
@@ -695,9 +734,10 @@ module at all. Nothing imports `app.js`, and the graph has no cycles.
 cluster map lives in that file and nowhere else. `npm run check:imports` fails
 on a cycle, an `app.js` import, a cross-cluster feature import, or a non-feature
 module importing a feature handler. `tools/browser-check.mjs` is the runtime
-counterpart: it drives the real client through dashboard, composer, inline
-`select`, A2UI panel and transcript-window flows at 390x844 and 1280x900, failing
-on page/console errors or horizontal overflow.
+counterpart: it drives the real client through dashboard, worktree create/delete
+refusal, peer notice, composer, inline `select`, A2UI panel and transcript-window
+flows at 390x844 and 1280x900, failing on page/console errors or horizontal
+overflow.
 
 ## Rust port map
 
@@ -723,8 +763,8 @@ per child, and raw bytes/strings on the hot path.
    would remove that wait (see the Pi hot-swap spike in the ticket board).
 2. Hub restart kills live children. Resume-all-on-start (by last activity) or
    leave them stopped?
-3. Worktrees: pixip needs them to replace AoE; `git worktree` in the hub, or shell
-   out to `aoe`-style helpers?
+3. Worktree CLI verbs and docs are still open; the dashboard and REST surfaces
+   are implemented (see the ticket board).
 4. Ordering: snapshot + live events have a small race window; a durable cursor
    (`get_entries?since=<leafId>`) on reconnect closes it properly.
 5. Multi-client: today each socket is independent; two phones on one session both

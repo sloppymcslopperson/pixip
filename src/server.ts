@@ -248,6 +248,61 @@ async function handleHttp(
 			send(200, JSON.stringify(await createDirectory(parsed.path, parsed.name, osHome())));
 			return;
 		}
+		if (req.method === "GET" && url.pathname === "/api/worktrees") {
+			if (!isLoopback(req)) {
+				send(403, JSON.stringify({ error: "worktrees are loopback-only" }));
+				return;
+			}
+			const cwd = url.searchParams.get("cwd");
+			if (!cwd) {
+				send(400, JSON.stringify({ error: "cwd is required" }));
+				return;
+			}
+			try {
+				send(200, JSON.stringify(await hub.listWorktrees(cwd)));
+			} catch (error) {
+				send(400, JSON.stringify({ error: (error as Error).message }));
+			}
+			return;
+		}
+		if (req.method === "DELETE" && url.pathname === "/api/worktrees") {
+			if (!isLoopback(req)) {
+				send(403, JSON.stringify({ error: "worktrees are loopback-only" }));
+				return;
+			}
+			const parsed = JSON.parse((await readBody(req)) || "{}") as {
+				cwd?: unknown;
+				worktree?: { branch?: unknown };
+				force?: unknown;
+			};
+			const cwd = typeof parsed.cwd === "string" ? parsed.cwd : "";
+			const branch = typeof parsed.worktree?.branch === "string" ? parsed.worktree.branch : "";
+			if (!cwd || !branch) {
+				send(400, JSON.stringify({ error: "cwd and worktree.branch are required" }));
+				return;
+			}
+			const result = await hub.removeWorktree({ cwd, worktree: { branch }, force: parsed.force === true });
+			if (result.removed) {
+				send(200, JSON.stringify({ ok: true, worktree: result.worktree }));
+				return;
+			}
+			const message =
+				result.reason === "referenced"
+					? "worktree still has sessions"
+					: result.reason === "dirty"
+						? "worktree has uncommitted changes"
+						: "external worktree; pixip will not remove it";
+			send(
+				409,
+				JSON.stringify({
+					error: message,
+					reason: result.reason,
+					worktree: result.worktree,
+					...(result.reason === "referenced" ? { sessions: result.sessions } : {}),
+				}),
+			);
+			return;
+		}
 		if (req.method === "GET" && url.pathname === "/api/sessions") {
 			send(200, JSON.stringify(await hub.list()));
 			return;

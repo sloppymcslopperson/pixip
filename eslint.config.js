@@ -48,7 +48,7 @@ export default tseslint.config(
 		},
 	},
 	{
-		files: ["src/hubStore.ts", "src/hubLive.ts", "src/hubControl.ts", "src/hubSession.ts"],
+		files: ["src/hubStore.ts", "src/hubLive.ts", "src/hubControl.ts", "src/hubSession.ts", "src/hubWorktree.ts"],
 		rules: {
 			"@typescript-eslint/ban-ts-comment": "off",
 			"@typescript-eslint/no-unused-vars": "off",

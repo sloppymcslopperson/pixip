@@ -3,10 +3,19 @@ import { describe, it } from "node:test";
 
 import {
 	countLabel,
+	groupActions,
 	groupBranch,
 	groupLabel,
+	groupSessionCount,
+	groupSessionTree,
 	groupSessions,
 	groupView,
+	nextWorktreeSlug,
+	pathBasename,
+	slugifyWorktree,
+	worktreeBranchFor,
+	worktreeBranchLabel,
+	worktreePathFor,
 	isActiveSession,
 	isHot,
 	isWarm,
@@ -161,5 +170,98 @@ describe("labels and storage", () => {
 		assert.equal(parseKeepActive("false"), false);
 		assert.equal(serializeKeepActive(false), "0");
 		assert.equal(serializeKeepActive(true), "1");
+	});
+});
+
+describe("repo and worktree hierarchy", () => {
+	const repo = "/home/x/proj";
+	const tree = groupSessionTree([
+		{ id: "main1", cwd: repo, repo, state: "busy", lastActivity: 100, branch: "main" },
+		{
+			id: "wt1",
+			cwd: `${repo}-worktrees/fix`,
+			repo,
+			state: "stopped",
+			lastActivity: 300,
+			branch: "pixip/fix",
+			worktree: { repo, path: "/home/x/pixip_worktrees/proj/fix", branch: "pixip/fix", pixipActive: true },
+		},
+		{
+			id: "wt2",
+			cwd: "/home/x/pixip_worktrees/proj/other",
+			repo,
+			state: "idle",
+			lastActivity: 200,
+			branch: "pixip/other",
+			worktree: { repo, path: "/home/x/pixip_worktrees/proj/other", branch: "pixip/other", pixipActive: true },
+		},
+		{ id: "plain", cwd: "/tmp/plain", state: "stopped", lastActivity: 50 },
+	]);
+
+	it("groups direct repo sessions and each worktree under one parent", () => {
+		assert.equal(tree.length, 2);
+		const parent = tree[0];
+		assert.equal(parent.kind, "repo");
+		assert.equal(parent.repo, repo);
+		assert.deepEqual(
+			parent.sessions.map((session) => session.id),
+			["main1"],
+		);
+		assert.deepEqual(
+			parent.worktrees.map((group) => group.branch),
+			["pixip/fix", "pixip/other"],
+		);
+		assert.equal(groupSessionCount(parent), 3);
+		assert.equal(tree[1].kind, "plain");
+	});
+
+	it("synthesizes the parent for a manually opened worktree", () => {
+		const [parent] = groupSessionTree([
+			{
+				id: "manual",
+				cwd: "/elsewhere/pixip_worktrees/repo/manual",
+				state: "stopped",
+				lastActivity: 1,
+				worktree: {
+					repo: "/elsewhere/repo",
+					path: "/elsewhere/pixip_worktrees/repo/manual",
+					branch: "manual",
+					pixipActive: true,
+				},
+			},
+		]);
+		assert.equal(parent.kind, "repo");
+		assert.equal(parent.repo, "/elsewhere/repo");
+		assert.equal(parent.sessions.length, 0);
+		assert.equal(parent.worktrees[0].sessions[0].id, "manual");
+	});
+
+	it("offers parent and worktree actions without a worktree for a plain cwd", () => {
+		assert.deepEqual(groupActions(tree[0]), ["new", "newWorktree"]);
+		assert.deepEqual(groupActions(tree[0].worktrees[0]), ["new", "delete"]);
+		assert.deepEqual(groupActions(tree[1]), ["new"]);
+	});
+});
+
+describe("worktree slug helpers", () => {
+	it("prefills a git-safe slug from the repo basename", () => {
+		assert.equal(pathBasename("/home/x/My_Project/"), "My_Project");
+		assert.equal(slugifyWorktree("My_Project"), "my_project");
+		assert.equal(slugifyWorktree("  ../Fix Reconnect!! "), "fix-reconnect");
+		assert.equal(slugifyWorktree("a/b"), "a-b");
+	});
+
+	it("suggests a suffix for an existing branch", () => {
+		assert.equal(nextWorktreeSlug("fix", []), "fix");
+		assert.equal(nextWorktreeSlug("fix", ["pixip/fix"]), "fix-2");
+		assert.equal(nextWorktreeSlug("fix", ["pixip/fix", "fix-2"]), "fix-3");
+		assert.equal(nextWorktreeSlug("!!!", []), "worktree");
+	});
+
+	it("labels branches and derives the managed directory", () => {
+		assert.equal(worktreeBranchLabel("pixip/fix"), "fix");
+		assert.equal(worktreeBranchLabel("main"), "main");
+		assert.equal(worktreeBranchFor("fix"), "pixip/fix");
+		assert.equal(worktreePathFor("/home/x/proj", "fix"), "/home/x/pixip_worktrees/proj/fix");
 	});
 });

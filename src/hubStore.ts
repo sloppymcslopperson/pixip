@@ -22,7 +22,7 @@ import {
 import { moveFile, nameFromLines, pathExists, readFromEnd, readHead, uniquePath, SYMBOL_PENDING } from "./jsonl.ts";
 import { type CommandLayer } from "./commands.ts";
 import { clearPendingReasks } from "./pendingReask.ts";
-import { realCwd } from "./worktree.ts";
+import { detectRepo, realCwd } from "./worktree.ts";
 import type { CommandPolicy, SessionInfo } from "./wire.ts";
 
 const run = promisify(execFile);
@@ -158,6 +158,7 @@ export async function list(this: any): Promise<SessionInfo[]> {
 			name: header.name ?? record?.name,
 			state: "stopped",
 			sessionFile: path,
+			...(record?.repo ? { repo: record.repo } : {}),
 			...(record?.worktree ? { worktree: record.worktree } : {}),
 			lastActivity: Date.parse(header.timestamp) || 0,
 		});
@@ -172,6 +173,7 @@ export async function list(this: any): Promise<SessionInfo[]> {
 			name: record.name,
 			state: "stopped",
 			sessionFile: record.sessionFile,
+			...(record.repo ? { repo: record.repo } : {}),
 			...(record.worktree ? { worktree: record.worktree } : {}),
 			lastActivity: Date.parse(record.createdAt) || 0,
 		});
@@ -179,6 +181,7 @@ export async function list(this: any): Promise<SessionInfo[]> {
 	infos.sort((a, b) => b.lastActivity - a.lastActivity);
 	// One git call per distinct cwd, shared by every session in that repo.
 	const branches = new Map<string, string | undefined>();
+	const repos = new Map<string, string | undefined>();
 	const realCwds = new Map<string, string>();
 	const liveByCwd = new Map<string, SessionInfo[]>();
 	for (const live of this.live.values()) {
@@ -190,6 +193,11 @@ export async function list(this: any): Promise<SessionInfo[]> {
 	}
 	for (const info of infos) {
 		if (!info.cwd) continue;
+		if (!info.repo) {
+			if (!repos.has(info.cwd)) repos.set(info.cwd, await detectRepo(info.cwd));
+			const repo = repos.get(info.cwd);
+			if (repo) info.repo = repo;
+		}
 		if (!branches.has(info.cwd)) branches.set(info.cwd, await this.gitBranch(info.cwd));
 		const branch = branches.get(info.cwd);
 		if (branch) info.branch = branch;
@@ -371,6 +379,7 @@ export async function upsertIndex(
 			name,
 			nameSource: source,
 			sessionFile: info.sessionFile ?? existing?.sessionFile,
+			repo: info.repo ?? existing?.repo,
 			worktree: info.worktree ?? existing?.worktree,
 			createdAt: existing?.createdAt ?? createdAt ?? new Date().toISOString(),
 		};
@@ -443,6 +452,7 @@ export async function resolveTarget(this: any, id: string): Promise<SessionTarge
 			cwd: info.cwd,
 			name: info.name,
 			sessionFile: info.sessionFile,
+			repo: info.repo,
 			...(info.worktree ? { worktree: info.worktree } : {}),
 			createdAt: new Date(info.lastActivity || Date.now()).toISOString(),
 		};
@@ -466,6 +476,7 @@ export async function resolveTarget(this: any, id: string): Promise<SessionTarge
 		name: record.name,
 		state: "stopped",
 		sessionFile: record.sessionFile,
+		...(record.repo ? { repo: record.repo } : {}),
 		...(record.worktree ? { worktree: record.worktree } : {}),
 		lastActivity: Date.parse(record.createdAt) || 0,
 	};
@@ -540,6 +551,7 @@ export async function restoreStored(this: any, root: string, id: string): Promis
 		name: record.name,
 		nameSource: record.nameSource,
 		sessionFile: record.sessionFile,
+		repo: record.repo,
 		worktree: record.worktree,
 		createdAt: record.createdAt,
 	};
@@ -573,6 +585,7 @@ export async function restoreStored(this: any, root: string, id: string): Promis
 		name: restored.name,
 		state: "stopped",
 		sessionFile: restored.sessionFile,
+		...(restored.repo ? { repo: restored.repo } : {}),
 		...(restored.worktree ? { worktree: restored.worktree } : {}),
 		lastActivity: Date.now(),
 	};

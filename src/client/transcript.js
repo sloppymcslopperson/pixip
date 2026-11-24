@@ -3,7 +3,7 @@ import { appendBlock, hideThinkingIndicator, showThinkingIndicator } from "./tra
 import { installDeps } from "./configure.js";
 import { renderQueue } from "./queueView.js";
 import { scheduleScroll, scrollToEnd } from "./scroll.js";
-import { applyInfo, setBusy } from "./sessionView.js";
+import { applyInfo, renderPeerNotice, setBusy } from "./sessionView.js";
 import { queueCount, queueFromEvent } from "./queue.js";
 import {
 	ansiToHtml,
@@ -226,6 +226,7 @@ export function renderTranscript(distance = null) {
 			? '<div class="block meta">no messages yet — say something</div>'
 			: htmlOf(entries.slice(start), calls);
 	if (older) ui.log.prepend(older);
+	renderPeerNotice();
 	restore();
 	trackTools();
 	trackTruncated();
@@ -237,6 +238,7 @@ export function renderTranscript(distance = null) {
 		const { from } = planFillChunk(entries, start, FILL_CHUNK_BYTES);
 		ui.log.insertAdjacentHTML("afterbegin", htmlOf(entries.slice(from, start), calls));
 		if (older) ui.log.prepend(older);
+		renderPeerNotice();
 		restore();
 		trackTools();
 		trackTruncated();

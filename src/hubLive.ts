@@ -11,6 +11,7 @@ import { resolveSessionPolicy, type CommandLayer } from "./commands.ts";
 import { messageText } from "./titles.ts";
 import {
 	createWorktree,
+	detectRepo,
 	detectWorktree,
 	normalizeWorktreeRequest,
 	realCwd,
@@ -268,12 +269,14 @@ export async function spawn(
 	ready.catch(() => {});
 
 	const worktree = input.worktree ?? (await detectWorktree(input.cwd));
+	const repo = worktree?.repo ?? (await detectRepo(input.cwd));
 	const info: SessionInfo = {
 		id: "",
 		logicalId,
 		cwd: input.cwd,
 		state: "starting",
 		peers: [],
+		...(repo ? { repo } : {}),
 		...(worktree ? { worktree } : {}),
 		lastActivity: started,
 	};

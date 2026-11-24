@@ -15,6 +15,9 @@
  * involved: the fixture Hub is the same one `test/` uses.
  */
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { mkdir, writeFile } from "node:fs/promises";
+import { promisify } from "node:util";
 import puppeteer from "puppeteer-core";
 
 import { startServer } from "../src/server.ts";
@@ -28,6 +31,7 @@ if (!executablePath) {
 }
 
 const CLIENT_DIR = fileURLToPath(new URL("../src/client", import.meta.url));
+const run = promisify(execFile);
 const VIEWPORTS = [
 	{ width: 390, height: 844 },
 	{ width: 1280, height: 900 },
@@ -54,6 +58,20 @@ async function bootFixture() {
 		entries.map((entry) => JSON.stringify(entry)),
 		{ cwd: paths.dir },
 	);
+	const repo = `${paths.dir}/repo`;
+	const gitEnv = {
+		...process.env,
+		GIT_AUTHOR_NAME: "pixip browser",
+		GIT_AUTHOR_EMAIL: "pixip@example.invalid",
+		GIT_COMMITTER_NAME: "pixip browser",
+		GIT_COMMITTER_EMAIL: "pixip@example.invalid",
+	};
+	await mkdir(repo, { recursive: true });
+	await run("git", ["-C", repo, "init", "-b", "main"], { env: gitEnv });
+	await writeFile(`${repo}/file.txt`, "one\n");
+	await run("git", ["-C", repo, "add", "file.txt"], { env: gitEnv });
+	await run("git", ["-C", repo, "commit", "-m", "init"], { env: gitEnv });
+
 	const hub = hubFor(paths, {}, { FAKE_PI_ENTRIES: JSON.stringify(entries) });
 	const server = await startServer({
 		host: "127.0.0.1",
@@ -63,7 +81,20 @@ async function bootFixture() {
 		log: () => {},
 		dev: true,
 	});
-	return { paths, hub, server, sessionId: id };
+	const main = await hub.create(repo, "repo main");
+	const peer = await hub.create(repo, "repo peer");
+	const worktree = await hub.create(repo, "worktree agent", { branch: "ui-check" });
+	return {
+		paths,
+		hub,
+		server,
+		sessionId: id,
+		repo,
+		mainId: main.id,
+		peerId: peer.id,
+		worktreeId: worktree.id,
+		worktreeBranch: "ui-check",
+	};
 }
 
 function delay(ms) {
@@ -140,7 +171,9 @@ async function runDashboardFlow(page, base, sessionId) {
 	await page.goto(base, { waitUntil: "domcontentloaded", timeout: FLOW_TIMEOUT });
 	const row = await page.waitForSelector(`.row[data-id="${sessionId}"]`, { timeout: FLOW_TIMEOUT });
 	assert.ok(row, "dashboard lists the seeded session");
-	await page.click(`.row[data-id="${sessionId}"] .row-open`);
+	// Click in-page: a live `sessions` frame can replace the row between the
+	// selector wait and a Puppeteer click, which would detach the handle.
+	await page.evaluate((id) => document.querySelector(`.row[data-id="${id}"] .row-open`)?.click(), sessionId);
 	await waitForSession(page);
 	await checkNoOverflow(page, "session open");
 }
@@ -351,17 +384,121 @@ async function runParkFlow(page, base, sessionId) {
 	await page.goto(`${base}#s=${sessionId}`, { waitUntil: "domcontentloaded", timeout: FLOW_TIMEOUT });
 	await waitForSession(page);
 	const beforeBack = await page.evaluate(() => window.__pixipSockets);
-	await page.click("#back");
+	await page.evaluate(() => document.querySelector("#back").click());
 	await page.waitForSelector(`.row[data-id="${sessionId}"] .row-open`, { timeout: FLOW_TIMEOUT });
 	await page.waitForFunction(() => !document.querySelector("#list").hidden, { timeout: FLOW_TIMEOUT });
 	const onList = await page.evaluate(() => window.__pixipSockets);
 	assert.ok(onList > beforeBack, "leaving the session opens the dashboard socket");
 
-	await page.click(`.row[data-id="${sessionId}"] .row-open`);
+	await page.evaluate((id) => document.querySelector(`.row[data-id="${id}"] .row-open`)?.click(), sessionId);
 	await waitForSession(page);
 	const backInSession = await page.evaluate(() => window.__pixipSockets);
 	assert.equal(backInSession, onList, "returning to a parked session opens no new WebSocket");
 	await checkNoOverflow(page, "parked session return");
+}
+
+async function waitGroup(page, repo) {
+	await page.waitForFunction(
+		(repo) =>
+			[...document.querySelectorAll("#list section.group")].some(
+				(section) => section.dataset.cwd === repo && section.querySelector(".group-toggle"),
+			),
+		{ timeout: FLOW_TIMEOUT },
+		repo,
+	);
+}
+
+async function openGroupMenu(page, selector) {
+	await page.evaluate((selector) => document.querySelector(`${selector} .group-new`)?.click(), selector);
+	await page.waitForSelector(`${selector} .group-menu`, { timeout: FLOW_TIMEOUT });
+}
+
+async function runWorktreeFlow(page, base, fixture) {
+	await page.goto(base, { waitUntil: "domcontentloaded", timeout: FLOW_TIMEOUT });
+	await waitGroup(page, fixture.repo);
+
+	const buttons = await page.evaluate(() => ({
+		plain: Boolean(document.querySelector("#new-row .new-plain")),
+		worktree: Boolean(document.querySelector("#new-row .new-worktree")),
+	}));
+	assert.deepEqual(buttons, { plain: true, worktree: true }, "top form has both new buttons");
+
+	// Top form: "new with worktree" fetches the repo and opens the confirm step.
+	await page.$eval(
+		"#new-row input",
+		(input, repo) => {
+			input.value = repo;
+		},
+		fixture.repo,
+	);
+	await page.click("#new-row .new-worktree");
+	await page.waitForSelector("#sheet .worktree-new", { timeout: FLOW_TIMEOUT });
+	const form = await page.evaluate(() => ({
+		slug: document.querySelector("#sheet .worktree-new input")?.value ?? "",
+		preview: document.querySelector("#sheet .worktree-preview")?.textContent ?? "",
+	}));
+	assert.ok(form.slug.length > 0, "worktree slug is prefilled");
+	assert.match(form.preview, /pixip_worktrees/, "confirm step names the resulting directory");
+	assert.match(form.preview, /pixip\//, "confirm step names the resulting branch");
+	await page.click("#sheet .sheet-actions button:last-child");
+	await page.waitForFunction(() => document.querySelector("#sheet")?.hidden === true, { timeout: FLOW_TIMEOUT });
+
+	const repoSelector = `#list section.group[data-cwd="${fixture.repo}"]`;
+	const expanded = await page.$eval(
+		`${repoSelector} .group-toggle`,
+		(button) => button.getAttribute("aria-expanded") === "true",
+	);
+	if (!expanded)
+		await page.evaluate((selector) => document.querySelector(selector)?.click(), `${repoSelector} .group-toggle`);
+	await page.waitForSelector(`${repoSelector} section.worktree-group`, { timeout: FLOW_TIMEOUT });
+	await openGroupMenu(page, repoSelector);
+	const parentMenu = await page.evaluate(() =>
+		[...document.querySelectorAll("#list .group-menu button")].map((button) => (button.textContent ?? "").trim()),
+	);
+	assert.deepEqual(parentMenu, ["new session", "new with worktree"], "parent group menu has both create actions");
+	await page.keyboard.press("Escape");
+	await page.evaluate(() => document.body.click());
+
+	const worktreeSelector = "#list section.worktree-group";
+	await openGroupMenu(page, worktreeSelector);
+	const worktreeMenu = await page.evaluate(() =>
+		[...document.querySelectorAll("#list .group-menu button")].map((button) => (button.textContent ?? "").trim()),
+	);
+	assert.deepEqual(worktreeMenu, ["new session", "delete worktree"], "worktree group menu has new and delete");
+	await page.evaluate(() =>
+		[...document.querySelectorAll("#list .group-menu button")]
+			.find((button) => (button.textContent ?? "").includes("delete"))
+			?.click(),
+	);
+	await page.waitForSelector("#sheet .worktree-list", { timeout: FLOW_TIMEOUT });
+	const branchRows = await page.evaluate(() =>
+		[...document.querySelectorAll("#sheet .worktree-branch")].map((node) => (node.textContent ?? "").trim()),
+	);
+	assert.ok(branchRows.includes(fixture.worktreeBranch), "manage sheet lists the target worktree");
+	await page.evaluate(() =>
+		[...document.querySelectorAll("#sheet .worktree-row button")]
+			.find((button) => (button.textContent ?? "").trim() === "delete")
+			?.click(),
+	);
+	await page.waitForSelector("#sheet .sheet-actions .danger", { timeout: FLOW_TIMEOUT });
+	await page.click("#sheet .sheet-actions .danger");
+	await page.waitForFunction(
+		() => (document.querySelector("#sheet .sheet-title")?.textContent ?? "").includes("in use"),
+		{ timeout: FLOW_TIMEOUT },
+	);
+	const refusal = await page.evaluate(() => document.querySelector("#sheet .sheet-text")?.textContent ?? "");
+	assert.match(refusal, /still has sessions/, "referenced worktree delete is refused with its sessions");
+	await page.click("#sheet .sheet-actions button:last-child");
+
+	// Peer notice: two live agents in the same repo directory.
+	await page.goto(`${base}#s=${fixture.mainId}`, { waitUntil: "domcontentloaded", timeout: FLOW_TIMEOUT });
+	await waitForSession(page);
+	await page.waitForSelector("#log .peer-notice", { timeout: FLOW_TIMEOUT });
+	const peerText = await page.evaluate(() => document.querySelector("#log .peer-notice")?.textContent ?? "");
+	assert.match(peerText, /repo peer/, "peer notice names the other agent");
+	await page.click("#log .peer-notice .peer-dismiss");
+	await page.waitForFunction(() => document.querySelector("#log .peer-notice") === null, { timeout: FLOW_TIMEOUT });
+	await checkNoOverflow(page, "worktree dashboard");
 }
 
 async function runViewport(browser, base, fixture, viewport) {
@@ -369,7 +506,14 @@ async function runViewport(browser, base, fixture, viewport) {
 	const problems = [];
 	page.on("pageerror", (error) => problems.push(`pageerror: ${error.message}`));
 	page.on("console", (message) => {
-		if (message.type() === "error") problems.push(`console: ${message.text()}`);
+		if (message.type() !== "error") return;
+		// A deliberate 4xx refusal (for example deleting a referenced worktree)
+		// is an API result the flow asserts on, not an application error. Chrome
+		// still logs every non-2xx fetch as a console error, so filter that exact
+		// resource failure rather than hiding other console errors.
+		const location = message.location()?.url ?? "";
+		if (message.text().includes("Failed to load resource") && location.includes("/api/worktrees")) return;
+		problems.push(`console: ${message.text()}`);
 	});
 	await page.setViewport({
 		width: viewport.width,
@@ -380,6 +524,7 @@ async function runViewport(browser, base, fixture, viewport) {
 	});
 	try {
 		await runDashboardFlow(page, base, fixture.sessionId);
+		await runWorktreeFlow(page, base, fixture);
 		await runComposerFlow(page, base, fixture.sessionId, fixture.paths, viewport);
 		await runSelectFlow(page, base, fixture.sessionId, fixture.hub, fixture.paths);
 		await runPanelFlow(page, base, fixture.sessionId);

@@ -4,7 +4,8 @@ import { chooseAttachment, clearPendingAttachment, setAttachMenu } from "./compo
 import { resize } from "./composerInput.js";
 import { bindScaleButton, readScale, setBarMenu, setScale, softRefresh } from "./controls.js";
 import { configureDashboard, showList } from "./dashboard.js";
-import { configureDashboardList } from "./dashboardList.js";
+import { configureDashboardList, refreshDashboard } from "./dashboardList.js";
+import { configureDashboardWorktree } from "./dashboardWorktree.js";
 import {
 	archiveInactive,
 	configureDashboardSettings,
@@ -368,6 +369,7 @@ ui.log.addEventListener("click", (event) => {
 configureComposer({ surfaceOpen });
 configureDashboard({ cacheCurrentSession, clearPendingAttachment, parkCurrentSession, resetSurface });
 configureDashboardList({ archiveInactive, openSessionActions });
+configureDashboardWorktree({ refresh: refreshDashboard, openSessionActions });
 configureDashboardSettings({ sheet });
 configureMenu({ submit });
 configureSession({ clearPendingAttachment, resetSurface, renderTranscript });

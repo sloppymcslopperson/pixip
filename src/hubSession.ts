@@ -14,7 +14,7 @@ import { type CommandLayer } from "./commands.ts";
 import { resolveModelArgument, resolveThinkingArgument } from "./client/commands.js";
 import { exportFileName } from "./client/sessionInfo.js";
 import { fallbackTitle, normalizeTitle, titlePrompt } from "./titles.ts";
-import { detectWorktree } from "./worktree.ts";
+import { detectRepo, detectWorktree } from "./worktree.ts";
 import { frameEvent } from "./wire.ts";
 import type { CommandPolicy, DynamicCommand, ModelSummary, SessionInfo } from "./wire.ts";
 
@@ -407,6 +407,7 @@ export async function importSession(
 	const logicalId = existing?.logicalId ?? randomUUID();
 	const importedCwd = typeof header.cwd === "string" ? header.cwd : live.info.cwd;
 	const worktree = await detectWorktree(importedCwd);
+	const repo = worktree?.repo ?? (await detectRepo(importedCwd));
 	const imported: SessionInfo = {
 		id: header.id,
 		logicalId,
@@ -414,6 +415,7 @@ export async function importSession(
 		name: nameFromLines(text.split("\n").slice(0, NAME_HEAD_LINES)),
 		state: "idle",
 		sessionFile: target,
+		...(repo ? { repo } : {}),
 		...(worktree ? { worktree } : {}),
 		lastActivity: Date.now(),
 	};
@@ -422,6 +424,8 @@ export async function importSession(
 	// The live session now *is* the imported one: follow its identity and cwd.
 	live.info.logicalId = logicalId;
 	live.info.cwd = imported.cwd;
+	if (imported.repo) live.info.repo = imported.repo;
+	else delete live.info.repo;
 	if (imported.worktree) live.info.worktree = imported.worktree;
 	else delete live.info.worktree;
 	const result =

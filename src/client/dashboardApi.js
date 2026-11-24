@@ -12,7 +12,14 @@ export async function listSessions() {
 export async function apiJson(path, options = {}) {
 	const response = await fetch(path, options);
 	const body = await response.json().catch(() => ({}));
-	if (!response.ok) throw new Error(body.error ?? `request failed (${response.status})`);
+	if (!response.ok) {
+		const error = new Error(body.error ?? `request failed (${response.status})`);
+		// Callers that need structured refusals (dirty worktrees, referenced
+		// sessions) read the parsed body without a second request.
+		error.body = body;
+		error.status = response.status;
+		throw error;
+	}
 	return body;
 }
 

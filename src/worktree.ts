@@ -142,6 +142,15 @@ async function branchAt(cwd: string): Promise<string> {
 	return sha || "HEAD";
 }
 
+/** The main repository root for any cwd inside a repo, or undefined outside git. */
+export async function detectRepo(cwd: string): Promise<string | undefined> {
+	try {
+		return (await repository(cwd)).root;
+	} catch {
+		return undefined;
+	}
+}
+
 /**
  * Metadata for a cwd inside a linked worktree, or undefined for a main worktree,
  * a non-repo directory, or a path that does not exist. Read-only: no git mutation.

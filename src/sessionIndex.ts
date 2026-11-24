@@ -25,6 +25,8 @@ export interface SessionIndexRecord {
 	/** Whether `name` came from the first-prompt label or a user rename. */
 	nameSource?: NameSource;
 	sessionFile?: string;
+	/** Main repository root for a git session; absent for plain directories. */
+	repo?: string;
 	worktree?: WorktreeInfo;
 	createdAt: string;
 }
@@ -93,6 +95,7 @@ export function normalizeRecord(raw: unknown, fallbackCwd: string): SessionIndex
 			name: typeof record.name === "string" ? record.name : undefined,
 			nameSource: record.nameSource === "auto" || record.nameSource === "manual" ? record.nameSource : undefined,
 			sessionFile: typeof record.sessionFile === "string" ? record.sessionFile : undefined,
+			repo: typeof record.repo === "string" ? record.repo : undefined,
 			worktree: normalizeWorktree(record.worktree),
 			createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
 		},
@@ -109,6 +112,7 @@ export function storedInfo(record: StoredSessionRecord, kind: "archive" | "trash
 		name: record.name,
 		state: "stopped",
 		sessionFile: record.sessionFile,
+		repo: record.repo,
 		worktree: record.worktree,
 		lastActivity: at,
 		...(kind === "archive" ? { archivedAt: record.storedAt } : { deletedAt: record.storedAt, expiresAt: at + graceMs }),

@@ -4,11 +4,13 @@ import * as hubControl from "./hubControl.ts";
 import * as hubLive from "./hubLive.ts";
 import * as hubSession from "./hubSession.ts";
 import * as hubStore from "./hubStore.ts";
+import * as hubWorktree from "./hubWorktree.ts";
 import { PENDING_UI_GRACE_MS, PENDING_UI_OPEN_MS, REASK_REPLY_MS } from "./pendingReask.ts";
 import type { PiBackend } from "./backend.ts";
 import { WINDOW_BYTES, WINDOW_ENTRIES } from "./jsonl.ts";
 import type { CommandLayer } from "./commands.ts";
 import type { CreateWorktreeRequest } from "./worktree.ts";
+import type { RemoveWorktreeRequest, RemoveWorktreeResult, WorktreeListing } from "./hubWorktree.ts";
 import type { RpcChild } from "./rpc.ts";
 import type {
 	NameSource,
@@ -191,6 +193,20 @@ export class Hub {
 
 	async create(cwd: string, name?: string, worktree?: CreateWorktreeRequest): Promise<SessionInfo> {
 		return await hubLive.create.apply(this, arguments as any);
+	}
+
+	/** Every worktree of the repository containing `cwd`, main tree first. */
+	async listWorktrees(cwd: string): Promise<WorktreeListing> {
+		return await hubWorktree.list.apply(this, arguments as any);
+	}
+
+	/**
+	 * Remove an explicit, pixip-active worktree. Never automatic: referenced or
+	 * external trees are reported back instead of removed, and a dirty tree needs
+	 * `force`.
+	 */
+	async removeWorktree(request: RemoveWorktreeRequest): Promise<RemoveWorktreeResult> {
+		return await hubWorktree.remove.apply(this, arguments as any);
 	}
 
 	async attach(id: string): Promise<SessionInfo> {
@@ -842,3 +858,5 @@ export type {
 	SessionTarget,
 } from "./sessionIndex.ts";
 export type { SessionInfo, SessionPeer, SessionState, WorktreeInfo } from "./wire.ts";
+export type { RemoveWorktreeRequest, RemoveWorktreeResult, WorktreeListing } from "./hubWorktree.ts";
+export type { WorktreeEntry } from "./worktree.ts";

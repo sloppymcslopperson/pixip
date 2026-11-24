@@ -19,10 +19,22 @@ export function configureDashboardSettings(next) {
 
 export function openSessionActions(session) {
 	const label = session.name ?? session.id.slice(0, 8);
-	deps.sheet(`session · ${label}`, [
-		["archive", () => confirmSessionAction("archive", session)],
-		["delete", () => confirmSessionAction("delete", session)],
-	]);
+	const actions = [];
+	const live = ["starting", "idle", "busy"].includes(session.state);
+	if (live) actions.push(["stop", () => void stopSession(session)]);
+	actions.push(["archive", () => confirmSessionAction("archive", session)]);
+	actions.push(["delete", () => confirmSessionAction("delete", session)]);
+	deps.sheet(`session · ${label}`, actions);
+}
+
+async function stopSession(session) {
+	try {
+		await apiJson(`/api/sessions/${encodeURIComponent(session.id)}/stop`, { method: "POST" });
+		await refreshDashboard();
+		toast("stopped");
+	} catch (error) {
+		toast(`stop failed: ${error.message}`);
+	}
 }
 
 export function confirmSessionAction(kind, session) {

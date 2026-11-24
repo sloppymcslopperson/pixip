@@ -24,7 +24,15 @@ import ts from "typescript";
 
 /** The cluster map lives here and nowhere else; ARCHITECTURE.md documents it. */
 export const CLUSTERS = {
-	dashboard: ["dashboard", "dashboardApi", "dashboardList", "dashboardPicker", "dashboardSettings", "dashboardModel"],
+	dashboard: [
+		"dashboard",
+		"dashboardApi",
+		"dashboardList",
+		"dashboardPicker",
+		"dashboardSettings",
+		"dashboardModel",
+		"dashboardWorktree",
+	],
 	session: ["session", "sessionEffects", "sessionPlan"],
 	composer: ["composer", "composerAttachments", "composerBash"],
 };

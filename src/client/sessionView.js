@@ -4,6 +4,7 @@
 import { addonStatusText, addonWidgets } from "./addonUi.js";
 import { contextLevel, footerPwdLine, footerStatsLeft, footerStatsRight } from "./footer.js";
 import { ansiToHtml, escapeHtml } from "./render.js";
+import { openSession } from "./navigation.js";
 import { scrollToEnd } from "./scroll.js";
 import { refreshSendState } from "./sendState.js";
 import { connect } from "./transport.js";
@@ -42,6 +43,55 @@ export function renderFooter() {
 	right.textContent = footerStatsRight(footer);
 }
 
+/** Peer notice lives in the transcript, but not in history: reset per open. */
+let peerDismissedFor = null;
+
+function peerKey(info) {
+	return String(info?.logicalId ?? info?.id ?? "");
+}
+
+export function resetPeerNotice() {
+	peerDismissedFor = null;
+	ui.log.querySelector(":scope > .peer-notice")?.remove();
+}
+
+export function renderPeerNotice() {
+	const info = state.info;
+	const peers = Array.isArray(info?.peers) ? info.peers : [];
+	const existing = ui.log.querySelector(":scope > .peer-notice");
+	if (!info || peers.length === 0 || peerDismissedFor === peerKey(info)) {
+		existing?.remove();
+		return;
+	}
+	const notice = existing ?? document.createElement("div");
+	notice.className = "block peer-notice";
+	notice.textContent = "";
+	const label = document.createElement("span");
+	label.className = "peer-label";
+	label.textContent = peers.length === 1 ? "another agent here:" : "other agents here:";
+	notice.append(label);
+	for (const peer of peers) {
+		const button = document.createElement("button");
+		button.type = "button";
+		button.className = "peer-open";
+		button.textContent = peer.name || String(peer.id ?? "").slice(0, 8);
+		button.title = "Open this agent";
+		button.addEventListener("click", () => openSession(peer.id));
+		notice.append(button);
+	}
+	const dismiss = document.createElement("button");
+	dismiss.type = "button";
+	dismiss.className = "peer-dismiss";
+	dismiss.setAttribute("aria-label", "Dismiss peer notice");
+	dismiss.textContent = "×";
+	dismiss.addEventListener("click", () => {
+		peerDismissedFor = peerKey(info);
+		notice.remove();
+	});
+	notice.append(dismiss);
+	if (ui.log.firstElementChild !== notice) ui.log.prepend(notice);
+}
+
 export function applyInfo() {
 	const info = state.info;
 	if (!info) return;
@@ -65,6 +115,7 @@ export function applyInfo() {
 	ui.input.disabled = restarting || stopped || starting;
 	ui.attach.disabled = restarting || stopped || starting;
 	refreshSendState();
+	renderPeerNotice();
 	// The provisional transcript is already readable; this only says the child
 	// is still booting and live events have not started yet.
 	let startingHint = ui.log.querySelector(".starting");

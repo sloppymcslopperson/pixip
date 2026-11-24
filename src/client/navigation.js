@@ -15,8 +15,8 @@ export function showList() {
 	return handlers.showList?.();
 }
 
-export function beginNewSession(cwd) {
-	return handlers.beginNewSession?.(cwd);
+export function beginNewSession(cwd, worktree) {
+	return handlers.beginNewSession?.(cwd, worktree);
 }
 
 export function cacheCurrentSession() {

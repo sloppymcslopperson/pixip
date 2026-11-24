@@ -219,6 +219,7 @@ export async function window(
 				name: found.header.name,
 				state: "stopped",
 				sessionFile: found.path,
+				...(record?.repo ? { repo: record.repo } : {}),
 				...(record?.worktree ? { worktree: record.worktree } : {}),
 				lastActivity: Date.parse(found.header.timestamp) || 0,
 			};
@@ -233,6 +234,7 @@ export async function window(
 				name: record.name,
 				state: "stopped",
 				sessionFile: record.sessionFile,
+				...(record.repo ? { repo: record.repo } : {}),
 				...(record.worktree ? { worktree: record.worktree } : {}),
 				lastActivity: Date.parse(record.createdAt) || 0,
 			};
@@ -299,6 +301,7 @@ export async function provisional(
 			name: record.name,
 			state: "starting",
 			sessionFile: record.sessionFile,
+			...(record.repo ? { repo: record.repo } : {}),
 			...(record.worktree ? { worktree: record.worktree } : {}),
 			lastActivity: Date.parse(record.createdAt) || 0,
 		};
@@ -314,6 +317,7 @@ export async function provisional(
 		name: found.header.name,
 		state: "starting",
 		sessionFile: found.path,
+		...(record?.repo ? { repo: record.repo } : {}),
 		...(record?.worktree ? { worktree: record.worktree } : {}),
 		lastActivity: Date.parse(found.header.timestamp) || 0,
 	};

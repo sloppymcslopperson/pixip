@@ -92,6 +92,8 @@ export interface SessionInfo {
 	sessionFile?: string;
 	/** Current git branch (or detached short SHA) for the dashboard chip. */
 	branch?: string;
+	/** Main repository root for any git session, including main-repo and worktrees. */
+	repo?: string;
 	/** Linked worktree metadata; absent for main-repo and plain directories. */
 	worktree?: WorktreeInfo;
 	/** Other live sessions sharing this realpath cwd; refreshed on lifecycle changes. */

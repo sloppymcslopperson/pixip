@@ -149,3 +149,102 @@ describe("hub worktrees and peers", () => {
 		await hub.shutdown();
 	});
 });
+
+describe("hub worktree listing and removal", () => {
+	it("adds the repo root to main-repo and worktree sessions", async () => {
+		const paths = await fixtureRoot("pixip-worktree-repo-");
+		const { repo } = await initRepo();
+		const hub = hubFor(paths);
+		const main = await hub.create(repo, "main");
+		const tree = await hub.create(repo, "worktree", { branch: "repo-meta" });
+		assert.equal(main.repo, repo);
+		assert.equal(tree.repo, repo);
+		const rows = await hub.list();
+		assert.equal(rows.find((row) => row.logicalId === main.logicalId)?.repo, repo);
+		await hub.shutdown();
+	});
+
+	it("lists the main tree first and refuses removal while sessions reference it", async () => {
+		const paths = await fixtureRoot("pixip-worktree-remove-");
+		const { repo } = await initRepo();
+		const hub = hubFor(paths);
+		const session = await hub.create(repo, "referenced", { branch: "remove-me" });
+		const listing = await hub.listWorktrees(repo);
+		assert.equal(listing.repo, repo);
+		assert.equal(listing.worktrees[0]?.path, repo);
+		const target = listing.worktrees.find((entry) => entry.branch === "pixip/remove-me");
+		assert.ok(target);
+		assert.equal(target.dirty, false);
+
+		const refused = await hub.removeWorktree({
+			cwd: repo,
+			worktree: { branch: "remove-me" },
+		});
+		assert.equal(refused.removed, false);
+		if (!refused.removed) {
+			assert.equal(refused.reason, "referenced");
+			assert.deepEqual(
+				refused.sessions.map((row) => row.logicalId),
+				[session.logicalId],
+			);
+		}
+		assert.equal(await exists(session.cwd), true);
+		await hub.shutdown();
+	});
+
+	it("removes a clean tree after its sessions are archived", async () => {
+		const paths = await fixtureRoot("pixip-worktree-clean-");
+		const { repo } = await initRepo();
+		const hub = hubFor(paths);
+		const session = await hub.create(repo, "gone", { branch: "clean-me" });
+		const path = session.cwd;
+		await hub.archive(session.id);
+		const result = await hub.removeWorktree({ cwd: repo, worktree: { branch: "clean-me" } });
+		assert.equal(result.removed, true);
+		assert.equal(await exists(path), false);
+		assert.equal(
+			(await hub.listWorktrees(repo)).worktrees.some((entry) => entry.branch === "pixip/clean-me"),
+			false,
+		);
+		await hub.shutdown();
+	});
+
+	it("requires force for a dirty tree", async () => {
+		const paths = await fixtureRoot("pixip-worktree-dirty-");
+		const { repo } = await initRepo();
+		const hub = hubFor(paths);
+		const session = await hub.create(repo, "dirty", { branch: "dirty-me" });
+		await hub.archive(session.id);
+		await writeFile(join(session.cwd, "untracked.txt"), "change\n");
+
+		const refused = await hub.removeWorktree({ cwd: repo, worktree: { branch: "dirty-me" } });
+		assert.equal(refused.removed, false);
+		if (!refused.removed) {
+			assert.equal(refused.reason, "dirty");
+			assert.equal(refused.worktree.changedFiles, 1);
+		}
+		const forced = await hub.removeWorktree({ cwd: repo, worktree: { branch: "dirty-me" }, force: true });
+		assert.equal(forced.removed, true);
+		await hub.shutdown();
+	});
+
+	it("never removes an external worktree, even with force", async () => {
+		const paths = await fixtureRoot("pixip-worktree-external-");
+		const { root, repo } = await initRepo();
+		const external = join(root, "external-tree");
+		await git(repo, "worktree", "add", "-b", "external-branch", external, "HEAD");
+		const hub = hubFor(paths);
+		const listing = await hub.listWorktrees(repo);
+		const target = listing.worktrees.find((entry) => entry.path === external);
+		assert.equal(target?.pixipActive, false);
+		const refused = await hub.removeWorktree({
+			cwd: repo,
+			worktree: { branch: "external-branch" },
+			force: true,
+		});
+		assert.equal(refused.removed, false);
+		if (!refused.removed) assert.equal(refused.reason, "external");
+		assert.equal(await exists(external), true);
+		await hub.shutdown();
+	});
+});

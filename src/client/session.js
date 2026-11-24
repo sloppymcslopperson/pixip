@@ -6,7 +6,7 @@ import { closeMenu } from "./menuView.js";
 import { renderQueue } from "./queueView.js";
 import { pendingErrorHtml, pendingSessionHtml } from "./render.js";
 import { updateJump } from "./scroll.js";
-import { applyInfo, renderFooter } from "./sessionView.js";
+import { applyInfo, renderFooter, resetPeerNotice } from "./sessionView.js";
 import { readingDistance, restoreSession, snapshotSession } from "./sessionCache.js";
 import { restoreSurface, surfaceStatus } from "./surface.js";
 import { closeSession, connect, park, resume, send } from "./transport.js";
@@ -24,16 +24,16 @@ export function configureSession(next) {
 	]);
 }
 
-export function beginNewSession(cwd) {
+export function beginNewSession(cwd, worktree) {
 	cacheCurrentSession();
 	parkCurrentSession();
 	// The dashboard socket is session-less and always kept separate; the
 	// `opened` frame will carry the new id.
 	connect(null);
-	state.pendingCreate = { cwd };
+	state.pendingCreate = worktree ? { cwd, worktree } : { cwd };
 	history.pushState(null, "", "#new");
 	showPendingSession();
-	send({ t: "create", cwd });
+	send(worktree ? { t: "create", cwd, worktree } : { t: "create", cwd });
 }
 
 export function showPendingSession() {
@@ -44,6 +44,7 @@ export function showPendingSession() {
 	state.streaming = null;
 	state.pendingUser = null;
 	deps.clearPendingAttachment();
+	resetPeerNotice();
 	state.entries = [];
 	state.more = false;
 	state.loadingEarlier = false;
@@ -110,6 +111,7 @@ export function openSession(id) {
 	state.streaming = null;
 	state.pendingUser = null;
 	deps.clearPendingAttachment();
+	resetPeerNotice();
 	state.policy = null;
 	state.dynamicCommands = [];
 	state.queue = { steering: [], followUp: [] };
