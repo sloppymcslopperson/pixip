@@ -548,7 +548,7 @@ async function runInboxFlow(page, base) {
 			?.click(),
 	);
 	await page.waitForFunction(() => document.querySelector("#sheet .inbox-card") === null, { timeout: FLOW_TIMEOUT });
-	await clickInboxChip(page, "active");
+	await clickInboxChip(page, "archived");
 	await page.waitForSelector("#sheet .inbox-card", { timeout: FLOW_TIMEOUT });
 
 	// Delete asks for confirmation; cancel keeps the message.

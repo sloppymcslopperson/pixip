@@ -187,15 +187,11 @@ function renderInboxSheet() {
 	}
 	const archived = archivedCount(sheetState.messages);
 	filters.append(
-		chip(
-			sheetState.archived ? `active (${sheetState.messages.length - archived})` : `archived (${archived})`,
-			sheetState.archived,
-			() => {
-				sheetState.archived = !sheetState.archived;
-				sheetState.expanded = null;
-				renderInboxSheet();
-			},
-		),
+		chip(`archived (${archived})`, sheetState.archived, () => {
+			sheetState.archived = !sheetState.archived;
+			sheetState.expanded = null;
+			renderInboxSheet();
+		}),
 	);
 	toolbar.append(filters);
 	if (!sheetState.archived && sheetState.unread > 0) {
