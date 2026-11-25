@@ -31,6 +31,7 @@ export async function showList() {
 	state.pendingCreate = null;
 	state.tools.clear();
 	state.streaming = null;
+	state.liveThought = null;
 	state.pendingUser = null;
 	deps.clearPendingAttachment();
 	state.restarting = false;

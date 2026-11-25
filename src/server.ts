@@ -21,6 +21,7 @@ import {
 	frameHello,
 	frameHistory,
 	frameImport,
+	frameLiveThinking,
 	frameModels,
 	frameOpened,
 	framePolicy,
@@ -574,17 +575,17 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 			// between, so a client connecting mid-turn cannot miss the start of a
 			// message. Records without an entry identity (status, UI dialogs) are
 			// order-independent and go out immediately.
-			const buffer: Array<{ frame: string; key: string }> = [];
+			const buffer: Array<{ frame: string; key: string; seq?: number }> = [];
 			let bytes = 0;
 			let overflowed = false;
 			let buffering = true;
 			sessionSubs.push(
-				hub.subscribe(info.id, (frame, key) => {
+				hub.subscribe(info.id, (frame, key, seq) => {
 					if (!key || !buffering) {
 						send(frame);
 						return;
 					}
-					buffer.push({ frame, key });
+					buffer.push({ frame, key, ...(seq !== undefined ? { seq } : {}) });
 					bytes += frame.length;
 					if (bytes > LIVE_BUFFER_BYTES || buffer.length > LIVE_BUFFER_FRAMES) {
 						// Bounded recovery below: close the gap with the durable cursor
@@ -606,8 +607,29 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 				const more = snapshot.resume ? snapshot.more : Boolean((hasBase && base?.more) || snapshot.more);
 				send(frameSnapshot(snapshot.info, snapshot.entries, snapshot.leafId, more, snapshot.resume));
 				const covered = new Set(snapshot.covered);
+				const deferredThinking: typeof buffer = [];
+				// Non-thinking frames go first: a buffered `message_start` resets the
+				// client's live thought, and the derived frame below restores it. Thinking
+				// deltas are held back so they can be compared with the buffer sequence.
 				for (const item of buffer) {
-					if (!covered.has(item.key)) send(item.frame);
+					if (covered.has(item.key)) continue;
+					if (item.seq !== undefined) deferredThinking.push(item);
+					else send(item.frame);
+				}
+				// Read after the non-thinking flush so a `message_end` that landed in the
+				// buffer cannot be followed by a stale live-thought frame.
+				const liveThought = hub.liveThinking(info.id);
+				if (gen !== generation || closed || parked) return;
+				if (liveThought && (liveThought.text.length > 0 || liveThought.active)) {
+					send(frameLiveThinking(liveThought));
+				}
+				// Deltas at or below the derived sequence are already folded into its text.
+				// With no live thought (for example after `message_end`) they are stale.
+				if (liveThought) {
+					for (const item of deferredThinking) {
+						if (item.seq === undefined || item.seq <= liveThought.seq) continue;
+						send(item.frame);
+					}
 				}
 				buffer.length = 0;
 				bytes = 0;

@@ -97,12 +97,26 @@
 	font-style: italic;
 }
 /* Transient placeholder shown from agent_start until the real thinking box or
-   text arrives; removed by the client, never part of a persisted entry. */
+   text arrives; removed by the client, never part of a persisted entry. When
+   thinking text exists it becomes a disclosure with the live thought inside. */
 .block.thinking-indicator {
 	border-left-color: var(--accent);
 	color: var(--fg-faint);
 	font-style: italic;
+}
+.block.thinking-indicator > summary {
+	cursor: pointer;
+}
+.block.thinking-indicator.active > summary {
 	animation: think-pulse 1.4s ease-in-out infinite;
+}
+.block.thinking-indicator .think-live {
+	margin: 6px 0 0;
+	color: var(--fg-dim);
+	font-size: 0.87em;
+	font-style: normal;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
 }
 @keyframes think-pulse {
 	50% {

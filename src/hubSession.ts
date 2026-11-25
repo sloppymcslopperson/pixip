@@ -115,7 +115,7 @@ interface LiveSession {
 	nameSource?: NameSource;
 }
 
-type Subscriber = (frame: string, key?: string) => void;
+type Subscriber = (frame: string, key?: string, seq?: number) => void;
 
 const SESSION_FILE = /\.jsonl$/;
 

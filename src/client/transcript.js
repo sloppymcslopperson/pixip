@@ -1,6 +1,7 @@
 // Client transcript module; shared state lives in kernel/state.js.
-import { appendBlock, hideThinkingIndicator, showThinkingIndicator } from "./transcriptView.js";
+import { appendBlock, hideThinkingIndicator, scheduleThinkingPaint, showThinkingIndicator } from "./transcriptView.js";
 import { endCompaction, startCompaction } from "./compaction.js";
+import { applyLiveThinkingFrame, applyThinkingEvent, createLiveThought } from "./thinkingStream.js";
 import { installDeps } from "./configure.js";
 import { renderQueue } from "./queueView.js";
 import { scheduleScroll, scrollToEnd } from "./scroll.js";
@@ -302,10 +303,12 @@ export function handleEvent(event) {
 	switch (event.type) {
 		case "agent_start":
 			setBusy(true);
+			state.liveThought = createLiveThought(false);
 			showThinkingIndicator();
 			break;
 		case "agent_settled":
 			hideThinkingIndicator();
+			state.liveThought = null;
 			setBusy(false);
 			break;
 		case "message_start": {
@@ -319,17 +322,25 @@ export function handleEvent(event) {
 				// Lazy: the block is created by the first text delta, so a turn that
 				// only thinks never leaves an empty labelled block behind.
 				state.streaming = null;
+				state.liveThought = {
+					text: "",
+					active: true,
+					expanded: state.liveThought?.expanded === true,
+				};
+				showThinkingIndicator();
 			}
 			break;
 		}
 		case "message_update":
 			handleDelta(event.assistantMessageEvent ?? {});
+			handleThinkingEvent(event.assistantMessageEvent ?? {});
 			break;
 		case "message_end": {
 			const message = event.message ?? {};
 			if (message.role === "assistant") {
+				const expanded = state.liveThought?.expanded === true;
 				hideThinkingIndicator();
-				const body = renderAssistantBody(message.content ?? [], false);
+				const body = renderAssistantBody(message.content ?? [], false, { openThinking: expanded });
 				const section = state.streaming;
 				state.streaming = null;
 				if (section) {
@@ -338,6 +349,7 @@ export function handleEvent(event) {
 				} else if (body) {
 					appendBlock("assistant", `<div class="who">pi</div>${body}`, true);
 				}
+				state.liveThought = { text: "", active: false, expanded };
 			}
 			if (message.role === "assistant" && Array.isArray(message.content)) {
 				for (const call of toolCallsOf(message.content)) state.tools.get(call.id)?.setAttribute("data-name", call.name);
@@ -348,6 +360,10 @@ export function handleEvent(event) {
 			// The agent is running a tool, not thinking; the indicator returns with
 			// the tool result if the turn continues.
 			hideThinkingIndicator();
+			if (state.liveThought) {
+				state.liveThought.text = "";
+				state.liveThought.active = false;
+			}
 			const summary = summarizeArgs(event.toolName, event.args);
 			if (!event.toolName && !summary) break;
 			const html = toolBlock(event.toolName, summary, "", "", null, event.toolCallId);
@@ -365,7 +381,14 @@ export function handleEvent(event) {
 		case "tool_execution_end": {
 			// The turn continues after a tool result, so show the thinking marker
 			// again until the next assistant text/thinking arrives.
-			if (state.info?.state === "busy") showThinkingIndicator();
+			if (state.info?.state === "busy") {
+				state.liveThought = {
+					text: "",
+					active: true,
+					expanded: state.liveThought?.expanded === true,
+				};
+				showThinkingIndicator();
+			}
 			const el = state.tools.get(event.toolCallId);
 			if (!el) break;
 			const result = event.result ?? {};
@@ -454,6 +477,20 @@ export function handleEvent(event) {
 		default:
 			break;
 	}
+}
+
+export function applyLiveThinking(frame) {
+	if (!frame || typeof frame.text !== "string") return;
+	state.liveThought = applyLiveThinkingFrame(state.liveThought, frame);
+	if (state.liveThought.text || state.liveThought.active) showThinkingIndicator();
+	else hideThinkingIndicator();
+}
+
+export function handleThinkingEvent(event) {
+	const type = typeof event?.type === "string" ? event.type : "";
+	if (type !== "thinking_start" && type !== "thinking_delta" && type !== "thinking_end") return;
+	state.liveThought = applyThinkingEvent(state.liveThought, event);
+	scheduleThinkingPaint();
 }
 
 export function handleDelta(delta) {

@@ -15,7 +15,7 @@ import { ui } from "./kernel/ui.js";
 import { renderMenu, restoreClearedQueue } from "./menu.js";
 import { openExportSheet, openModelSheet, openThinkingSheet, openTreeSheet } from "./sheets.js";
 import { dropSurface, handleNeedTime, handleReasks } from "./surface.js";
-import { applyFullEntry, handleEvent, prependHistory, renderTranscript } from "./transcript.js";
+import { applyFullEntry, applyLiveThinking, handleEvent, prependHistory, renderTranscript } from "./transcript.js";
 import { toast } from "./toast.js";
 
 /** A parked session that stopped, errored or vanished no longer owns a socket. */
@@ -99,6 +99,9 @@ export function handleFrame(fromSessionId, frame) {
 		}
 		case "snapshot":
 			handleSnapshot(frame);
+			break;
+		case "live_thinking":
+			applyLiveThinking(frame);
 			break;
 		case "restarting":
 			handleRestarting();

@@ -7,6 +7,15 @@ import type { RpcChild } from "./rpc.ts";
 import { piRpcBackend, type PiBackend } from "./backend.ts";
 import { type NameSource } from "./sessionIndex.ts";
 import { isBlockingUiMethod, SYMBOL_PENDING, coverageKey } from "./jsonl.ts";
+import {
+	applyLiveThinkingEvent,
+	createLiveThinking,
+	readLiveThinking,
+	resetLiveThinking,
+	type LiveThinkingEvent,
+	type LiveThinkingSnapshot,
+	type LiveThinkingState,
+} from "./liveThinking.ts";
 import { resolveSessionPolicy, type CommandLayer } from "./commands.ts";
 import { messageText } from "./titles.ts";
 import {
@@ -141,6 +150,8 @@ interface LiveSession {
 	bashId?: string;
 	/** Timestamp of the assistant message currently streaming (or last done). */
 	assistantTs?: number;
+	/** Volatile live thinking for the current assistant message, replayed on attach. */
+	thinking?: LiveThinkingState;
 	/** The automatic title has already been attempted for this session. */
 	titleAttempted?: boolean;
 	/** First prompt whose title call lost the provider race; retried at settle. */
@@ -152,7 +163,7 @@ interface LiveSession {
 	nameSource?: NameSource;
 }
 
-type Subscriber = (frame: string, key?: string) => void;
+type Subscriber = (frame: string, key?: string, seq?: number) => void;
 
 const SESSION_FILE = /\.jsonl$/;
 
@@ -393,7 +404,7 @@ export function onRecord(this: any, info: SessionInfo, raw: string, record: unkn
 		id?: unknown;
 		name?: string;
 		message?: unknown;
-		assistantMessageEvent?: { type?: string };
+		assistantMessageEvent?: LiveThinkingEvent;
 		method?: string;
 		statusKey?: string;
 		statusText?: unknown;
@@ -494,7 +505,61 @@ export function onRecord(this: any, info: SessionInfo, raw: string, record: unkn
 			break;
 	}
 
-	this.broadcast(target, frameEvent(raw), key);
+	this.broadcast(target, frameEvent(raw), key, noteLiveThinking(target, typed));
+}
+
+/**
+ * Track the current assistant message's thinking for late subscribers. This is a
+ * side effect on the attach path only: the original Pi record is still the
+ * frame that goes over the socket. Returns the thinking sequence for that frame.
+ */
+export function noteLiveThinking(
+	live: LiveSession,
+	record: { type?: string; message?: unknown; assistantMessageEvent?: LiveThinkingEvent },
+): number | undefined {
+	switch (record.type) {
+		case "agent_start":
+			live.thinking ??= createLiveThinking();
+			resetLiveThinking(live.thinking, true);
+			return undefined;
+		case "message_start": {
+			const message = record.message as { role?: unknown } | undefined;
+			if (message?.role !== "assistant") return undefined;
+			live.thinking ??= createLiveThinking();
+			resetLiveThinking(live.thinking, true);
+			return undefined;
+		}
+		case "message_end": {
+			const message = record.message as { role?: unknown } | undefined;
+			if (message?.role !== "assistant") return undefined;
+			if (live.thinking) resetLiveThinking(live.thinking, false);
+			return undefined;
+		}
+		case "tool_execution_start":
+			if (live.thinking) resetLiveThinking(live.thinking, false);
+			return undefined;
+		case "tool_execution_end":
+			// The turn continues after a tool result: the client shows the waiting
+			// marker again, and a reconnecting browser should see it too.
+			live.thinking ??= createLiveThinking();
+			resetLiveThinking(live.thinking, true);
+			return undefined;
+		case "agent_settled":
+			if (live.thinking) resetLiveThinking(live.thinking, false);
+			return undefined;
+		case "message_update":
+			live.thinking ??= createLiveThinking();
+			return applyLiveThinkingEvent(live.thinking, record.assistantMessageEvent ?? {});
+		default:
+			return undefined;
+	}
+}
+
+/** Current live thinking state for a reattaching client, or null before any turn. */
+export function liveThinking(this: any, id: string): LiveThinkingSnapshot | null {
+	const live = this.live.get(id);
+	if (!live?.thinking) return null;
+	return readLiveThinking(live.thinking);
 }
 
 export function cacheBlockingUi(
@@ -853,10 +918,10 @@ export function require(this: any, id: string): LiveSession {
 	return live;
 }
 
-export function broadcast(this: any, live: LiveSession, frame: string, key?: string): void {
+export function broadcast(this: any, live: LiveSession, frame: string, key?: string, seq?: number): void {
 	for (const subscriber of live.subs) {
 		try {
-			subscriber(frame, key);
+			subscriber(frame, key, seq);
 		} catch {
 			live.subs.delete(subscriber);
 		}

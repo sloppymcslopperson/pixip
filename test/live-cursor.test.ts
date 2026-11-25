@@ -248,4 +248,42 @@ describe("snapshot / live boundary", () => {
 		await server.close();
 		await hub.shutdown();
 	});
+
+	it("replays an in-progress thought once and drops buffered thinking deltas", async () => {
+		const paths = await fixtureRoot("pixip-cursor-");
+		const first = entry("m1", "user", 111);
+		await writeSession(paths, [first]);
+		const thinking = [
+			{ type: "agent_start" },
+			{ type: "message_start", message: { role: "assistant", timestamp: 500, content: [] } },
+			{ type: "message_update", usage: {}, assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } },
+			{
+				type: "message_update",
+				usage: {},
+				assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "hmm" },
+			},
+		];
+		const { hub, server } = await boot(paths, {
+			FAKE_PI_ENTRIES: JSON.stringify([first]),
+			FAKE_PI_LEAF: "m1",
+			FAKE_PI_DURING: JSON.stringify(thinking),
+		});
+		const inbox = await connect(`${server.url}ws?session=${SESSION_ID}`);
+		await waitFor(() => inbox.frames.some((frame) => frame["t"] === "footer"));
+		await delay(100);
+
+		const live = inbox.frames.find((frame) => frame["t"] === "live_thinking");
+		assert.equal(live?.["text"], "hmm");
+		assert.equal(live?.["active"], true);
+		const replayedDeltas = inbox.frames.filter(
+			(frame) =>
+				frame["t"] === "event" &&
+				(frame["ev"] as { assistantMessageEvent?: { type?: string } } | undefined)?.assistantMessageEvent?.type ===
+					"thinking_delta",
+		);
+		assert.equal(replayedDeltas.length, 0);
+		inbox.close();
+		await server.close();
+		await hub.shutdown();
+	});
 });
