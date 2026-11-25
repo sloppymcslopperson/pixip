@@ -2,3 +2,5 @@
 /tmp/
 *.log
 /dev.sh
+# re-fetch with `node tools/vendor-lit-html.mjs`
+/ui_work/vendor/lit-html/

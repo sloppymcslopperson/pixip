@@ -13,6 +13,7 @@ export default tseslint.config(
 			"node_modules/",
 			"docs/*.png",
 			"src/client/vendor/",
+			"ui_work/vendor/",
 			"package-lock.json",
 		],
 	},
