@@ -1,6 +1,7 @@
 ---
 grilled: true
 project: pixip
+commit: fd83a82f45fcc14f213e19b5336e8bd635ec91a4
 ---
 
 Give the inbox a dashboard surface: a header icon with an unread badge, an inbox sheet with filters and archive/delete, cap warnings, and a tap-to-session reply path.
