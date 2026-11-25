@@ -235,6 +235,14 @@ message on every change. `--inbox-token` (or `PIXIP_INBOX_TOKEN`) turns on the
 `Authorization: Bearer` seam for the API and passes the same token to Pi
 children; it is off by default. Every child gets `PIXIP_DAEMON_URL` regardless.
 
+`extensions/pixip-inbox` is the opt-in agent face: `inbox_send({subject, body,
+  purpose})` posts to the same endpoint, sends `PIXIP_INBOX_TOKEN` only when it
+is set, and returns a tool error (daemon down, wrong token) instead of crashing.
+
+```bash
+pi install /path/to/pixip/extensions/pixip-inbox
+```
+
 ## Worktrees
 
 A session can run in a fresh git worktree, or join any directory that already
