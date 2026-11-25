@@ -28,3 +28,7 @@ reask_reply_ms = 60000
 - Malformed or unknown keys are reported with the file path.
 - `ARCHITECTURE.md` / `README.md` document the file and precedence.
 - Tests cover precedence, missing file, valid file and malformed values.
+
+### Cross-ticket note (from 30-pixip-service-install)
+
+The `pixip service install` unit generator must consume `pixip.toml` as the fallback for any serve argument that was not explicitly provided on the install command. Until this ticket lands, service install uses the CLI defaults for unset arguments; when the TOML loader exists, the generated `ExecStart` (and `WorkingDirectory`) must reflect the file values so an installed service and a bare `pixip` start agree. Keep the precedence TOML < CLI flags.
