@@ -170,68 +170,6 @@ TUI command parity is the current focus (developing pixip inside pixip); see
 [`docs/TUI-parity.md`](docs/TUI-parity.md) for the command-by-command coverage map and the
 tickets that own each gap.
 
-## Install and run
-
-For a machine that should keep pixip running across crashes and reboots, install the
-generated systemd unit instead of writing one by hand:
-
-```bash
-npm install
-node bin/pixip.ts service install      # user unit, ~/pixip_data
-node bin/pixip.ts service status
-```
-
-The user unit lives at `~/.config/systemd/user/pixip.service`, runs as you, and
-logs to `~/pixip_data/pixip.log`. Install tries `loginctl enable-linger`; if it
-cannot, it prints the one command needed for boot startup:
-
-```bash
-sudo loginctl enable-linger "$USER"
-```
-
-Use `--data-dir <path>` to keep the service data somewhere else, and `--replace`
-to overwrite an existing unit. `node bin/pixip.ts service uninstall` stops and
-removes the unit but keeps the data dir; add `--delete-data` to remove it too.
-
-For a system-wide unit:
-
-```bash
-sudo node bin/pixip.ts service install --system
-```
-
-With no `--user`, that uses the unprivileged `pixip` account (created with a
-login shell and its own home when missing) and asks first on a terminal. Use
-`--user <name>` for an existing account or `--user self` for `SUDO_USER` /
-the current user. The unit still runs as that user, not root.
-
-The installer uses the repo's vendored Pi (`node_modules/.bin/pi`) when `--pi` is
-omitted. If the service account cannot execute the installer's node binary (for
-example nvm under a `0700` home), it copies node to
-`/usr/local/lib/pixip/node` and points the unit there automatically.
-
-An agent inside pixip can run `pixip restart` (and `pixip stop`, which restarts
-from inside a session): it keeps the busy / `--when-idle` checks and then asks
-systemd to restart the unit instead of spawning a second daemon. A user unit
-needs no extra privilege. For a system unit, allow only that one unit through a
-narrow polkit rule (do not grant blanket sudo):
-
-```js
-// /etc/polkit-1/rules.d/50-pixip-service.rules
-polkit.addRule(function (action, subject) {
-	if (
-		action.id == "org.freedesktop.systemd1.manage-units" &&
-		subject.user == "pixip" &&
-		action.lookup("unit") == "pixip.service"
-	) {
-		return polkit.Result.YES;
-	}
-});
-```
-
-The UI has no authentication. Keep the default loopback bind and open
-<http://127.0.0.1:8137/> locally; do not expose the port or bind `0.0.0.0` without
-putting authentication and TLS in front of it.
-
 ## Running as a daemon
 
 Bare `pixip` still serves in the foreground; the CLI manages a detached process:

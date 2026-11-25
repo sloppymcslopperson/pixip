@@ -3,9 +3,7 @@ import { spawn } from "node:child_process";
 import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
 import { mkdir, open } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 
 import { Hub } from "../src/hub.ts";
@@ -34,26 +32,6 @@ import { detectRepo, pruneWorktrees, realCwd } from "../src/worktree.ts";
 import type { WorktreeEntry } from "../src/worktree.ts";
 import type { SessionInfo } from "../src/wire.ts";
 import { spawnEnv } from "../src/spawnEnv.ts";
-import {
-	defaultRunner,
-	ensureServiceNode,
-	findInstalledService,
-	generateUnit,
-	installService,
-	readServiceStatus,
-	resolveExecutable,
-	resolveServiceTarget,
-	restartDecision,
-	serviceOwnsPid,
-	servicePathEnv,
-	serviceScopeFromEnv,
-	serviceUnitExists,
-	systemServiceUnitPath,
-	systemctlArgs,
-	uninstallService,
-	userServiceUnitPath,
-} from "../src/service.ts";
-import type { ServiceAction, ServiceScope } from "../src/service.ts";
 
 /**
  * pixip — supervisor + web UI for Pi sessions.
@@ -67,29 +45,15 @@ import type { ServiceAction, ServiceScope } from "../src/service.ts";
  * serve path; `stop`/`status`/`logs`/`refresh`/`restart` manage it.
  */
 
-type Command =
-	"serve" | "start" | "stop" | "status" | "logs" | "refresh" | "restart" | "worktree" | "protect" | "service";
+type Command = "serve" | "start" | "stop" | "status" | "logs" | "refresh" | "restart" | "worktree" | "protect";
 
-const SUBCOMMANDS = new Set<string>([
-	"start",
-	"stop",
-	"status",
-	"logs",
-	"refresh",
-	"restart",
-	"worktree",
-	"protect",
-	"service",
-]);
-const SERVICE_ACTIONS = new Set<string>(["install", "status", "uninstall"]);
+const SUBCOMMANDS = new Set<string>(["start", "stop", "status", "logs", "refresh", "restart", "worktree", "protect"]);
 
 interface Options {
 	host: string;
 	port: number;
 	dataDir: string;
 	piBin: string;
-	/** True when `--pi` was supplied, rather than the default lookup. */
-	piExplicit: boolean;
 	/** `--pi-host [path]` / `PIXIP_PI_HOST`; `""` means resolve the installed host bin. */
 	piHost?: string;
 	idleMs: number;
@@ -120,20 +84,6 @@ interface Options {
 	timeoutS: number;
 	/** Internal: this process is the detached restart helper. */
 	detached: boolean;
-	/** Internal: the helper restarts through systemd rather than stop/start. */
-	service?: ServiceScope;
-	/** `service install --system` */
-	system: boolean;
-	/** `service install --replace`: overwrite an existing unit file. */
-	replace: boolean;
-	/** `service uninstall --delete-data` */
-	deleteData: boolean;
-	/** `service install --user <name|self>` */
-	user?: string;
-	/** Skip the interactive confirmation for the default pixip service user. */
-	yes: boolean;
-	/** True when `--data-dir` or PIXIP_DATA_DIR was supplied. */
-	dataDirExplicit: boolean;
 	/** Non-flag arguments after the subcommand (`worktree list [<path>]`). */
 	positionals: string[];
 }
@@ -162,7 +112,6 @@ function parseArgs(argv: string[]): Options {
 		port: 8137,
 		dataDir: resolve(process.env["PIXIP_DATA_DIR"] ?? "tmp/dev"),
 		piBin: "pi",
-		piExplicit: false,
 		piHost: undefined,
 		idleMs: 15 * 60_000,
 		pendingUiTimeoutMs: 5 * 60 * 60_000,
@@ -181,13 +130,6 @@ function parseArgs(argv: string[]): Options {
 		whenIdle: false,
 		timeoutS: 300,
 		detached: false,
-		service: undefined,
-		system: false,
-		replace: false,
-		deleteData: false,
-		user: undefined,
-		yes: false,
-		dataDirExplicit: Boolean(process.env["PIXIP_DATA_DIR"]),
 		positionals: [],
 	};
 	for (let index = 0; index < argv.length; index += 1) {
@@ -210,11 +152,9 @@ function parseArgs(argv: string[]): Options {
 				break;
 			case "--data-dir":
 				options.dataDir = resolve(next());
-				options.dataDirExplicit = true;
 				break;
 			case "--pi":
 				options.piBin = next();
-				options.piExplicit = true;
 				break;
 			case "--pi-host": {
 				// The value is optional: a bare flag means "resolve the installed host".
@@ -279,28 +219,6 @@ function parseArgs(argv: string[]): Options {
 			case "--detached":
 				// Internal flag of the restart helper; not part of the public surface.
 				options.detached = true;
-				break;
-			case "--service": {
-				const value = next();
-				if (value !== "user" && value !== "system") throw new Error("--service must be user or system");
-				options.service = value;
-				break;
-			}
-			case "--system":
-				options.system = true;
-				break;
-			case "--replace":
-				options.replace = true;
-				break;
-			case "--delete-data":
-				options.deleteData = true;
-				break;
-			case "--user":
-				options.user = next();
-				break;
-			case "--yes":
-			case "-y":
-				options.yes = true;
 				break;
 			case "--help":
 			case "-h":
@@ -385,11 +303,7 @@ Commands:
                       ends, the daemon comes back). Refuses while a session is
                       busy unless --force; --when-idle waits for the other
                       sessions (the calling one does not count) up to --timeout
-                      (default 300s, exit 2). Under the generated systemd unit
-                      this delegates to systemctl instead.
-  service <install|status|uninstall>
-                      run pixip at boot through systemd without hand-writing a
-                      unit (see 'pixip service --help')
+                      (default 300s, exit 2)
   protect [<session-id>] [--off] [--json]
                       mark one session as protected from the dashboard bulk
                       archive (or clear it with --off). Defaults to the caller's
@@ -424,31 +338,6 @@ Options:
                       when no daemon is running (default ./tmp/dev)
   --json              machine-readable output
   --force             allow removing a dirty worktree
-`;
-	process.stdout.write(usage);
-}
-
-function printServiceHelp(): void {
-	const usage = `Usage: pixip service <install|status|uninstall> [options]
-
-Commands:
-  install             write and enable the systemd unit, then start pixip
-  status [--json]     unit installed/enabled/active plus the daemon and URL
-  uninstall           stop, disable and remove the unit; the data dir is kept
-
-Options:
-  --system            install a system unit instead of a user unit; with no
-                      --user, run as the unprivileged pixip service account
-  --user <name|self>  system unit account: an existing user, or 'self' for
-                      SUDO_USER / the current user (default: pixip)
-  --replace           overwrite an existing unit file at the target path
-  --delete-data       uninstall only: also delete the service data dir
-  --yes               skip the confirmation prompt for the default pixip user
-  --data-dir <path>   service data dir (default ~/pixip_data)
-
-User units live at ~/.config/systemd/user/pixip.service and system units at
-/etc/systemd/system/pixip.service. Boot startup for a user unit needs lingering:
-  sudo loginctl enable-linger <user>
 `;
 	process.stdout.write(usage);
 }
@@ -501,16 +390,6 @@ async function main(): Promise<void> {
 		const options = parseArgs(argv);
 		return await cmdWorktree(action, options);
 	}
-	if (command === "service") {
-		const action = argv.shift();
-		if (!action || action === "--help" || action === "-h" || action === "help") {
-			printServiceHelp();
-			return;
-		}
-		if (!SERVICE_ACTIONS.has(action)) throw new Error(`unknown service action ${action}`);
-		const options = parseArgs(argv);
-		return await cmdService(action as ServiceAction, options);
-	}
 	const options = parseArgs(argv);
 	if (options.positionals.length > 0 && command !== "protect") {
 		throw new Error(`unknown argument ${options.positionals[0]}`);
@@ -559,11 +438,6 @@ function resolvePiHost(value: string | undefined): string {
 	const path = resolve(dirname(packagePath), bin);
 	if (!existsSync(path)) throw new Error(`pixip-pi-host bin not found: ${path}`);
 	return path;
-}
-
-function vendoredPiPath(): string | undefined {
-	const path = join(dirname(fileURLToPath(import.meta.url)), "..", "node_modules", ".bin", "pi");
-	return existsSync(path) ? path : undefined;
 }
 
 async function serve(options: Options): Promise<void> {
@@ -668,34 +542,6 @@ async function cmdStart(options: Options): Promise<void> {
 	process.stdout.write(`pixip listening on ${state.url} (pid ${state.pid})\n`);
 }
 
-function serviceHome(): string {
-	return process.env["HOME"] || homedir();
-}
-
-/** The generated unit records its data dir; use it for status/stop/restart. */
-async function detectServiceForCommand(options: Options, runningPid?: number): Promise<ServiceScope | undefined> {
-	const envScope = serviceScopeFromEnv();
-	if (envScope) return envScope;
-	const installed = await findInstalledService(options.dataDir, { home: serviceHome() });
-	if (!installed) return undefined;
-	if (runningPid === undefined) return installed.scope;
-	const owns = await serviceOwnsPid(installed.scope, runningPid, defaultRunner).catch(() => false);
-	return owns ? installed.scope : undefined;
-}
-
-async function waitForDaemonState(dataDir: string, timeoutMs: number, previousPid?: number) {
-	const deadline = Date.now() + timeoutMs;
-	for (;;) {
-		const state = await runningDaemon(dataDir).catch(() => undefined);
-		if (state && state.pid !== previousPid) {
-			const health = await waitForHealth(state.url, 1000, state.pid).catch(() => undefined);
-			if (health) return state;
-		}
-		if (Date.now() >= deadline) return undefined;
-		await delay(100);
-	}
-}
-
 async function cmdStop(options: Options): Promise<void> {
 	// Never let a bash tool inside a session take the service down. A stop from
 	// inside pixip is a restart from the caller's point of view: the calling turn
@@ -708,17 +554,6 @@ async function cmdStop(options: Options): Promise<void> {
 		}
 		process.stderr.write("pixip stop requested from inside a pixip session: restarting instead\n");
 		return await cmdRestart({ ...options, force: true });
-	}
-
-	const running = await runningDaemon(options.dataDir);
-	const serviceScope = await detectServiceForCommand(options, running?.pid);
-	if (serviceScope) {
-		const result = await defaultRunner.run("systemctl", systemctlArgs(serviceScope, "stop", "pixip.service"));
-		if (result.code !== 0) {
-			throw new Error(`systemctl stop pixip.service failed: ${(result.stderr || result.stdout).trim()}`);
-		}
-		process.stdout.write(`stopped pixip ${serviceScope} service\n`);
-		return;
 	}
 
 	const result = await stopDaemon(options.dataDir);
@@ -875,7 +710,7 @@ function isCaller(session: SessionInfo, caller: string | undefined): boolean {
 }
 
 /** Spawn the detached helper that performs the actual stop/start. */
-function spawnRestartHelper(options: Options, serviceScope?: ServiceScope): void {
+function spawnRestartHelper(options: Options): void {
 	const logFd = openSync(daemonPaths(options.dataDir).log, "a");
 	try {
 		// Strip the caller marker: the helper is not a session, and the new
@@ -884,14 +719,16 @@ function spawnRestartHelper(options: Options, serviceScope?: ServiceScope): void
 		// does not hand it to every later child.
 		const env = spawnEnv();
 		delete env["PIXIP_SESSION_ID"];
-		const args = [fileURLToPath(import.meta.url), "restart", "--detached", "--data-dir", options.dataDir];
-		if (serviceScope) args.push("--service", serviceScope);
-		const child = spawn(process.execPath, args, {
-			detached: true,
-			stdio: ["ignore", logFd, logFd],
-			cwd: process.cwd(),
-			env,
-		});
+		const child = spawn(
+			process.execPath,
+			[fileURLToPath(import.meta.url), "restart", "--detached", "--data-dir", options.dataDir],
+			{
+				detached: true,
+				stdio: ["ignore", logFd, logFd],
+				cwd: process.cwd(),
+				env,
+			},
+		);
 		child.unref();
 	} finally {
 		closeSync(logFd);
@@ -904,7 +741,6 @@ function spawnRestartHelper(options: Options, serviceScope?: ServiceScope): void
  * even though the calling turn is gone.
  */
 async function runRestartHelper(options: Options): Promise<void> {
-	if (options.service) return await runServiceRestartHelper(options);
 	const note = (message: string) => log(`[restart helper] ${message}`);
 	const running = await runningDaemon(options.dataDir);
 	const args = running && running.args.length > 0 ? running.args : serveArgs(options);
@@ -922,38 +758,11 @@ async function runRestartHelper(options: Options): Promise<void> {
 	note(`listening on ${state.url} (pid ${state.pid})`);
 }
 
-async function runServiceRestartHelper(options: Options): Promise<void> {
-	const scope = options.service;
-	if (!scope) return;
-	const note = (message: string) => log(`[restart helper] ${message}`);
-	const running = await runningDaemon(options.dataDir).catch(() => undefined);
-	const previousPid = running?.pid;
-	note(`systemctl ${systemctlArgs(scope, "restart", "pixip.service").join(" ")}`);
-	const result = await defaultRunner.run("systemctl", systemctlArgs(scope, "restart", "pixip.service"));
-	if (result.code !== 0) {
-		note(`systemctl restart failed (${result.code}): ${(result.stderr || result.stdout).trim()}`);
-		process.exitCode = 1;
-		return;
-	}
-	const state = await waitForDaemonState(options.dataDir, 30_000, previousPid);
-	if (!state) {
-		note("systemd did not bring pixip back within 30s");
-		process.exitCode = 1;
-		return;
-	}
-	note(`listening on ${state.url} (pid ${state.pid})`);
-}
-
 async function cmdRestart(options: Options): Promise<void> {
 	if (options.detached) return await runRestartHelper(options);
 
 	const running = await runningDaemon(options.dataDir);
-	const decision = restartDecision(
-		process.env,
-		options.service ?? (await detectServiceForCommand(options, running?.pid)),
-	);
-	const serviceScope = decision.mode === "systemd" ? decision.scope : undefined;
-	if (!running && !serviceScope) {
+	if (!running) {
 		// Idempotent: restarting a stopped data dir is just a start.
 		await cmdStart(options);
 		return;
@@ -961,9 +770,7 @@ async function cmdRestart(options: Options): Promise<void> {
 
 	const caller = callerSession();
 	const busyNow = async () =>
-		running
-			? busySessions(await fetchSessions(running.url).catch(() => [])).filter((session) => !isCaller(session, caller))
-			: [];
+		busySessions(await fetchSessions(running.url).catch(() => [])).filter((session) => !isCaller(session, caller));
 
 	if (options.whenIdle) {
 		const deadline = Date.now() + options.timeoutS * 1000;
@@ -987,9 +794,7 @@ async function cmdRestart(options: Options): Promise<void> {
 	// Hand the destructive half to a detached helper. This process may be a child
 	// of a Pi child that is about to be stopped, so it must not be the one doing
 	// `stopDaemon()`; the helper survives the shutdown and starts the replacement.
-	// Under systemd the helper asks systemctl instead, so the unit sees one restart
-	// rather than a main-process exit plus a duplicate spawned by us.
-	spawnRestartHelper(options, serviceScope);
+	spawnRestartHelper(options);
 
 	// A normal shell waits here and prints the new URL. Inside a session this
 	// process is killed when the old daemon stops its child; the helper finishes
@@ -997,7 +802,7 @@ async function cmdRestart(options: Options): Promise<void> {
 	const deadline = Date.now() + 30_000;
 	for (;;) {
 		const state = await readDaemonState(options.dataDir).catch(() => undefined);
-		if (state && state.pid !== running?.pid) {
+		if (state && state.pid !== running.pid) {
 			const health = await waitForHealth(state.url, 1000, state.pid).catch(() => undefined);
 			if (health) {
 				process.stdout.write(`pixip restarted on ${state.url} (pid ${state.pid})\n`);
@@ -1010,160 +815,6 @@ async function cmdRestart(options: Options): Promise<void> {
 			return;
 		}
 		await delay(100);
-	}
-}
-
-// ------------------------------------------------------------------ service
-
-async function confirmDefaultServiceUser(): Promise<boolean> {
-	if (!process.stdin.isTTY || !process.stdout.isTTY) return true;
-	const terminal = createInterface({ input: process.stdin, output: process.stdout });
-	try {
-		const answer = await terminal.question(
-			"system install will run as the unprivileged 'pixip' service user; continue? [y/N] ",
-		);
-		return /^y(?:es)?$/i.test(answer.trim());
-	} finally {
-		terminal.close();
-	}
-}
-
-async function cmdService(action: ServiceAction, options: Options): Promise<void> {
-	if (options.positionals.length > 0) throw new Error(`unknown argument ${options.positionals[0]}`);
-	if (options.user !== undefined && !options.system) {
-		throw new Error("--user is only valid with --system; the user unit always runs as the invoking user");
-	}
-	if (options.deleteData && action !== "uninstall") {
-		throw new Error("--delete-data is only valid with 'pixip service uninstall'");
-	}
-	if (action === "install") return await cmdServiceInstall(options);
-	if (action === "status") return await cmdServiceStatus(options);
-	return await cmdServiceUninstall(options);
-}
-
-async function cmdServiceInstall(options: Options): Promise<void> {
-	const scope: ServiceScope = options.system ? "system" : "user";
-	const home = serviceHome();
-	const unitPath = scope === "user" ? userServiceUnitPath(home) : systemServiceUnitPath();
-	if ((await serviceUnitExists(unitPath)) && !options.replace) {
-		throw new Error(`unit already exists: ${unitPath}; rerun with --replace to overwrite it`);
-	}
-
-	const target = await resolveServiceTarget({
-		requestedUser: scope === "system" ? options.user : "self",
-		runner: defaultRunner,
-		env: process.env,
-		confirmDefault: scope === "system" && !options.yes ? confirmDefaultServiceUser : undefined,
-	});
-	const targetHome = target.account.home || home;
-	const dataDir = options.dataDirExplicit ? options.dataDir : join(targetHome, "pixip_data");
-	const workingDirectory = join(targetHome, "dev");
-	const serviceNode = await ensureServiceNode({ nodePath: process.execPath, scope, target });
-	const nodePath = serviceNode.nodePath;
-
-	const piHostBin = options.piHost !== undefined ? resolvePiHost(options.piHost || undefined) : undefined;
-	let piBin = options.piBin;
-	if (piHostBin) {
-		piBin = await resolveExecutable(options.piBin).catch(() => options.piBin);
-	} else if (!options.piExplicit && vendoredPiPath()) {
-		piBin = await resolveExecutable(vendoredPiPath() ?? options.piBin);
-	} else {
-		piBin = await resolveExecutable(options.piBin);
-	}
-
-	const serveOptions: Options = { ...options, dataDir, piBin, piHost: piHostBin };
-	const unit = generateUnit({
-		scope,
-		user: target.account.name,
-		group: target.group,
-		home: targetHome,
-		dataDir,
-		workingDirectory,
-		nodePath,
-		entryPath: fileURLToPath(import.meta.url),
-		serveArgs: serveArgs(serveOptions),
-		pathEnv: servicePathEnv(nodePath, piBin, piHostBin),
-	});
-	const result = await installService({
-		scope,
-		unitPath,
-		unit,
-		dataDir,
-		workingDirectory,
-		target,
-		runner: defaultRunner,
-		replace: options.replace,
-	});
-
-	process.stdout.write(`installed ${scope} service at ${result.unitPath}\n`);
-	process.stdout.write(`runs as ${target.account.name}; data dir ${dataDir}\n`);
-	if (serviceNode.copied) process.stdout.write(`copied node for the service user to ${nodePath}\n`);
-	if (result.lingerCommand) {
-		process.stderr.write(
-			`could not enable lingering for ${target.account.name}. Boot startup needs it, so run:\n  ${result.lingerCommand}\n`,
-		);
-	}
-	const state = await waitForDaemonState(dataDir, 15_000);
-	if (state) {
-		process.stdout.write(`pixip listening on ${state.url} (pid ${state.pid})\n`);
-	} else {
-		process.stdout.write("service start requested; run 'pixip service status' to check it\n");
-	}
-}
-
-async function cmdServiceStatus(options: Options): Promise<void> {
-	const scope: ServiceScope = options.system ? "system" : "user";
-	const home = serviceHome();
-	const unitPath = scope === "user" ? userServiceUnitPath(home) : systemServiceUnitPath();
-	const fallbackDataDir = options.dataDirExplicit ? options.dataDir : join(home, "pixip_data");
-	const status = await readServiceStatus({ scope, unitPath, fallbackDataDir, runner: defaultRunner });
-	const state = status.installed ? await runningDaemon(status.dataDir).catch(() => undefined) : undefined;
-
-	if (options.json) {
-		process.stdout.write(
-			`${JSON.stringify({
-				...status,
-				running: Boolean(state),
-				pid: state?.pid,
-				url: state?.url,
-			})}\n`,
-		);
-	} else {
-		process.stdout.write(`unit: ${status.unitPath}\n`);
-		process.stdout.write(`installed: ${status.installed ? "yes" : "no"}\n`);
-		process.stdout.write(`enabled: ${status.enabled}\n`);
-		process.stdout.write(`active: ${status.active}\n`);
-		if (status.metadata.user) process.stdout.write(`user: ${status.metadata.user}\n`);
-		process.stdout.write(`data dir: ${status.dataDir}\n`);
-		if (state) {
-			process.stdout.write(`daemon: running on ${state.url} (pid ${state.pid})\n`);
-		} else {
-			process.stdout.write("daemon: not running\n");
-		}
-	}
-	process.exitCode = status.installed && status.active === "active" && state ? 0 : 1;
-}
-
-async function cmdServiceUninstall(options: Options): Promise<void> {
-	const scope: ServiceScope = options.system ? "system" : "user";
-	const home = serviceHome();
-	const unitPath = scope === "user" ? userServiceUnitPath(home) : systemServiceUnitPath();
-	const result = await uninstallService({
-		scope,
-		unitPath,
-		runner: defaultRunner,
-		deleteData: options.deleteData,
-	});
-	if (!result.installed) {
-		process.stdout.write(`pixip ${scope} service is not installed (${unitPath})\n`);
-		return;
-	}
-	for (const warning of result.warnings) process.stderr.write(`warning: ${warning}\n`);
-	process.stdout.write(`removed ${unitPath}\n`);
-	if (result.dataRemoved) {
-		process.stdout.write(`removed data dir ${result.dataDir}\n`);
-	} else if (result.dataDir) {
-		process.stdout.write(`kept data dir ${result.dataDir}\n`);
 	}
 }
 
