@@ -1,9 +1,10 @@
-// Dashboard inbox: header badge, bottom sheet, filters and sender replies.
-// Everything user-visible is built with textContent; message bodies are never
-// treated as HTML.
+// Inbox feature: dashboard bottom bar, dedicated inbox page, filters and
+// sender replies. Everything user-visible is built with textContent; message
+// bodies are never treated as HTML.
 import { openSession } from "./navigation.js";
 import { closeSheet, sheetHeader } from "./sheetShell.js";
 import { toast } from "./toast.js";
+import { connect } from "./transport.js";
 import {
 	archivedCount,
 	badgeLabel,
@@ -13,6 +14,7 @@ import {
 	INBOX_PURPOSES,
 	mergeWarnings,
 	newCapWarnings,
+	newestPreview,
 	normalizeInbox,
 	purposeLabel,
 	replyPrefix,
@@ -26,7 +28,7 @@ import { ui } from "./kernel/ui.js";
 
 const WARN_KEY = "pixip.inbox.warned";
 
-const sheetState = {
+const viewState = {
 	filter: "all",
 	purpose: null,
 	archived: false,
@@ -35,7 +37,6 @@ const sheetState = {
 	unread: 0,
 	total: 0,
 	limit: 200,
-	loading: false,
 };
 
 function readWarned() {
@@ -55,7 +56,8 @@ function writeWarned(warned) {
 	}
 }
 
-export function renderInboxBadge() {
+/** Dashboard bottom bar: newest subject/body preview plus the unread badge. */
+export function renderInboxBar() {
 	const badge = ui.inboxBadge;
 	if (!badge) return;
 	const label = badgeLabel(state.inbox.unread);
@@ -64,10 +66,17 @@ export function renderInboxBadge() {
 	badge.hidden = label === "";
 	badge.classList.toggle("warn", level === "warn");
 	badge.classList.toggle("full", level === "full");
-	if (ui.inbox) {
-		ui.inbox.title =
+	const { subject, preview } = newestPreview(state.inbox.newest);
+	if (ui.inboxBarSubject) ui.inboxBarSubject.textContent = subject;
+	if (ui.inboxBarPreview) ui.inboxBarPreview.textContent = preview;
+	if (ui.inboxBar) {
+		const title =
 			state.inbox.unread > 0 ? `Inbox · ${state.inbox.unread} unread` : `Inbox · ${state.inbox.total} message(s)`;
-		ui.inbox.setAttribute("aria-label", state.inbox.unread > 0 ? `Inbox, ${state.inbox.unread} unread` : "Inbox");
+		ui.inboxBar.title = title;
+		ui.inboxBar.setAttribute(
+			"aria-label",
+			state.inbox.unread > 0 ? `Open inbox, ${state.inbox.unread} unread` : "Open inbox",
+		);
 	}
 }
 
@@ -83,10 +92,10 @@ function warnCap(inbox) {
 	);
 }
 
-/** A live `inbox` frame: badge, cap warning, and no reload. */
+/** A live `inbox` frame: bar preview, badge, cap warning, and no reload. */
 export function applyInboxFrame(summary) {
 	state.inbox = normalizeInbox(summary);
-	renderInboxBadge();
+	renderInboxBar();
 	warnCap(state.inbox);
 }
 
@@ -112,35 +121,49 @@ async function inboxJson(path, init = {}) {
 async function loadInbox() {
 	const data = await inboxJson("/api/inbox?all=1&filter=all");
 	const normalized = normalizeInbox(data);
-	sheetState.messages = Array.isArray(data.messages) ? data.messages : [];
-	sheetState.unread = normalized.unread;
-	sheetState.total = normalized.total;
-	sheetState.limit = normalized.limit;
-	// The list response is the authoritative snapshot; update the badge too, so
-	// opening the sheet does not leave a stale count until the next frame.
+	viewState.messages = Array.isArray(data.messages) ? data.messages : [];
+	viewState.unread = normalized.unread;
+	viewState.total = normalized.total;
+	viewState.limit = normalized.limit;
+	// The list response is the authoritative snapshot; update the bar too, so
+	// opening the page does not leave a stale count until the next frame.
 	state.inbox = normalized;
-	renderInboxBadge();
+	renderInboxBar();
 }
 
-export async function openInboxSheet() {
-	sheetState.archived = false;
-	sheetState.expanded = null;
-	ui.sheet.hidden = false;
-	ui.sheet.textContent = "";
-	const wrapper = document.createElement("div");
-	wrapper.className = "inbox-sheet";
-	wrapper.append(sheetHeader("inbox"));
+/**
+ * The inbox is a real route (`#inbox`), not a sheet: it owns the main area and
+ * the header's back button, exactly like a session page.
+ */
+export async function showInboxPage() {
+	viewState.archived = false;
+	viewState.expanded = null;
+	ui.list.hidden = true;
+	ui.session.hidden = true;
+	ui.inboxPage.hidden = false;
+	ui.inboxBar.hidden = true;
+	ui.composer.hidden = true;
+	ui.footer.hidden = true;
+	ui.dock.hidden = true;
+	ui.stop.hidden = true;
+	ui.back.hidden = false;
+	ui.settings.hidden = true;
+	ui.dot.hidden = true;
+	ui.title.textContent = "inbox";
+	ui.sub.textContent = "durable messages";
+	document.title = "inbox · pixip";
+	connect(null);
+	ui.inboxPage.textContent = "";
 	const loading = document.createElement("div");
-	loading.className = "sheet-text";
+	loading.className = "inbox-empty";
 	loading.textContent = "loading…";
-	wrapper.append(loading);
-	ui.sheet.append(wrapper);
+	ui.inboxPage.append(loading);
 	try {
 		await loadInbox();
-		renderInboxSheet();
+		renderInboxPage();
 	} catch (error) {
 		toast(`inbox failed: ${error.message}`);
-		closeSheet();
+		ui.inboxPage.textContent = "";
 	}
 }
 
@@ -154,47 +177,43 @@ function chip(label, active, action) {
 	return button;
 }
 
-function renderInboxSheet() {
-	const target = ui.sheet;
+function renderInboxPage() {
+	const target = ui.inboxPage;
 	target.hidden = false;
 	target.textContent = "";
-	const wrapper = document.createElement("div");
-	wrapper.className = "inbox-sheet";
-	const heading = sheetHeader(sheetState.unread > 0 ? `inbox · ${sheetState.unread} unread` : "inbox");
-	wrapper.append(heading);
 
 	const toolbar = document.createElement("div");
 	toolbar.className = "inbox-toolbar";
 	const filters = document.createElement("div");
 	filters.className = "inbox-filters";
 	filters.append(
-		chip("all", sheetState.filter === "all", () => {
-			sheetState.filter = "all";
-			renderInboxSheet();
+		chip("all", viewState.filter === "all", () => {
+			viewState.filter = "all";
+			renderInboxPage();
 		}),
-		chip("unread", sheetState.filter === "unread", () => {
-			sheetState.filter = "unread";
-			renderInboxSheet();
+		chip("unread", viewState.filter === "unread", () => {
+			viewState.filter = "unread";
+			renderInboxPage();
 		}),
 	);
 	for (const purpose of INBOX_PURPOSES) {
 		filters.append(
-			chip(purposeLabel(purpose), sheetState.purpose === purpose, () => {
-				sheetState.purpose = sheetState.purpose === purpose ? null : purpose;
-				renderInboxSheet();
+			chip(purposeLabel(purpose), viewState.purpose === purpose, () => {
+				viewState.purpose = viewState.purpose === purpose ? null : purpose;
+				renderInboxPage();
 			}),
 		);
 	}
-	const archived = archivedCount(sheetState.messages);
+	const archived = archivedCount(viewState.messages);
 	filters.append(
-		chip(`archived (${archived})`, sheetState.archived, () => {
-			sheetState.archived = !sheetState.archived;
-			sheetState.expanded = null;
-			renderInboxSheet();
+		chip(`archived (${archived})`, viewState.archived, () => {
+			viewState.archived = !viewState.archived;
+			viewState.expanded = null;
+			renderInboxPage();
 		}),
 	);
 	toolbar.append(filters);
-	if (!sheetState.archived && sheetState.unread > 0) {
+	if (!viewState.archived && viewState.unread > 0) {
 		const markAll = document.createElement("button");
 		markAll.type = "button";
 		markAll.className = "inbox-mark-all";
@@ -202,28 +221,19 @@ function renderInboxSheet() {
 		markAll.addEventListener("click", () => void markAllRead());
 		toolbar.append(markAll);
 	}
-	wrapper.append(toolbar);
+	target.append(toolbar);
 
 	const list = document.createElement("div");
 	list.className = "inbox-list";
-	const visible = filterMessages(sheetState.messages, sheetState);
+	const visible = filterMessages(viewState.messages, viewState);
 	if (visible.length === 0) {
 		const empty = document.createElement("div");
-		empty.className = "sheet-text";
-		empty.textContent = sheetState.archived ? "no archived messages" : "no messages";
+		empty.className = "inbox-empty";
+		empty.textContent = viewState.archived ? "no archived messages" : "no messages";
 		list.append(empty);
 	}
 	for (const message of visible) list.append(renderCard(message));
-	wrapper.append(list);
-
-	const actions = document.createElement("div");
-	actions.className = "sheet-actions";
-	const close = document.createElement("button");
-	close.textContent = "close";
-	close.addEventListener("click", closeSheet);
-	actions.append(close);
-	wrapper.append(actions);
-	target.append(wrapper);
+	target.append(list);
 }
 
 function statusLabel(message) {
@@ -279,7 +289,7 @@ function renderCard(message) {
 	}`;
 	card.append(meta);
 
-	const expanded = sheetState.expanded === message.id;
+	const expanded = viewState.expanded === message.id;
 	const body = document.createElement("div");
 	body.className = expanded ? "inbox-body" : "inbox-body preview";
 	body.textContent = expanded ? message.body : message.body.split("\n")[0].slice(0, 180);
@@ -306,9 +316,9 @@ function renderCard(message) {
 	card.append(actions);
 
 	card.addEventListener("click", () => {
-		sheetState.expanded = expanded ? null : message.id;
+		viewState.expanded = expanded ? null : message.id;
 		if (!expanded && !message.readAt) void markRead(message);
-		else renderInboxSheet();
+		else renderInboxPage();
 	});
 	return card;
 }
@@ -317,8 +327,8 @@ async function markRead(message) {
 	try {
 		await inboxJson(`/api/inbox/${encodeURIComponent(message.id)}/read`, { method: "POST" });
 		message.readAt = new Date().toISOString();
-		sheetState.unread = Math.max(0, sheetState.unread - 1);
-		renderInboxSheet();
+		viewState.unread = Math.max(0, viewState.unread - 1);
+		renderInboxPage();
 	} catch (error) {
 		toast(`mark read failed: ${error.message}`);
 	}
@@ -327,9 +337,9 @@ async function markRead(message) {
 async function markAllRead() {
 	try {
 		await inboxJson("/api/inbox/read-all", { method: "POST" });
-		for (const message of sheetState.messages) if (!message.readAt) message.readAt = new Date().toISOString();
-		sheetState.unread = 0;
-		renderInboxSheet();
+		for (const message of viewState.messages) if (!message.readAt) message.readAt = new Date().toISOString();
+		viewState.unread = 0;
+		renderInboxPage();
 	} catch (error) {
 		toast(`mark all failed: ${error.message}`);
 	}
@@ -342,9 +352,9 @@ async function toggleArchive(message) {
 			method: "POST",
 		});
 		message.archivedAt = restoring ? null : new Date().toISOString();
-		sheetState.expanded = null;
+		viewState.expanded = null;
 		await loadInbox();
-		renderInboxSheet();
+		renderInboxPage();
 		toast(restoring ? "restored" : "archived");
 	} catch (error) {
 		toast(`archive failed: ${error.message}`);
@@ -368,7 +378,7 @@ function confirmDelete(message) {
 	const cancel = document.createElement("button");
 	cancel.type = "button";
 	cancel.textContent = "cancel";
-	cancel.addEventListener("click", () => renderInboxSheet());
+	cancel.addEventListener("click", () => renderInboxPage());
 	actions.append(confirm, cancel);
 	ui.sheet.append(note, actions);
 }
@@ -376,9 +386,9 @@ function confirmDelete(message) {
 async function removeMessage(message) {
 	try {
 		await inboxJson(`/api/inbox/${encodeURIComponent(message.id)}`, { method: "DELETE" });
-		sheetState.expanded = null;
+		viewState.expanded = null;
 		await loadInbox();
-		renderInboxSheet();
+		renderInboxPage();
 		toast("deleted");
 	} catch (error) {
 		toast(`delete failed: ${error.message}`);
@@ -393,8 +403,8 @@ function openReply(message, session) {
 	ui.input.focus();
 }
 
-/** The initial value for a fresh page; keeps the badge honest before frames. */
+/** The initial value for a fresh page; keeps the bar honest before frames. */
 export function initialInbox() {
 	state.inbox = emptyInbox();
-	renderInboxBadge();
+	renderInboxBar();
 }

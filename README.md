@@ -147,9 +147,10 @@ do in the TUI.
 - transcript text size: `A−`/`A+` in the header, seven steps from 50 % to 150 %,
   device-local (`localStorage`), scaling only the transcript so the composer and
   the rest of the chrome stay fixed (long-press resets, `Ctrl/Cmd` `-`/`+`/`0`);
-- dashboard inbox icon with a live unread badge, a filterable sheet
-  (all/unread/purpose/archived), read/archive/restore/delete actions and a
-  tap-to-session reply that prefills the composer;
+- a dashboard bottom bar with the newest inbox message preview and a live
+  unread badge, opening a dedicated `#inbox` page with
+  all/unread/purpose/archived filters, read/archive/restore/delete actions and
+  a tap-to-session reply that prefills the composer;
 - dashboard settings sheet from the header gear, with a device-local toggle for
   keeping hot/warm and newest sessions visible in collapsed groups, plus
   `archived` and `trash` views (restore or permanently delete);

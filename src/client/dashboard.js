@@ -56,8 +56,9 @@ export async function showList() {
 	ui.stop.hidden = true;
 	ui.back.hidden = true;
 	ui.settings.hidden = false;
-	ui.inbox.hidden = false;
 	ui.list.hidden = false;
+	ui.inboxPage.hidden = true;
+	ui.inboxBar.hidden = false;
 	ui.title.textContent = "sessions";
 	ui.sub.textContent = "";
 	ui.dot.className = "dot idle";

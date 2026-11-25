@@ -15,6 +15,10 @@ export function showList() {
 	return handlers.showList?.();
 }
 
+export function showInbox() {
+	return handlers.showInbox?.();
+}
+
 export function beginNewSession(cwd, worktree) {
 	return handlers.beginNewSession?.(cwd, worktree);
 }
@@ -31,6 +35,7 @@ export function route() {
 	const match = /^#s=(.+)$/.exec(location.hash);
 	const id = match ? decodeURIComponent(match[1]) : null;
 	if (id) openSession(id);
+	else if (location.hash === "#inbox") void showInbox();
 	else if (location.hash === "#new") {
 		// A reload lands here without a create in flight: fall back to the dashboard.
 		if (!handlers.hasPendingCreate?.()) {

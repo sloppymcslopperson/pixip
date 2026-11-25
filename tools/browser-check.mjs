@@ -509,7 +509,7 @@ async function runWorktreeFlow(page, base, fixture) {
 
 async function clickInboxChip(page, prefix) {
 	const clicked = await page.evaluate((prefix) => {
-		const chip = [...document.querySelectorAll("#sheet .inbox-chip")].find((button) =>
+		const chip = [...document.querySelectorAll("#inbox-page .inbox-chip")].find((button) =>
 			(button.textContent ?? "").trim().startsWith(prefix),
 		);
 		chip?.click();
@@ -520,40 +520,51 @@ async function clickInboxChip(page, prefix) {
 
 async function runInboxFlow(page, base) {
 	await page.goto(base, { waitUntil: "domcontentloaded", timeout: FLOW_TIMEOUT });
-	await page.waitForSelector("#inbox:not([hidden])", { timeout: FLOW_TIMEOUT });
-	await page.evaluate(() => document.querySelector("#inbox").click());
-	await page.waitForSelector("#sheet .inbox-card", { timeout: FLOW_TIMEOUT });
-	await checkNoOverflow(page, "inbox sheet");
+	await page.waitForSelector("#inbox-bar:not([hidden])", { timeout: FLOW_TIMEOUT });
+	await page.waitForFunction(
+		() => (document.querySelector("#inbox-bar-subject")?.textContent ?? "") === "browser inbox",
+		{ timeout: FLOW_TIMEOUT },
+	);
+	await page.evaluate(() => document.querySelector("#inbox-bar").click());
+	await page.waitForSelector("#inbox-page:not([hidden]) .inbox-card", { timeout: FLOW_TIMEOUT });
+	await checkNoOverflow(page, "inbox page");
 
 	// Reading a message is expanding it; that marks it read without a reload.
-	await page.evaluate(() => document.querySelector("#sheet .inbox-card").click());
-	await page.waitForSelector("#sheet .inbox-body:not(.preview)", { timeout: FLOW_TIMEOUT });
-	await page.waitForFunction(() => (document.querySelector("#sheet .inbox-meta")?.textContent ?? "").includes("read"), {
-		timeout: FLOW_TIMEOUT,
-	});
+	await page.evaluate(() => document.querySelector("#inbox-page .inbox-card").click());
+	await page.waitForSelector("#inbox-page .inbox-body:not(.preview)", { timeout: FLOW_TIMEOUT });
+	await page.waitForFunction(
+		() => (document.querySelector("#inbox-page .inbox-meta")?.textContent ?? "").includes("read"),
+		{
+			timeout: FLOW_TIMEOUT,
+		},
+	);
 	await checkNoOverflow(page, "inbox message expanded");
 
 	// Archive hides the row; the archived toggle restores visibility.
 	await page.evaluate(() =>
-		[...document.querySelectorAll("#sheet .inbox-actions button")]
+		[...document.querySelectorAll("#inbox-page .inbox-actions button")]
 			.find((button) => (button.textContent ?? "").trim() === "archive")
 			?.click(),
 	);
-	await page.waitForFunction(() => document.querySelector("#sheet .inbox-card") === null, { timeout: FLOW_TIMEOUT });
+	await page.waitForFunction(() => document.querySelector("#inbox-page .inbox-card") === null, {
+		timeout: FLOW_TIMEOUT,
+	});
 	await clickInboxChip(page, "archived");
-	await page.waitForSelector("#sheet .inbox-card", { timeout: FLOW_TIMEOUT });
+	await page.waitForSelector("#inbox-page .inbox-card", { timeout: FLOW_TIMEOUT });
 	await page.evaluate(() =>
-		[...document.querySelectorAll("#sheet .inbox-actions button")]
+		[...document.querySelectorAll("#inbox-page .inbox-actions button")]
 			.find((button) => (button.textContent ?? "").trim() === "restore")
 			?.click(),
 	);
-	await page.waitForFunction(() => document.querySelector("#sheet .inbox-card") === null, { timeout: FLOW_TIMEOUT });
+	await page.waitForFunction(() => document.querySelector("#inbox-page .inbox-card") === null, {
+		timeout: FLOW_TIMEOUT,
+	});
 	await clickInboxChip(page, "archived");
-	await page.waitForSelector("#sheet .inbox-card", { timeout: FLOW_TIMEOUT });
+	await page.waitForSelector("#inbox-page .inbox-card", { timeout: FLOW_TIMEOUT });
 
 	// Delete asks for confirmation; cancel keeps the message.
 	await page.evaluate(() =>
-		[...document.querySelectorAll("#sheet .inbox-actions button")]
+		[...document.querySelectorAll("#inbox-page .inbox-actions button")]
 			.find((button) => (button.textContent ?? "").trim() === "delete")
 			?.click(),
 	);
@@ -562,14 +573,22 @@ async function runInboxFlow(page, base) {
 		{ timeout: FLOW_TIMEOUT },
 	);
 	await page.click("#sheet .sheet-actions button:last-child");
-	await page.waitForSelector("#sheet .inbox-card", { timeout: FLOW_TIMEOUT });
+	await page.waitForSelector("#inbox-page .inbox-card", { timeout: FLOW_TIMEOUT });
 	await checkNoOverflow(page, "inbox archived filter");
 
 	// A live sender opens its session and prefills the reply marker.
-	await page.evaluate(() => document.querySelector("#sheet .inbox-sender")?.click());
+	await page.evaluate(() => document.querySelector("#inbox-page .inbox-sender")?.click());
 	await waitForSession(page);
 	const draft = await page.evaluate(() => document.querySelector("#input")?.value ?? "");
 	assert.match(draft, /^\[inbox [0-9a-f]{8}\] $/, "sender tap prefills the inbox reply marker");
+
+	// The inbox is a route, not a sheet: a direct load lands on its own page.
+	await page.goto(`${base}?direct=inbox#inbox`, { waitUntil: "domcontentloaded", timeout: FLOW_TIMEOUT });
+	await page.waitForSelector("#inbox-page:not([hidden]) .inbox-card", { timeout: FLOW_TIMEOUT });
+	await page.waitForFunction(() => document.querySelector("#title")?.textContent === "inbox", {
+		timeout: FLOW_TIMEOUT,
+	});
+	await checkNoOverflow(page, "direct inbox route");
 }
 
 async function runViewport(browser, base, fixture, viewport) {

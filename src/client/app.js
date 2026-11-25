@@ -6,7 +6,7 @@ import { bindScaleButton, readScale, setBarMenu, setScale, softRefresh } from ".
 import { configureDashboard, showList } from "./dashboard.js";
 import { configureDashboardList, refreshDashboard } from "./dashboardList.js";
 import { configureDashboardWorktree } from "./dashboardWorktree.js";
-import { initialInbox, openInboxSheet } from "./inbox.js";
+import { initialInbox, showInboxPage } from "./inbox.js";
 import {
 	archiveInactive,
 	configureDashboardSettings,
@@ -303,7 +303,9 @@ ui.stop.addEventListener("click", () => {
 
 ui.reload.addEventListener("click", () => void softRefresh());
 ui.settings.addEventListener("click", openSettingsSheet);
-ui.inbox.addEventListener("click", () => void openInboxSheet());
+ui.inboxBar.addEventListener("click", () => {
+	location.hash = "inbox";
+});
 
 /** Far-right `…` popover: text size and reload live here so the session name
  *  keeps the header width. Closed by an outside click or Escape. */
@@ -391,6 +393,12 @@ configureTransport({ onFrame: handleFrame, onClose: handleTransportClose });
 configureNavigation({
 	openSession,
 	showList,
+	showInbox: () => {
+		cacheCurrentSession();
+		parkCurrentSession();
+		state.sessionId = null;
+		return showInboxPage();
+	},
 	beginNewSession,
 	cacheCurrentSession,
 	forgetCachedSession,

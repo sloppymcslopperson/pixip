@@ -36,6 +36,21 @@ export function normalizeInbox(value) {
 }
 
 /** Badge copy: no number at zero, and a cap so the header never grows. */
+/** One-line bar copy: newest subject plus a flattened body preview. */
+export function newestPreview(newest) {
+	if (!newest || typeof newest !== "object") {
+		return { subject: "inbox", preview: "no messages yet" };
+	}
+	const subject =
+		typeof newest.subject === "string" && newest.subject.trim() ? newest.subject.trim() : "untitled message";
+	const body = typeof newest.body === "string" ? newest.body.replace(/\s+/g, " ").trim() : "";
+	const sender = newest.sender && typeof newest.sender.name === "string" ? newest.sender.name : "";
+	return {
+		subject,
+		preview: body || (sender ? `from ${sender}` : "no preview"),
+	};
+}
+
 export function badgeLabel(unread) {
 	const count = Number.isFinite(unread) ? Math.max(0, Math.trunc(unread)) : 0;
 	if (count === 0) return "";

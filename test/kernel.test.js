@@ -72,9 +72,12 @@ describe("kernel ui map", () => {
 		assert.deepEqual(ui.footerAbove, { selector: "#footer .addon-widgets.above" });
 		assert.deepEqual(ui.surface, { selector: "#surface" });
 		assert.deepEqual(ui.toast, { selector: "#toast" });
-		assert.deepEqual(ui.inbox, { selector: "#inbox" });
+		assert.deepEqual(ui.inboxBar, { selector: "#inbox-bar" });
+		assert.deepEqual(ui.inboxBarSubject, { selector: "#inbox-bar-subject" });
+		assert.deepEqual(ui.inboxBarPreview, { selector: "#inbox-bar-preview" });
 		assert.deepEqual(ui.inboxBadge, { selector: "#inbox-badge" });
-		assert.equal(Object.keys(ui).length, 37);
+		assert.deepEqual(ui.inboxPage, { selector: "#inbox-page" });
+		assert.equal(Object.keys(ui).length, 40);
 		assert.equal(selectors.filter((selector) => selector === "#bar").length, 1);
 	});
 });

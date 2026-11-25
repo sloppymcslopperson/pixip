@@ -23,9 +23,6 @@
 				<div id="sub"></div>
 			</div>
 			<span id="dot" class="dot idle"></span>
-			<button id="inbox" class="ghost inbox-btn" aria-label="Inbox" title="Inbox" hidden>
-				✉<span id="inbox-badge" class="inbox-badge" hidden></span>
-			</button>
 			<button id="settings" class="ghost settings-btn" aria-label="Settings" title="Settings" hidden>⚙</button>
 			<button id="stop" class="ghost" hidden aria-label="Stop">stop</button>
 			<div id="more-wrap" class="bar-more">
@@ -56,6 +53,7 @@
 		</header>
 
 		<main id="list" hidden></main>
+		<main id="inbox-page" hidden aria-label="Inbox"></main>
 		<main id="session" hidden>
 			<div id="log"></div>
 			<section id="surface" hidden aria-label="Extension request"></section>
@@ -103,6 +101,15 @@
 				<div class="fline stats"><span class="left"></span><span class="right"></span></div>
 			</footer>
 		</div>
+
+		<button id="inbox-bar" class="inbox-bar" type="button" hidden aria-label="Open inbox">
+			<span class="inbox-bar-icon" aria-hidden="true">✉</span>
+			<span class="inbox-bar-text">
+				<span id="inbox-bar-subject" class="inbox-bar-subject">inbox</span>
+				<span id="inbox-bar-preview" class="inbox-bar-preview">no messages yet</span>
+			</span>
+			<span id="inbox-badge" class="inbox-badge" hidden></span>
+		</button>
 
 		<div id="sheet" hidden role="dialog" aria-modal="true"></div>
 		<div id="toast" hidden></div>

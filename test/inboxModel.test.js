@@ -9,6 +9,7 @@ import {
 	filterMessages,
 	mergeWarnings,
 	newCapWarnings,
+	newestPreview,
 	normalizeInbox,
 	purposeLabel,
 	replyPrefix,
@@ -45,6 +46,11 @@ describe("inbox model", () => {
 		assert.equal(badgeLabel(120), "99+");
 		assert.equal(shortId("abcdef123"), "abcdef12");
 		assert.equal(purposeLabel("extra-info"), "extra info");
+		assert.deepEqual(newestPreview(null), { subject: "inbox", preview: "no messages yet" });
+		assert.deepEqual(newestPreview({ subject: "Subject", body: "line one\nline two", sender: { name: "Sam" } }), {
+			subject: "Subject",
+			preview: "line one line two",
+		});
 	});
 
 	it("grades the cap and only warns once per threshold", () => {
