@@ -6,7 +6,7 @@
  *
  *   PIXIP_CHROME=/path/to/chrome node tools/svg-review.mjs ui_work/mocks/main.svg
  *   node tools/svg-review.mjs ui_work/mocks/main.svg --widths 360,390 --crops top,footer
- *   node tools/svg-review.mjs ui_work/mocks/main.svg --crop "rows:0,128,360,220"
+ *   node tools/svg-review.mjs ui_work/mocks/main.svg --crop "rows:0,120,360,264"
  *
  * Output goes to `tmp/svg-review/<svg-name>/` (git-ignored): one PNG per width,
  * one crop PNG per region. `--metrics` prints palette, font sizes and stroke
@@ -30,7 +30,7 @@ const DEFAULT_WIDTHS = [360, 390, 1280];
 const DEFAULT_REGIONS = {
 	top: [0, 0, 360, 130],
 	banner: [0, 55, 360, 95],
-	rows: [0, 128, 360, 220],
+	rows: [0, 120, 360, 264],
 	footer: [0, 585, 360, 55],
 };
 
