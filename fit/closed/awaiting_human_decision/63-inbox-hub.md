@@ -1,6 +1,7 @@
 ---
 grilled: true
 project: pixip
+commit: "8166ddaac4b37b48d1252ce9342f421dcce84169"
 ---
 
 Add a durable message inbox that agents can post to and the user can read from the dashboard; messages belong to the data dir and outlive sessions. This ticket is the hub half: store, REST, websocket badge updates, CLI, child env, and the auth seam.
