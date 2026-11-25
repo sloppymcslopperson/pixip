@@ -66,6 +66,15 @@ pi list
 pi remove /path/to/pi_questionare
 ```
 
+`extensions/pixip-show-image` registers `show_image_to_user`, the agent's
+explicit way to show one local image in the transcript. Pixip renders it as a
+thumbnail on the tool card; a plain Pi TUI keeps the `file://` link. Install it
+the same way:
+
+```bash
+pi install /path/to/pixip/extensions/pixip-show-image
+```
+
 ## Why
 
 Existing options are slow, shaped around terminals or editors, and some of them

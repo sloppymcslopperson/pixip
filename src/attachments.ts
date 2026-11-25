@@ -24,6 +24,33 @@ export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 const SUPPORTED_IMAGE_MIME = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 
+/** Magic-byte detection for the download route, which never trusts a filename. */
+export function detectImageMime(bytes: Uint8Array): string | undefined {
+	if (
+		bytes.length >= 8 &&
+		bytes[0] === 0x89 &&
+		bytes[1] === 0x50 &&
+		bytes[2] === 0x4e &&
+		bytes[3] === 0x47 &&
+		bytes[4] === 0x0d &&
+		bytes[5] === 0x0a &&
+		bytes[6] === 0x1a &&
+		bytes[7] === 0x0a
+	)
+		return "image/png";
+	if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+	if (bytes.length >= 6) {
+		const head = Buffer.from(bytes.subarray(0, 6)).toString("ascii");
+		if (head === "GIF87a" || head === "GIF89a") return "image/gif";
+	}
+	if (bytes.length >= 12) {
+		const riff = Buffer.from(bytes.subarray(0, 4)).toString("ascii");
+		const webp = Buffer.from(bytes.subarray(8, 12)).toString("ascii");
+		if (riff === "RIFF" && webp === "WEBP") return "image/webp";
+	}
+	return undefined;
+}
+
 function supportedMimeType(value: string): string | undefined {
 	const base = value.split(";")[0]?.trim().toLowerCase() ?? "";
 	if (base === "image/jpg") return "image/jpeg";

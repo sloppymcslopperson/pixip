@@ -93,6 +93,77 @@ describe("rendering", () => {
 		assert.match(html, /12ms/);
 	});
 
+	it("shows only show_image_to_user images, visibly above the folded text", () => {
+		const html = renderMessage(
+			{
+				role: "toolResult",
+				toolName: "show_image_to_user",
+				toolCallId: "call_img",
+				content: [
+					{ type: "text", text: "ignored in favour of details" },
+					{ type: "image", data: "aGVsbG8=", mimeType: "image/png" },
+					{ type: "image", data: "c2Vjb25k", mimeType: "image/png" },
+				],
+				details: {
+					path: "/tmp/shot.png",
+					caption: "Login screen",
+					bytes: 1234,
+					thumbnail: false,
+					overSourceLimit: false,
+					tooLarge: false,
+				},
+			},
+			undefined,
+			{ sessionId: "s1" },
+		);
+		assert.match(html, /class="tool image-card"/);
+		assert.match(html, /class="msg-images tool-images"/);
+		assert.match(html, /src="data:image\/png;base64,aGVsbG8="/);
+		assert.doesNotMatch(html, /c2Vjb25k/);
+		assert.doesNotMatch(html, /loading="lazy"/);
+		assert.match(html, /Login screen/);
+		assert.match(html, /href="\/api\/sessions\/s1\/files\?path=%2Ftmp%2Fshot\.png" download/);
+		assert.ok(html.indexOf("tool-images") < html.indexOf('<details class="tool-text"'));
+	});
+
+	it("leaves images from other tools as text", () => {
+		const html = renderMessage({
+			role: "toolResult",
+			toolName: "read",
+			content: [
+				{ type: "text", text: "Read image file [image/png]" },
+				{ type: "image", data: "aGVsbG8=", mimeType: "image/png" },
+			],
+		});
+		assert.doesNotMatch(html, /msg-image/);
+		assert.match(html, /Read image file/);
+	});
+
+	it("labels an over-limit thumbnail with a download link", () => {
+		const html = renderMessage(
+			{
+				role: "toolResult",
+				toolName: "show_image_to_user",
+				content: [
+					{ type: "text", text: "size note" },
+					{ type: "image", data: "dGh1bWI=", mimeType: "image/jpeg" },
+				],
+				details: {
+					path: "/tmp/big.png",
+					bytes: 2 * 1024 * 1024,
+					thumbnail: true,
+					overSourceLimit: true,
+					tooLarge: false,
+				},
+			},
+			undefined,
+			{ sessionId: "s1" },
+		);
+		assert.match(html, /over the 1 MB limit/);
+		assert.match(html, /download original/);
+		assert.match(html, /%2Ftmp%2Fbig\.png/);
+	});
+
 	it("escapes tool names and summaries", () => {
 		assert.equal(escapeHtml('<a href="x">'), "&lt;a href=&quot;x&quot;&gt;");
 	});

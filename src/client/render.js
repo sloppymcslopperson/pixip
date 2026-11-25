@@ -181,7 +181,7 @@ export function textOf(content) {
 }
 
 /** Snapshot path: a persisted session entry -> html. */
-export function renderEntry(entry) {
+export function renderEntry(entry, context) {
 	if (!entry || typeof entry !== "object") return "";
 	if (entry.type === "compaction" || entry.type === "branchSummary") {
 		const label = entry.type === "compaction" ? "compacted" : "branch summary";
@@ -189,13 +189,87 @@ export function renderEntry(entry) {
 		return `<section class="block meta"><div class="meta-head">${label}</div><div class="meta-body">${summary}</div></section>`;
 	}
 	if (entry.type !== "message") return "";
-	return renderMessage(entry.message, entry.id);
+	return renderMessage(entry.message, entry.id, context);
 }
+
+/** The one tool whose image blocks are intentional display, not tool output. */
+export const SHOW_IMAGE_TOOL = "show_image_to_user";
 
 /** Snapshot path: a message -> html. */
 export function toolCallsOf(content) {
 	if (!Array.isArray(content)) return [];
 	return content.filter((block) => block && block.type === "toolCall");
+}
+
+function imageOf(content) {
+	if (!Array.isArray(content)) return null;
+	return (
+		content.find(
+			(block) =>
+				block && block.type === "image" && typeof block.data === "string" && typeof block.mimeType === "string",
+		) ?? null
+	);
+}
+
+/** Only `show_image_to_user` results are deliberate displays; `read` stays text. */
+export function toolResultImage(toolName, content) {
+	if (toolName !== SHOW_IMAGE_TOOL) return null;
+	return imageOf(content);
+}
+
+/** Hub route for the original file; the browser cannot follow a `file://` link. */
+export function sessionFileHref(sessionId, path) {
+	if (typeof sessionId !== "string" || !sessionId || typeof path !== "string" || !path) return undefined;
+	return `/api/sessions/${encodeURIComponent(sessionId)}/files?path=${encodeURIComponent(path)}`;
+}
+
+function fileUrl(path) {
+	return path.startsWith("/") ? `file://${encodeURI(path)}` : path;
+}
+
+function sizeLabel(bytes) {
+	if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) return "unknown size";
+	if (bytes < 1024) return `${bytes} B`;
+	if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+	const mb = bytes / (1024 * 1024);
+	return `${mb < 10 ? Math.round(mb * 10) / 10 : Math.round(mb)} MB`;
+}
+
+/** Text beside a displayed image: caption, size note and a download link. */
+export function showImageTextHtml(details, sessionId) {
+	if (!details || typeof details !== "object") return "";
+	const path = typeof details.path === "string" ? details.path : "";
+	const caption = typeof details.caption === "string" ? details.caption : "";
+	const url = fileUrl(path);
+	const href = sessionFileHref(sessionId, path) ?? url;
+	const label = details.thumbnail ? "download original" : escapeHtml(url);
+	const link = url ? `<a class="tool-download" href="${escapeHtml(href)}" download>${label}</a>` : escapeHtml(path);
+	const lines = [];
+	if (caption) lines.push(escapeHtml(caption));
+	if (details.tooLarge) {
+		lines.push(`File is ${sizeLabel(details.bytes)}, over the 20 MB limit; showing a link only.`);
+	} else if (details.thumbnail) {
+		lines.push(`File is ${sizeLabel(details.bytes)}, over the 1 MB limit; showing a thumbnail.`);
+	} else if (details.overSourceLimit) {
+		lines.push(`File is ${sizeLabel(details.bytes)}, over the 1 MB limit; a thumbnail could not be made.`);
+	}
+	lines.push(`Download: ${link}`);
+	return lines.join("\n");
+}
+
+/**
+ * Output html plus the one renderable image for a tool result. Kept here so the
+ * snapshot, live event and full-entry paths share the same rules.
+ */
+export function toolResultParts(message, sessionId) {
+	const toolName = message?.toolName ?? "tool";
+	const image = toolResultImage(toolName, message?.content);
+	const details = message?.details;
+	const output =
+		toolName === SHOW_IMAGE_TOOL && details && typeof details === "object"
+			? showImageTextHtml(details, sessionId)
+			: ansiToHtml(textOf(message?.content));
+	return { output, image };
 }
 
 /** Inside a user block: text plus any recorded image thumbnails. */
@@ -222,7 +296,7 @@ export function renderUserBody(message) {
 	return `${textHtml}${thumbs ? `<div class="msg-images">${thumbs}</div>` : ""}`;
 }
 
-export function renderMessage(message, entryId) {
+export function renderMessage(message, entryId, context = {}) {
 	if (!message || typeof message !== "object") return "";
 	if (message.role === "user") {
 		// Snapshot entries carry their id; live `message_start` records do not, so
@@ -237,9 +311,9 @@ export function renderMessage(message, entryId) {
 		return renderAssistant(message.content ?? []);
 	}
 	if (message.role === "toolResult") {
-		const output = ansiToHtml(textOf(message.content));
+		const { output, image } = toolResultParts(message, context.sessionId);
 		const error = message.isError ? " error" : "";
-		return toolBlock(message.toolName ?? "tool", "", output, error, null, message.toolCallId ?? "");
+		return toolBlock(message.toolName ?? "tool", "", output, error, null, message.toolCallId ?? "", { image });
 	}
 	if (message.role === "bashExecution") {
 		return bashCardHtml(message);
@@ -317,11 +391,21 @@ export function renderAssistantBody(content, includeTools = true) {
 	return html;
 }
 
-export function toolBlock(name, summary, output, extraClass, durationMs, callId) {
+export function toolBlock(name, summary, output, extraClass, durationMs, callId, options = {}) {
 	const head = `<span class="tool-name">${escapeHtml(name)}</span>${summary ? ` <span class="tool-arg">${escapeHtml(summary)}</span>` : ""}`;
 	const timing = typeof durationMs === "number" ? `<span class="tool-time">${durationMs}ms</span>` : "";
+	const attrs = `data-call="${escapeHtml(callId ?? "")}" data-name="${escapeHtml(name)}"${summary ? ` data-arg="${escapeHtml(summary)}"` : ""}`;
+	const image = options.image;
+	if (image) {
+		// Visible while the text stays folded: the image is the point of the call.
+		const thumb = `<button type="button" class="msg-image tool-image" aria-label="Open image shown by the agent"><img src="data:${escapeHtml(image.mimeType)};base64,${image.data}" alt="image shown by the agent" /></button>`;
+		const text = output
+			? `<details class="tool-text"><summary><span class="tool-text-label">output</span></summary><pre class="tool-out">${output}</pre></details>`
+			: "";
+		return `<section class="tool image-card${extraClass ?? ""}" ${attrs}><div class="tool-head">${head}${timing}</div><div class="msg-images tool-images">${thumb}</div>${text}</section>`;
+	}
 	const open = output ? "" : " empty";
-	return `<details class="tool${extraClass ?? ""}${open}" data-call="${escapeHtml(callId ?? "")}"><summary>${head}${timing}</summary><pre class="tool-out">${output}</pre></details>`;
+	return `<details class="tool${extraClass ?? ""}${open}" ${attrs}><summary>${head}${timing}</summary><pre class="tool-out">${output}</pre></details>`;
 }
 
 export function relativeTime(ms) {

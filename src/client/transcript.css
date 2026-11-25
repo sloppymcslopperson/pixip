@@ -149,7 +149,7 @@
 .load-full:disabled {
 	opacity: 0.6;
 }
-details.tool > .load-full {
+.tool > .load-full {
 	margin: 0 9px 9px;
 }
 .meta-head {
@@ -357,8 +357,59 @@ details.tool.error > summary .tool-name {
 	overflow: auto;
 	color: #cfc9e0;
 }
+.tool-out a {
+	color: var(--accent);
+}
 details.tool.empty > summary {
 	color: var(--fg-faint);
+}
+
+/* show_image_to_user: the image is the result, so it stays visible while the
+   text output stays folded. */
+.tool.image-card {
+	margin: 6px 0;
+	background: var(--bg-soft);
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	overflow: hidden;
+}
+.tool.image-card > .tool-head {
+	padding: 7px 9px;
+	font-size: 0.833em;
+	display: flex;
+	gap: 6px;
+	align-items: baseline;
+}
+.tool.image-card > .tool-images {
+	padding: 0 9px 9px;
+}
+.tool.image-card > .tool-text {
+	border-top: 1px solid var(--line);
+}
+.tool.image-card > .tool-text > summary {
+	cursor: pointer;
+	padding: 7px 9px;
+	font-size: 0.833em;
+	list-style: none;
+	display: flex;
+	gap: 6px;
+	align-items: baseline;
+}
+.tool.image-card > .tool-text > summary::-webkit-details-marker {
+	display: none;
+}
+.tool.image-card > .tool-text > summary::before {
+	content: "▸";
+	color: var(--fg-faint);
+}
+.tool.image-card > .tool-text[open] > summary::before {
+	content: "▾";
+}
+.tool.image-card > .tool-text > .tool-out {
+	border-top: 0;
+}
+.tool.image-card.error > .tool-head .tool-name {
+	color: var(--err);
 }
 
 /* ---- bash cards (!cmd / !!cmd) ---- */
