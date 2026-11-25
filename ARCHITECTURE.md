@@ -463,8 +463,13 @@ still applies, without claiming a planned restart.
 The classifier in `src/client/commands.js` marks the RPC-drivable TUI built-ins;
 `src/client/app.js` keeps one handler per name and the hub is a thin wrapper:
 
-- `/compact [instructions]` → `compact`; after `compaction_end` the client sends
-  `resnapshot`, so the shrunken context replaces the loaded windows;
+- `/compact [instructions]` → `compact`; while Pi compacts, the client shows a
+  persistent `compacting context (<reason>)… Ns` row and locks the composer
+  (the draft stays). A successful `compaction_end` sends `resnapshot`, which
+  keeps the full history and paints a collapsed boundary with the summary,
+  tokens before/after when known, duration and time. Aborted or failed
+  compactions add no boundary and only toast the outcome. Automatic
+  threshold/overflow compaction takes the same path and refreshes the footer;
 - `/name [name]` → toast the name, or `set_session_name` (the header follows the
   status frame);
 - `/session` → local meta sheet from the snapshot `session` and the footer;

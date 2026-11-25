@@ -56,6 +56,9 @@ export const state = {
 	entries: [], // what the client currently knows, oldest first
 	more: false, // older entries exist before entries[0]
 	loadingEarlier: false,
+	compacting: null, // { reason, startedAt } while Pi reports compaction_start
+	compactionResult: null, // success metadata waiting for the replacement snapshot
+	compactionMeta: null, // { id, estimatedTokensAfter, durationMs } for the boundary
 
 	// composer: the pending attachment and command/menu/queue state.
 	pendingAttachment: null, // one image or file, never both: { kind, name, size, ... }

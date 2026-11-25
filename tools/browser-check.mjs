@@ -72,7 +72,7 @@ async function bootFixture() {
 	await run("git", ["-C", repo, "add", "file.txt"], { env: gitEnv });
 	await run("git", ["-C", repo, "commit", "-m", "init"], { env: gitEnv });
 
-	const hub = hubFor(paths, {}, { FAKE_PI_ENTRIES: JSON.stringify(entries) });
+	const hub = hubFor(paths, {}, { FAKE_PI_ENTRIES: JSON.stringify(entries), FAKE_PI_COMPACTION_DURATION_MS: "600" });
 	const server = await startServer({
 		host: "127.0.0.1",
 		port: 0,
@@ -316,6 +316,38 @@ async function transcriptDistance(page) {
 	});
 }
 
+async function runCompactionFlow(page, base, sessionId) {
+	await page.goto(`${base}?flow=compaction#s=${sessionId}`, {
+		waitUntil: "domcontentloaded",
+		timeout: FLOW_TIMEOUT,
+	});
+	await waitForSession(page);
+	await page.type("#input", "/compact keep the API notes");
+	await page.click("#send");
+	await page.waitForFunction(() => Boolean(document.querySelector("#log .compaction-indicator")), {
+		timeout: FLOW_TIMEOUT,
+	});
+	assert.equal(await page.$eval("#input", (element) => element.disabled), true, "composer locks while compacting");
+	await page.waitForFunction(() => Boolean(document.querySelector("#log details.compact-boundary")), {
+		timeout: FLOW_TIMEOUT,
+	});
+	await page.waitForFunction(() => !document.querySelector("#log .compaction-indicator"), {
+		timeout: FLOW_TIMEOUT,
+	});
+	assert.equal(await page.$eval("#input", (element) => !element.disabled), true, "composer unlocks after compaction");
+	const label = await page.evaluate(
+		() => [...document.querySelectorAll("#log details.compact-boundary > summary")].at(-1)?.textContent ?? "",
+	);
+	assert.match(label, /compacted/);
+	assert.match(label, /100 → ~10/);
+	await page.evaluate(() => [...document.querySelectorAll("#log details.compact-boundary > summary")].at(-1)?.click());
+	const body = await page.evaluate(
+		() => [...document.querySelectorAll("#log details.compact-boundary .meta-body")].at(-1)?.textContent ?? "",
+	);
+	assert.equal(body, "compacted");
+	await checkNoOverflow(page, "compaction");
+}
+
 async function runHistoryFlow(page, base, sessionId) {
 	await page.goto(`${base}?flow=history#s=${sessionId}`, { waitUntil: "domcontentloaded", timeout: FLOW_TIMEOUT });
 	await waitForSession(page);
@@ -529,6 +561,7 @@ async function runViewport(browser, base, fixture, viewport) {
 		await runSelectFlow(page, base, fixture.sessionId, fixture.hub, fixture.paths);
 		await runPanelFlow(page, base, fixture.sessionId);
 		await runHistoryFlow(page, base, fixture.sessionId);
+		await runCompactionFlow(page, base, fixture.sessionId);
 		await runParkFlow(page, base, fixture.sessionId);
 		await delay(50);
 		assert.deepEqual(problems, [], `${viewport.width}px browser problems`);

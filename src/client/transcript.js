@@ -1,5 +1,6 @@
 // Client transcript module; shared state lives in kernel/state.js.
 import { appendBlock, hideThinkingIndicator, showThinkingIndicator } from "./transcriptView.js";
+import { endCompaction, startCompaction } from "./compaction.js";
 import { installDeps } from "./configure.js";
 import { renderQueue } from "./queueView.js";
 import { scheduleScroll, scrollToEnd } from "./scroll.js";
@@ -121,8 +122,19 @@ export function earlierButton() {
 	return button;
 }
 
+function newestCompactionId(entries) {
+	for (let index = entries.length - 1; index >= 0; index -= 1) {
+		if (entries[index]?.type === "compaction" && typeof entries[index].id === "string") return entries[index].id;
+	}
+	return null;
+}
+
 export function htmlOf(entries, calls) {
-	const context = { sessionId: state.info?.id };
+	const boundaryId = newestCompactionId(state.entries ?? []);
+	const context = {
+		sessionId: state.info?.id,
+		compaction: boundaryId && state.compactionMeta?.id === boundaryId ? state.compactionMeta : null,
+	};
 	const blocks = [];
 	for (const entry of entries) {
 		if (entry?.type === "message" && entry.message?.role === "assistant") {
@@ -426,15 +438,15 @@ export function handleEvent(event) {
 			applyInfo();
 			break;
 		case "compaction_end":
-			// The compaction entry is not on the live event path and the context
-			// window shrank: re-request the transcript the way it is now.
-			send({ t: "resnapshot" });
+			// Success adds a boundary that is not on the live event path, so the
+			// transcript is re-requested. Abort/error leaves history untouched.
+			if (endCompaction(event)) send({ t: "resnapshot" });
 			break;
 		case "auto_retry_start":
 			toast(`retrying (${event.attempt}/${event.maxAttempts}): ${event.errorMessage ?? ""}`);
 			break;
 		case "compaction_start":
-			toast(`compacting (${event.reason})…`);
+			startCompaction(event.reason);
 			break;
 		case "extension_error":
 			toast(`extension error: ${event.error ?? event.message ?? ""}`);

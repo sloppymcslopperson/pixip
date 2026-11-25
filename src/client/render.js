@@ -2,6 +2,7 @@
 // `node --test` imports the same file, so what the tests cover is what ships.
 // Markdown lives in `./markdown.js`, which imports the vendored renderer.
 
+import { formatTokens } from "./footer.js";
 import { escapeHtml, markdownToHtml } from "./markdown.js";
 
 export { escapeHtml };
@@ -180,13 +181,56 @@ export function textOf(content) {
 		.join("");
 }
 
+/** Compact durations without dragging the reader through sub-second noise. */
+export function formatDuration(ms) {
+	const seconds = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+	if (seconds < 60) return `${seconds}s`;
+	const minutes = Math.floor(seconds / 60);
+	return `${minutes}m ${seconds % 60}s`;
+}
+
+function formatClock(value) {
+	const date = new Date(value);
+	if (Number.isNaN(date.getTime())) return "";
+	return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+/** Live status line while Pi is summarizing the context. */
+export function compactionStatusText(reason, elapsedMs, hasDraft = false) {
+	const phase = typeof reason === "string" && reason ? reason : "manual";
+	const draft = hasDraft ? " · draft kept" : "";
+	return `compacting context (${phase})… ${formatDuration(elapsedMs)}${draft}`;
+}
+
+/** One-line boundary label; `meta` is only known for the just-finished compaction. */
+export function compactionBoundaryLabel(entry, meta) {
+	const parts = ["compacted"];
+	if (meta && typeof meta.durationMs === "number") parts.push(formatDuration(meta.durationMs));
+	if (typeof entry.tokensBefore === "number") {
+		const before = formatTokens(entry.tokensBefore);
+		parts.push(
+			meta && typeof meta.estimatedTokensAfter === "number"
+				? `${before} → ~${formatTokens(meta.estimatedTokensAfter)}`
+				: `${before} before`,
+		);
+	}
+	const clock = formatClock(entry.timestamp);
+	if (clock) parts.push(clock);
+	return parts.join(" · ");
+}
+
 /** Snapshot path: a persisted session entry -> html. */
 export function renderEntry(entry, context) {
 	if (!entry || typeof entry !== "object") return "";
-	if (entry.type === "compaction" || entry.type === "branchSummary") {
-		const label = entry.type === "compaction" ? "compacted" : "branch summary";
+	if (entry.type === "compaction") {
+		const meta = context?.compaction?.id === entry.id ? context.compaction : null;
 		const summary = ansiToHtml(textOf(entry.summary ?? entry.message ?? ""));
-		return `<section class="block meta"><div class="meta-head">${label}</div><div class="meta-body">${summary}</div></section>`;
+		const label = escapeHtml(compactionBoundaryLabel(entry, meta));
+		return `<details class="compact-boundary"><summary>${label}</summary><div class="meta-body">${summary}</div></details>`;
+	}
+	if (entry.type === "branchSummary") {
+		const summary = ansiToHtml(textOf(entry.summary ?? entry.message ?? ""));
+		return `<section class="block meta"><div class="meta-head">branch summary</div><div class="meta-body">${summary}</div></section>`;
 	}
 	if (entry.type !== "message") return "";
 	return renderMessage(entry.message, entry.id, context);

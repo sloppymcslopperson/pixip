@@ -7,9 +7,25 @@ export function refreshSendState() {
 	ui.send.disabled = !canSend();
 }
 
+/** Compaction owns the composer: no send and no attach until it ends. */
+export function refreshComposerState() {
+	const info = state.info;
+	const locked =
+		state.restarting ||
+		Boolean(state.compacting) ||
+		!info ||
+		info.state === "stopped" ||
+		info.state === "error" ||
+		info.state === "starting";
+	ui.input.disabled = locked;
+	ui.attach.disabled = locked;
+	refreshSendState();
+}
+
 export function canSend() {
 	const info = state.info;
 	if (!info) return false;
+	if (state.compacting) return false;
 	if (state.restarting || info.state === "stopped" || info.state === "error" || info.state === "starting") return false;
 	const attachment = state.pendingAttachment;
 	if (attachment) {

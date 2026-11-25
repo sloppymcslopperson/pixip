@@ -92,7 +92,10 @@ describe("built-in commands over the socket", () => {
 		const replaced = framesOf(inbox, "snapshot").at(-1);
 		assert.equal(replaced?.["replace"], true);
 		assert.equal(replaced?.["resume"], undefined);
-		assert.deepEqual(replaced?.["entries"], []);
+		const entries = replaced?.["entries"] as Array<Record<string, unknown>>;
+		const boundary = entries.find((entry) => entry["type"] === "compaction");
+		assert.equal(boundary?.["summary"], "compacted");
+		assert.equal(boundary?.["tokensBefore"], 100);
 
 		inbox.close();
 		await server.close();

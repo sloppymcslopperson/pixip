@@ -6,10 +6,14 @@ import {
 	ansiToHtml,
 	bashCardHtml,
 	bashStartCard,
+	compactionBoundaryLabel,
+	compactionStatusText,
 	escapeHtml,
+	formatDuration,
 	pendingErrorHtml,
 	pendingSessionHtml,
 	renderAssistantBody,
+	renderEntry,
 	renderMessage,
 	summarizeArgs,
 	textOf,
@@ -314,5 +318,58 @@ describe("bash start card", () => {
 		});
 		assert.match(bashCardHtml(state), /running…/);
 		assert.match(bashCardHtml(state), /excluded/);
+	});
+});
+
+describe("compaction", () => {
+	it("formats elapsed time without sub-second noise", () => {
+		assert.equal(formatDuration(0), "0s");
+		assert.equal(formatDuration(12_400), "12s");
+		assert.equal(formatDuration(125_000), "2m 5s");
+	});
+
+	it("describes the running phase, elapsed time and a kept draft", () => {
+		assert.equal(compactionStatusText("manual", 3_000), "compacting context (manual)… 3s");
+		assert.equal(compactionStatusText("threshold", 61_000, true), "compacting context (threshold)… 1m 1s · draft kept");
+	});
+
+	it("labels the boundary with tokens, duration and clock time", () => {
+		const entry = { id: "c1", type: "compaction", tokensBefore: 13_400, timestamp: "2026-11-21T12:34:00.000Z" };
+		const label = compactionBoundaryLabel(entry, { durationMs: 12_000, estimatedTokensAfter: 1_200 });
+		assert.match(label, /^compacted · 12s · 13k → ~1\.2k · \d{2}:\d{2}$/);
+	});
+
+	it("falls back to tokens before when no post-compaction estimate exists", () => {
+		const label = compactionBoundaryLabel(
+			{ type: "compaction", tokensBefore: 500, timestamp: "2026-11-21T12:34:00.000Z" },
+			null,
+		);
+		assert.match(label, /^compacted · 500 before · \d{2}:\d{2}$/);
+	});
+
+	it("renders a collapsed boundary with the summary inside", () => {
+		const html = renderEntry(
+			{
+				id: "c1",
+				type: "compaction",
+				summary: "kept the API notes",
+				tokensBefore: 13_400,
+				timestamp: "2026-11-21T12:34:00.000Z",
+			},
+			{ compaction: { id: "c1", durationMs: 12_000, estimatedTokensAfter: 1_200 } },
+		);
+		assert.match(html, /^<details class="compact-boundary"><summary>/);
+		assert.match(html, /13k → ~1\.2k/);
+		assert.match(html, /kept the API notes/);
+		assert.doesNotMatch(html, /<details[^>]* open/);
+	});
+
+	it("ignores metadata intended for a different boundary", () => {
+		const html = renderEntry(
+			{ id: "c2", type: "compaction", summary: "old", tokensBefore: 900, timestamp: "2026-11-21T12:00:00.000Z" },
+			{ compaction: { id: "c1", durationMs: 12_000, estimatedTokensAfter: 100 } },
+		);
+		assert.doesNotMatch(html, /12s/);
+		assert.match(html, /900 before/);
 	});
 });

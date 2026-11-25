@@ -481,6 +481,11 @@ export function onRecord(this: any, info: SessionInfo, raw: string, record: unkn
 			this.scheduleFooter(target);
 			break;
 		}
+		case "compaction_end":
+			// Automatic compaction changes the context window without a compact RPC
+			// response, so the footer has no other update path.
+			this.scheduleFooter(target);
+			break;
 		case "extension_ui_request":
 			this.cacheAddonUi(target, typed, raw);
 			this.cacheBlockingUi(target, typed, raw);

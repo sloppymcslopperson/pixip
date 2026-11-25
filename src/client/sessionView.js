@@ -6,7 +6,7 @@ import { contextLevel, footerPwdLine, footerStatsLeft, footerStatsRight } from "
 import { ansiToHtml, escapeHtml } from "./render.js";
 import { openSession } from "./navigation.js";
 import { scrollToEnd } from "./scroll.js";
-import { refreshSendState } from "./sendState.js";
+import { refreshComposerState } from "./sendState.js";
 import { connect } from "./transport.js";
 import { hideThinkingIndicator } from "./transcriptView.js";
 import { state } from "./kernel/state.js";
@@ -112,9 +112,7 @@ export function applyInfo() {
 	const stopped = !restarting && (info.state === "stopped" || info.state === "error");
 	const starting = !restarting && info.state === "starting";
 	if (stopped || starting) hideThinkingIndicator();
-	ui.input.disabled = restarting || stopped || starting;
-	ui.attach.disabled = restarting || stopped || starting;
-	refreshSendState();
+	refreshComposerState();
 	renderPeerNotice();
 	// The provisional transcript is already readable; this only says the child
 	// is still booting and live events have not started yet.

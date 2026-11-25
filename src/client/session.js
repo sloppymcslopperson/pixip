@@ -2,6 +2,7 @@
 import { createAddonUi } from "./addonUi.js";
 import { installDeps } from "./configure.js";
 import { resize } from "./composerInput.js";
+import { clearCompaction } from "./compaction.js";
 import { closeMenu } from "./menuView.js";
 import { renderQueue } from "./queueView.js";
 import { pendingErrorHtml, pendingSessionHtml } from "./render.js";
@@ -37,6 +38,7 @@ export function beginNewSession(cwd, worktree) {
 }
 
 export function showPendingSession() {
+	clearCompaction();
 	state.sessionId = null;
 	ui.jump.hidden = true;
 	state.info = null;
@@ -100,6 +102,7 @@ export function failPendingSession(message) {
 
 export function openSession(id) {
 	if (state.sessionId === id) return;
+	clearCompaction();
 	cacheCurrentSession();
 	parkCurrentSession();
 	state.pendingCreate = null;

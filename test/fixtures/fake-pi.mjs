@@ -251,21 +251,51 @@ function handle(line) {
 				type: "compact",
 				customInstructions: command.customInstructions ?? null,
 			});
-			if (env.FAKE_PI_COMPACTION !== "0") {
-				send({ type: "compaction_start", reason: "manual" });
-				send({
-					type: "compaction_end",
-					reason: "manual",
-					aborted: false,
-					result: { summary: "compacted", tokensBefore: 100 },
-				});
+			const delayMs = Number(env.FAKE_PI_COMPACTION_DELAY_MS ?? 0);
+			const durationMs = Number(env.FAKE_PI_COMPACTION_DURATION_MS ?? 0);
+			const compaction = () => {
+				const id = `cmp-${randomUUID()}`;
+				const firstKeptEntryId = entries.at(-1)?.id ?? id;
+				const finish = () => {
+					if (env.FAKE_PI_COMPACTION !== "0") {
+						entries.push({
+							type: "compaction",
+							id,
+							parentId: leafId,
+							timestamp: new Date().toISOString(),
+							summary: "compacted",
+							firstKeptEntryId,
+							tokensBefore: 100,
+						});
+						leafId = id;
+						send({
+							type: "compaction_end",
+							reason: "manual",
+							aborted: false,
+							result: { summary: "compacted", tokensBefore: 100, estimatedTokensAfter: 10 },
+						});
+					}
+					return ok(command.id, "compact", {
+						summary: "compacted",
+						firstKeptEntryId,
+						tokensBefore: 100,
+						estimatedTokensAfter: 10,
+					});
+				};
+				if (env.FAKE_PI_COMPACTION !== "0") {
+					send({ type: "compaction_start", reason: "manual" });
+					if (durationMs > 0) {
+						setTimeout(finish, durationMs);
+						return;
+					}
+				}
+				return finish();
+			};
+			if (delayMs > 0) {
+				setTimeout(compaction, delayMs);
+				return;
 			}
-			return ok(command.id, "compact", {
-				summary: "compacted",
-				firstKeptEntryId: null,
-				tokensBefore: 100,
-				estimatedTokensAfter: 10,
-			});
+			return compaction();
 		}
 		case "prompt": {
 			logRecord({

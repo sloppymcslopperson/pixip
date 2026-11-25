@@ -1,6 +1,7 @@
 // Session frame effects: the explicit handlers the protocol adapter calls for
 // snapshots, restarts, status, re-keys and socket close. Decisions come from
 // the pure sessionPlan.js helpers; this module applies them.
+import { clearCompaction } from "./compaction.js";
 import { installDeps } from "./configure.js";
 import { applyInfo } from "./sessionView.js";
 import { closePlan, openedPlan, snapshotPlan, statusPlan } from "./sessionPlan.js";
@@ -26,6 +27,12 @@ export function configureSessionEffects(next) {
 
 /** Replacement snapshot: a compaction or a `/new` invalidates loaded windows. */
 export function renderReplace(entries, more) {
+	// The old DOM (and any live streaming node) is about to be replaced. Drop the
+	// references so the next delta starts a fresh block instead of writing into a
+	// detached section.
+	state.streaming = null;
+	state.pendingUser = null;
+	state.pending = "";
 	state.entries = [];
 	state.more = false;
 	state.stick = true;
@@ -45,9 +52,20 @@ export function handleSnapshot(frame) {
 		state.pendingUser = null;
 	}
 	state.info = frame.session;
-	if (plan.render === "resume") deps.renderResume(frame.entries ?? []);
-	else if (plan.render === "replace") renderReplace(frame.entries ?? [], frame.more === true);
-	else deps.renderSnapshot(frame.entries ?? [], frame.more === true);
+	const entries = frame.entries ?? [];
+	if (plan.render === "replace") {
+		// A just-finished compaction carries its post-summary estimate only in the
+		// event; pin it to the newest boundary before the snapshot paints.
+		const boundary = [...entries].reverse().find((entry) => entry?.type === "compaction");
+		if (typeof boundary?.id === "string" && state.compactionResult) {
+			state.compactionMeta = { id: boundary.id, ...state.compactionResult };
+		}
+		state.compactionResult = null;
+		if (!boundary) state.compactionMeta = null;
+	}
+	if (plan.render === "resume") deps.renderResume(entries);
+	else if (plan.render === "replace") renderReplace(entries, frame.more === true);
+	else deps.renderSnapshot(entries, frame.more === true);
 	if (plan.repaint) deps.renderTranscript();
 	applyInfo();
 	if (state.restartNoticePending) {
@@ -67,6 +85,7 @@ export function handleStatus(frame) {
 	const plan = statusPlan(frame, state);
 	if (plan.act !== "apply") return;
 	state.info = frame.session;
+	if (state.info?.state === "stopped" || state.info?.state === "error") clearCompaction();
 	applyInfo();
 	if (plan.quit) {
 		state.quitting = false;
@@ -120,6 +139,7 @@ export function handleOpened(frame) {
 
 /** Socket close: reconnect with the durable cursor, or fail a pending create. */
 export function handleTransportClose() {
+	clearCompaction();
 	const plan = closePlan({
 		pendingCreate: Boolean(state.pendingCreate),
 		sessionId: state.sessionId,

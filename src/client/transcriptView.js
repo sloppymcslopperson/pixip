@@ -33,3 +33,25 @@ export function showThinkingIndicator() {
 export function hideThinkingIndicator() {
 	ui.log.querySelector(".thinking-indicator")?.remove();
 }
+
+/** Persistent progress for compaction, separate from the turn's thinking row. */
+export function showCompactionIndicator(text) {
+	if (ui.session.hidden) return;
+	let section = ui.log.querySelector(".compaction-indicator");
+	if (!section) {
+		section = document.createElement("div");
+		section.className = "block meta compaction-indicator";
+		ui.log.append(section);
+		scheduleScroll();
+	}
+	section.textContent = text;
+}
+
+export function updateCompactionIndicator(text) {
+	const section = ui.log.querySelector(".compaction-indicator");
+	if (section) section.textContent = text;
+}
+
+export function hideCompactionIndicator() {
+	ui.log.querySelector(".compaction-indicator")?.remove();
+}
