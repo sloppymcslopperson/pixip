@@ -41,3 +41,15 @@ The agent should be able to intentionally show the user one image in the transcr
 - A >1 MB image shows a downscaled thumbnail plus the over-limit/download text.
 - The download link works in pixip and is a `file://` link in the TUI.
 - `npm run check` is green and the two screenshots are inspected.
+
+### Verification
+
+- `npm run check` green (run with `PIXIP_INSIDE`, `PI_SESSION_FILE` and `PIXIP_SESSION_ID` unset; inside pixip the daemon lifecycle tests see a caller session and fail for that unrelated reason).
+- Real session `show_image_to_user({ path: ".../docs/phone-session.png", caption: "Phone session layout" })`: tool result had `details`, a text block and one image block; live event and a fresh snapshot page both rendered the card.
+- `tools/shot.mjs` at 390 and 1280: thumbnail visible, `output` folded below it, no console/page errors, no horizontal overflow.
+- Tapping and the download route: expanded text showed the caption/size/link; `GET /api/sessions/<id>/files?path=...` returned `200 image/png`, `attachment; filename="phone-session.png"` and the full 43,872 bytes.
+- A 1.2 MB padded PNG returned a 473×1024 thumbnail with "over the 1 MB limit" text and a "download original" link.
+- Extension unit tests cover relative paths, missing/non-file/unsupported sources, the 1 MB and 20 MB thresholds, resize failure and link-only fallback.
+- Commit `763f60e`. The extension is installed in the user's Pi settings for this check and must be removed after confirmation with `pi remove ./extensions/pixip-show-image`.
+
+- User confirmed the worktree-served copy rendered the tool correctly. Extension removed with `pi remove ./extensions/pixip-show-image`; temporary daemons on 8141/8142 stopped. Ready to merge and install on main.
