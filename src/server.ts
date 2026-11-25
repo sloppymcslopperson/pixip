@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { open, readdir, readFile, stat } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, normalize } from "node:path";
@@ -6,6 +7,7 @@ import { basename, extname, isAbsolute, join, normalize } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 
 import { createDirectory, DirError, listDirectories } from "./dirs.ts";
+import { INBOX_PURPOSES, InboxError, type InboxFilter, type InboxPurpose } from "./inbox.ts";
 import { detectImageMime, MAX_UPLOAD_BYTES, safeUploadName } from "./attachments.ts";
 import { coverageKeys, Hub } from "./hub.ts";
 import {
@@ -21,6 +23,7 @@ import {
 	frameHello,
 	frameHistory,
 	frameImport,
+	frameInbox,
 	frameModels,
 	frameOpened,
 	framePolicy,
@@ -65,6 +68,16 @@ interface ServerState {
 }
 
 const LOOPBACK = /^(127\.|::1$|::ffff:127\.)/;
+
+/** Inbox auth seam: off when no token is configured, exact bearer match otherwise. */
+function inboxAuthorized(req: IncomingMessage, token: string | undefined): boolean {
+	if (!token) return true;
+	const match = /^Bearer (.+)$/.exec(req.headers.authorization ?? "");
+	if (!match?.[1]) return false;
+	const presented = Buffer.from(match[1]);
+	const expected = Buffer.from(token);
+	return presented.length === expected.length && timingSafeEqual(presented, expected);
+}
 
 /** The refresh endpoint changes server state, so only local peers may call it. */
 export function isLoopback(req: IncomingMessage): boolean {
@@ -230,6 +243,70 @@ async function handleHttp(
 			}
 			const report = await state.refresh();
 			send(200, JSON.stringify({ ok: true, ...report }));
+			return;
+		}
+		if (url.pathname === "/api/inbox" || url.pathname.startsWith("/api/inbox/")) {
+			if (!inboxAuthorized(req, hub.inboxToken)) {
+				send(401, JSON.stringify({ error: "inbox token required" }));
+				return;
+			}
+			if (req.method === "GET" && url.pathname === "/api/inbox") {
+				const filter: InboxFilter = {};
+				if (url.searchParams.get("archived") === "1") filter.archived = true;
+				if (url.searchParams.get("all") === "1") filter.all = true;
+				const selected = url.searchParams.get("filter");
+				if (selected === "unread" || selected === "read" || selected === "all") filter.filter = selected;
+				const purpose = url.searchParams.get("purpose");
+				if (purpose && (INBOX_PURPOSES as readonly string[]).includes(purpose)) {
+					filter.purpose = purpose as InboxPurpose;
+				}
+				send(200, JSON.stringify(await hub.inboxList(filter)));
+				return;
+			}
+			if (req.method === "POST" && url.pathname === "/api/inbox") {
+				const parsed = JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>;
+				if (typeof parsed["subject"] !== "string" || typeof parsed["body"] !== "string") {
+					send(400, JSON.stringify({ error: "subject and body are required" }));
+					return;
+				}
+				const purpose = parsed["purpose"];
+				const message = await hub.inboxSend({
+					subject: parsed["subject"],
+					body: parsed["body"],
+					purpose: typeof purpose === "string" ? (purpose as InboxPurpose) : "attention-needed",
+					sessionId: typeof parsed["sessionId"] === "string" ? parsed["sessionId"] : undefined,
+				});
+				send(200, JSON.stringify({ ok: true, message }));
+				return;
+			}
+			if (req.method === "POST" && url.pathname === "/api/inbox/read-all") {
+				send(200, JSON.stringify({ ok: true, read: await hub.inboxRead("all") }));
+				return;
+			}
+			const inboxReadMatch = /^\/api\/inbox\/([^/]+)\/read$/.exec(url.pathname);
+			if (req.method === "POST" && inboxReadMatch?.[1]) {
+				send(200, JSON.stringify({ ok: true, read: await hub.inboxRead(decodeURIComponent(inboxReadMatch[1])) }));
+				return;
+			}
+			const inboxArchiveMatch = /^\/api\/inbox\/([^/]+)\/archive$/.exec(url.pathname);
+			if (req.method === "POST" && inboxArchiveMatch?.[1]) {
+				await hub.inboxArchive(decodeURIComponent(inboxArchiveMatch[1]));
+				send(200, JSON.stringify({ ok: true }));
+				return;
+			}
+			const inboxRestoreMatch = /^\/api\/inbox\/([^/]+)\/restore$/.exec(url.pathname);
+			if (req.method === "POST" && inboxRestoreMatch?.[1]) {
+				await hub.inboxRestore(decodeURIComponent(inboxRestoreMatch[1]));
+				send(200, JSON.stringify({ ok: true }));
+				return;
+			}
+			const inboxDeleteMatch = /^\/api\/inbox\/([^/]+)$/.exec(url.pathname);
+			if (req.method === "DELETE" && inboxDeleteMatch?.[1]) {
+				await hub.inboxDelete(decodeURIComponent(inboxDeleteMatch[1]));
+				send(200, JSON.stringify({ ok: true }));
+				return;
+			}
+			send(404, JSON.stringify({ error: "not found" }));
 			return;
 		}
 		if (req.method === "GET" && url.pathname === "/api/info") {
@@ -483,7 +560,12 @@ async function handleHttp(
 		}
 		send(200, asset, CONTENT_TYPES[extname(normalized)] ?? "application/octet-stream");
 	} catch (error) {
-		const status = error instanceof DirError ? error.status : error instanceof PayloadTooLargeError ? 413 : 500;
+		const status =
+			error instanceof DirError || error instanceof InboxError
+				? error.status
+				: error instanceof PayloadTooLargeError
+					? 413
+					: 500;
 		log(`http error: ${(error as Error).message}`);
 		send(status, JSON.stringify({ error: (error as Error).message }));
 	}
@@ -501,6 +583,7 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 
 	if (!sessionId) {
 		send(frameHello(await hub.list(), process.cwd(), process.env["HOME"] ?? ""));
+		send(frameInbox(await hub.inboxSummary()));
 		const unwatch = hub.watch((frame) => send(frame));
 		ws.on("close", unwatch);
 		ws.on("message", (data) => {

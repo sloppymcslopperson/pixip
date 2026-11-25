@@ -185,7 +185,7 @@ pixip stop
 ```
 
 `--data-dir` owns everything (`pixip.pid`, `pixip.state.json`, `pixip.log`,
-`sessions/`), so parallel instances on another `--port`/`--data-dir` never
+`sessions/`, `inbox.json`), so parallel instances on another `--port`/`--data-dir` never
 collide. One process owns a data dir at a time: the bare foreground command
 refuses to start when a daemon already owns it. Soft refresh (`pixip refresh`, `SIGHUP`, or the header's `reload`) keeps
 children and sockets, and its endpoint is loopback-only because the UI has no
@@ -203,6 +203,34 @@ backoff and its durable cursor, and sessions reattach from their JSONL.
 and the flag is stored in the session index so it survives restarts and
 archive/restore. The explicit `archive` action still works on a protected
 session.
+
+## Inbox
+
+Agents can leave durable messages for the user without keeping a session open.
+The inbox is `<data-dir>/inbox.json`, owned by the hub (atomic temp+rename, no
+expiry, default cap 200), so it survives restarts and the deletion of the
+sending session; each message keeps a sender snapshot (name, cwd, branch, Pi
+id), while its status (running/idle/stopped/archived/deleted) is resolved live.
+
+```bash
+pixip inbox send --subject "Review the migration" --purpose attention-needed "tests pass"
+pixip inbox list [--unread] [--archived] [--json]
+pixip inbox read <id|all>
+pixip inbox archive <id>
+pixip inbox delete <id>
+```
+
+Inside a Pi child the sender is the calling session (`PIXIP_SESSION_ID`); a
+plain shell is labelled `local shell`. The CLI talks to `PIXIP_DAEMON_URL` when
+set, otherwise to the daemon running for `--data-dir`. Purposes are
+`attention-needed`, `deliverable`, `extra-info` and `no-rush`.
+
+The REST surface is `POST/GET /api/inbox`, `POST /api/inbox/read-all`,
+`POST /api/inbox/:id/read|archive|restore`, and `DELETE /api/inbox/:id`; the
+dashboard socket receives an `inbox` frame with the unread count and newest
+message on every change. `--inbox-token` (or `PIXIP_INBOX_TOKEN`) turns on the
+`Authorization: Bearer` seam for the API and passes the same token to Pi
+children; it is off by default. Every child gets `PIXIP_DAEMON_URL` regardless.
 
 ## Worktrees
 
