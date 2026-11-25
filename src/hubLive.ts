@@ -288,7 +288,12 @@ export async function spawn(
 		// legacy child and would be rejected by the host's strict parser.
 		args: host ? input.args : [...input.args, ...this.options.extraPiArgs],
 		cwd: input.cwd,
-		env: { ...this.options.env, PIXIP_SESSION_ID: logicalId, PIXIP_INSIDE: "1" },
+		env: {
+			...this.options.env,
+			PIXIP_SESSION_ID: logicalId,
+			PIXIP_INSIDE: "1",
+			...(this.options.dataDir ? { PIXIP_DATA_DIR: this.options.dataDir } : {}),
+		},
 		onRecord: (raw, record) => this.onRecord(info, raw, record),
 		onStderr: (chunk) => this.options.log(`[${host ? "host" : "pi"} ${input.cwd}] ${chunk.trimEnd()}`),
 		onExit: (code, signal) => {

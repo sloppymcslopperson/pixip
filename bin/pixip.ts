@@ -108,7 +108,7 @@ function parseArgs(argv: string[]): Options {
 	const options: Options = {
 		host: "127.0.0.1",
 		port: 8137,
-		dataDir: resolve("tmp/dev"),
+		dataDir: resolve(process.env["PIXIP_DATA_DIR"] ?? "tmp/dev"),
 		piBin: "pi",
 		piHost: undefined,
 		idleMs: 15 * 60_000,
