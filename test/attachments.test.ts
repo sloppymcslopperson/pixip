@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
 
@@ -97,6 +97,37 @@ describe("image attachments", () => {
 			/image is too large/,
 		);
 		assert.equal((await records(paths)).filter((record) => record["type"] === "prompt").length, 0);
+
+		await server.close();
+		await hub.shutdown();
+	});
+});
+
+describe("file downloads", () => {
+	it("streams one image from the session route and rejects unsafe requests", async () => {
+		const paths = await fixtureRoot("pixip-attachments-", { logName: "commands.jsonl" });
+		const { hub, server } = await boot(paths);
+		const created = await hub.create(paths.dir);
+		const png = Buffer.from(
+			"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+			"base64",
+		);
+		const imagePath = join(paths.dir, "shot.png");
+		await writeFile(imagePath, png);
+		const route = (path: string) =>
+			new URL(`api/sessions/${encodeURIComponent(created.id)}/files?path=${encodeURIComponent(path)}`, server.url);
+
+		const response = await fetch(route(imagePath));
+		assert.equal(response.status, 200);
+		assert.equal(response.headers.get("content-type"), "image/png");
+		assert.match(response.headers.get("content-disposition") ?? "", /^attachment; filename="shot\.png"$/);
+		assert.deepEqual(Buffer.from(await response.arrayBuffer()), png);
+
+		assert.equal((await fetch(route("relative.png"))).status, 400);
+		const textPath = join(paths.dir, "notes.txt");
+		await writeFile(textPath, "not an image");
+		assert.equal((await fetch(route(textPath))).status, 415);
+		assert.equal((await fetch(route(join(paths.dir, "missing.png")))).status, 404);
 
 		await server.close();
 		await hub.shutdown();

@@ -6,7 +6,6 @@ import { scheduleScroll, scrollToEnd } from "./scroll.js";
 import { applyInfo, renderPeerNotice, setBusy } from "./sessionView.js";
 import { queueCount, queueFromEvent } from "./queue.js";
 import {
-	ansiToHtml,
 	escapeHtml,
 	renderAssistant,
 	renderAssistantBody,
@@ -16,6 +15,7 @@ import {
 	textOf,
 	toolBlock,
 	toolCallsOf,
+	toolResultParts,
 } from "./render.js";
 import { toast } from "./toast.js";
 import { readingDistance, restoreScrollTop } from "./transcriptScroll.js";
@@ -77,7 +77,7 @@ function callsFromEntries(entries) {
 }
 
 function trackTools() {
-	for (const node of ui.log.querySelectorAll("details.tool")) state.tools.set(node.dataset.call, node);
+	for (const node of ui.log.querySelectorAll(".tool[data-call]")) state.tools.set(node.dataset.call, node);
 }
 
 /** Every bounded-window block gets a visible way to ask for its full text. */
@@ -122,6 +122,7 @@ export function earlierButton() {
 }
 
 export function htmlOf(entries, calls) {
+	const context = { sessionId: state.info?.id };
 	const blocks = [];
 	for (const entry of entries) {
 		if (entry?.type === "message" && entry.message?.role === "assistant") {
@@ -130,22 +131,24 @@ export function htmlOf(entries, calls) {
 		}
 		if (entry?.type === "message" && entry.message?.role === "toolResult") {
 			const call = calls.get(entry.message.toolCallId);
+			const { output, image } = toolResultParts(entry.message, context.sessionId);
 			blocks.push(
 				tagEntry(
 					toolBlock(
 						entry.message.toolName ?? call?.name ?? "tool",
 						call ? summarizeArgs(call.name, call.arguments) : "",
-						ansiToHtml(textOf(entry.message.content)),
+						output,
 						entry.message.isError ? " error" : "",
 						null,
 						entry.message.toolCallId ?? "",
+						{ image },
 					),
 					entry,
 				),
 			);
 			continue;
 		}
-		blocks.push(tagEntry(renderEntry(entry), entry));
+		blocks.push(tagEntry(renderEntry(entry, context), entry));
 	}
 	return blocks.join("");
 }
@@ -353,12 +356,43 @@ export function handleEvent(event) {
 			if (state.info?.state === "busy") showThinkingIndicator();
 			const el = state.tools.get(event.toolCallId);
 			if (!el) break;
-			const out = el.querySelector(".tool-out");
-			if (out) out.innerHTML = ansiToHtml(textOf(event.result?.content));
-			if (event.isError) el.classList.add("error");
-			const time = el.querySelector(".tool-time");
-			if (time && event.durationMs) time.textContent = `${event.durationMs}ms`;
-			el.classList.remove("empty");
+			const result = event.result ?? {};
+			const { output, image } = toolResultParts(
+				{
+					toolName: event.toolName ?? el.dataset.name ?? "tool",
+					content: result.content,
+					details: result.details,
+				},
+				state.info?.id,
+			);
+			if (image) {
+				// An image card has a different shell (visible strip + folded text),
+				// so replace the placeholder rather than patching one property.
+				el.outerHTML = toolBlock(
+					event.toolName ?? el.dataset.name ?? "tool",
+					el.dataset.arg ?? "",
+					output,
+					event.isError ? " error" : "",
+					event.durationMs,
+					event.toolCallId,
+					{ image },
+				);
+				const next = ui.log.querySelector(`.tool[data-call="${CSS.escape(event.toolCallId)}"]`);
+				if (next) state.tools.set(event.toolCallId, next);
+				if (next) {
+					if (event.isError) next.classList.add("error");
+					const time = next.querySelector(".tool-time");
+					if (time && event.durationMs) time.textContent = `${event.durationMs}ms`;
+					next.classList.remove("empty");
+				}
+			} else {
+				const out = el.querySelector(".tool-out");
+				if (out) out.innerHTML = output;
+				if (event.isError) el.classList.add("error");
+				const time = el.querySelector(".tool-time");
+				if (time && event.durationMs) time.textContent = `${event.durationMs}ms`;
+				el.classList.remove("empty");
+			}
 			scheduleScroll();
 			break;
 		}

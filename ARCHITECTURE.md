@@ -555,6 +555,27 @@ plain prompts and passthrough extension commands carry it. While Pi is busy the
 image rides the same `prompt` + `streamingBehavior: "steer"` path, so a steer
 never silently drops it.
 
+## Agent-shown images
+
+`extensions/pixip-show-image` registers `show_image_to_user({ path, caption? })`.
+It is a separate tool on purpose: pixip renders image blocks only for this tool,
+so an incidental image in a `read` or other tool result stays text. The path must
+be absolute and names one PNG/JPEG/GIF/WebP file. Up to 1 MB the image is
+returned unchanged; over 1 MB (to 20 MB) the extension returns a thumbnail
+(longest edge 1024 px, at most 512 KB) and says the original is over the limit;
+over 20 MB, or when no thumbnail can be made, it returns a link only. Pi's own
+tool-result image normalization still runs after the tool returns.
+
+The tool result carries `details: { path, caption?, bytes, thumbnail,
+overSourceLimit, tooLarge }`. The client renders the first image as a visible
+strip on the tool card with the text output folded below it; tapping opens the
+same sheet as a user image. Snapshot, live `tool_execution_end` and the lazy
+full-entry path use the same `toolResultParts()` rules. The tool's text keeps a
+`file://` link for other hosts; in pixip the client rewrites it to
+`GET /api/sessions/<id>/files?path=<absolute>` so the browser can download the
+original. That route streams one regular image file (magic-byte checked,
+`Content-Disposition: attachment`, 100 MB cap) and refuses relative paths.
+
 ## First-prompt session labels
 
 A new session with no messages and no name gets a label from its first user
@@ -729,8 +750,7 @@ protocol path is still one obvious place to start:
 | `src/client/configure.js`                                                   | `installDeps` for the per-module `configureX({ ...callbacks })` boundaries                                                 |
 | `src/client/{addonUi,transcriptScale,transcriptScroll,transcriptWindow}.js` | addon status/widget cache, transcript text scale, pure scroll math, window planning                                        |
 | `src/client/{directoryPicker,sessionCache,sessionInfo,sessionGroups}.js`    | pure path math, session cache persistence, session info, cwd grouping                                                      |
-| `src/client/{markdown,render,attachments,commands,tree,footer}.js`          | pure/markup helpers: markdown, HTML painting, attachment encoding, command catalog, session tree, footer formatting        |
-| `src/client/{menu,controls,toast,transport}.js`                             | menus/queue, scale/refresh controls, notices, keyed websocket manager with park/resume                                     |
+| `src/client/{markdown,render,attachments,commands,tree,footer}.js`          | pure/markup helpers: markdown, HTML painting, attachment encoding, command catalog, session tree, footer formatting        |     | `src/client/{menu,controls,toast,transport}.js` | menus/queue, scale/refresh controls, notices, keyed websocket manager with park/resume |
 | `tools/check-client-imports.mjs`                                            | client import-graph guard: cycles, `app.js` imports and feature-cluster boundaries                                         |
 | `tools/browser-check.mjs`                                                   | scripted client flows at 390x844 and 1280x900 against an in-process fixture Hub                                            |
 | `tools/shot.mjs` / `tools/build-a2ui.mjs`                                   | screenshot/layout probe, and the pinned A2UI bundle rebuild                                                                |

@@ -1,0 +1,44 @@
+{
+	"name": "pixip-show-image",
+	"version": "0.1.0",
+	"private": true,
+	"description": "show_image_to_user: let the agent show one local image in a pixip transcript",
+	"type": "module",
+	"license": "Unlicense",
+	"keywords": [
+		"pi-package",
+		"pi",
+		"extension",
+		"image",
+		"pixip"
+	],
+	"pi": {
+		"extensions": [
+			"./src/index.ts"
+		]
+	},
+	"files": [
+		"src",
+		"README.md"
+	],
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"scripts": {
+		"test": "node --test test/*.test.ts",
+		"typecheck": "tsc --noEmit",
+		"lint": "eslint .",
+		"format:check": "prettier --check .",
+		"check": "npm run typecheck && npm run lint && npm run format:check && npm test"
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*",
+		"typebox": "*"
+	},
+	"devDependencies": {
+		"@earendil-works/pi-coding-agent": "1.5.2",
+		"@types/node": "^22.19.0",
+		"typebox": "*",
+		"typescript": "^5.9.0"
+	}
+}

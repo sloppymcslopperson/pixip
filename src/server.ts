@@ -1,11 +1,12 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readdir, readFile } from "node:fs/promises";
-import { basename, extname, join, normalize } from "node:path";
+import { createReadStream } from "node:fs";
+import { open, readdir, readFile, stat } from "node:fs/promises";
+import { basename, extname, isAbsolute, join, normalize } from "node:path";
 
 import { WebSocketServer, type WebSocket } from "ws";
 
 import { createDirectory, DirError, listDirectories } from "./dirs.ts";
-import { MAX_UPLOAD_BYTES } from "./attachments.ts";
+import { detectImageMime, MAX_UPLOAD_BYTES, safeUploadName } from "./attachments.ts";
 import { coverageKeys, Hub } from "./hub.ts";
 import {
 	frameBash,
@@ -324,6 +325,49 @@ async function handleHttp(
 			const bytes = await readBinaryBody(req, MAX_UPLOAD_BYTES);
 			const uploaded = await hub.uploadFile(id, name, bytes);
 			send(200, JSON.stringify({ ok: true, ...uploaded }));
+			return;
+		}
+		const filesMatch = /^\/api\/sessions\/([^/]+)\/files$/.exec(url.pathname);
+		if (req.method === "GET" && filesMatch?.[1]) {
+			const id = decodeURIComponent(filesMatch[1]);
+			const filePath = url.searchParams.get("path") ?? "";
+			if (!isAbsolute(filePath)) {
+				send(400, JSON.stringify({ error: "path must be absolute" }));
+				return;
+			}
+			if (!(await hub.sessionFile(id))) {
+				send(404, JSON.stringify({ error: "unknown session" }));
+				return;
+			}
+			let info;
+			try {
+				info = await stat(filePath);
+			} catch {
+				send(404, JSON.stringify({ error: "file not found" }));
+				return;
+			}
+			if (!info.isFile()) {
+				send(400, JSON.stringify({ error: "not a regular file" }));
+				return;
+			}
+			if (info.size > MAX_UPLOAD_BYTES) {
+				send(413, JSON.stringify({ error: "file is too large (max 100 MB)" }));
+				return;
+			}
+			const mimeType = detectImageMime(await readFileHead(filePath));
+			if (!mimeType) {
+				send(415, JSON.stringify({ error: "not a supported image" }));
+				return;
+			}
+			res.writeHead(200, {
+				"content-type": mimeType,
+				"content-length": info.size,
+				"content-disposition": `attachment; filename="${safeUploadName(basename(filePath))}"`,
+				"cache-control": "no-store",
+			});
+			const stream = createReadStream(filePath);
+			stream.on("error", () => res.destroy());
+			stream.pipe(res);
 			return;
 		}
 		if (req.method === "POST" && url.pathname === "/api/sessions/archive-inactive") {
@@ -854,6 +898,18 @@ async function readBody(req: IncomingMessage): Promise<string> {
 	const chunks: Buffer[] = [];
 	for await (const chunk of req) chunks.push(chunk as Buffer);
 	return Buffer.concat(chunks).toString("utf8");
+}
+
+/** First bytes of a file, enough for magic-byte MIME detection. */
+async function readFileHead(path: string): Promise<Uint8Array> {
+	const handle = await open(path, "r");
+	try {
+		const buffer = Buffer.alloc(16);
+		const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+		return buffer.subarray(0, bytesRead);
+	} finally {
+		await handle.close();
+	}
 }
 
 class PayloadTooLargeError extends Error {}
