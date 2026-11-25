@@ -15,6 +15,24 @@ PNGs and `metrics.json` land in `tmp/svg-review/paperape_brutal_mainscreen/`.
 Named crops (`top`, `banner`, `rows`, `footer`) are in SVG user units, so they
 keep working if the artboard grows.
 
+## Rendered images
+
+Committed so the defects below are visible away from this machine, produced by
+the command above at `2` device pixels per CSS pixel:
+
+| Image | Shows |
+| --- | --- |
+| `review/…-360.png` | the mockup at its authored width |
+| `review/…-390.png` | the same at a 390 phone width |
+| `review/…-1280.png` | stretched to 1280; exposes the stroke-width drift |
+| `review/…-360-top.png` | clipped wordmark, chevron below the band |
+| `review/…-360-banner.png` | `~/dev/thing` cut by the notch |
+| `review/…-360-rows.png` | chips, `!` crowding, `Stop` at 5.87 px, meta strings |
+| `review/…-360-footer.png` | preview through the envelope, `9987` clipped |
+
+Regenerate with `--out ui_work/mocks/review` when the mockup changes; the file
+names are the tool's, so a diff only appears for images that actually changed.
+
 ## What the file already encodes
 
 | | |
