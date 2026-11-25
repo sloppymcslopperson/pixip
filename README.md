@@ -204,6 +204,11 @@ login shell and its own home when missing) and asks first on a terminal. Use
 `--user <name>` for an existing account or `--user self` for `SUDO_USER` /
 the current user. The unit still runs as that user, not root.
 
+The installer uses the repo's vendored Pi (`node_modules/.bin/pi`) when `--pi` is
+omitted. If the service account cannot execute the installer's node binary (for
+example nvm under a `0700` home), it copies node to
+`/usr/local/lib/pixip/node` and points the unit there automatically.
+
 An agent inside pixip can run `pixip restart` (and `pixip stop`, which restarts
 from inside a session): it keeps the busy / `--when-idle` checks and then asks
 systemd to restart the unit instead of spawning a second daemon. A user unit

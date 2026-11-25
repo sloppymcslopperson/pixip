@@ -8,7 +8,19 @@
  */
 import { spawn } from "node:child_process";
 import { constants } from "node:fs";
-import { access, chown, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import {
+	access,
+	chmod,
+	chown,
+	copyFile,
+	mkdir,
+	readFile,
+	realpath,
+	rename,
+	rm,
+	stat,
+	writeFile,
+} from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 
@@ -198,6 +210,63 @@ async function requireExecutable(path: string, label: string): Promise<void> {
 	} catch (error) {
 		throw new Error(`${label} is not executable: ${path} (${(error as Error).message})`);
 	}
+}
+
+function permissionFor(info: { uid: number; gid: number; mode: number }, account: UserAccount, mask: number): boolean {
+	if (account.uid === 0) return mask === 0o1 ? (info.mode & 0o111) !== 0 : true;
+	if (info.uid === account.uid) return (info.mode & (mask << 6)) !== 0;
+	if (info.gid === account.gid) return (info.mode & (mask << 3)) !== 0;
+	return (info.mode & mask) !== 0;
+}
+
+/** Can this account traverse to and execute `path` using its own uid/gid? */
+export async function canExecuteAs(path: string, account: UserAccount): Promise<boolean> {
+	let real: string;
+	try {
+		real = await realpath(path);
+	} catch {
+		return false;
+	}
+	const file = await stat(real).catch(() => undefined);
+	if (!file?.isFile() || !permissionFor(file, account, 0o1)) return false;
+
+	const directories: string[] = [];
+	let current = dirname(real);
+	for (;;) {
+		directories.push(current);
+		const parent = dirname(current);
+		if (parent === current) break;
+		current = parent;
+	}
+	for (const directory of directories) {
+		const info = await stat(directory).catch(() => undefined);
+		if (!info?.isDirectory() || !permissionFor(info, account, 0o1)) return false;
+	}
+	return true;
+}
+
+/**
+ * A system unit runs as another account. If that account cannot execute the
+ * installer's node (for example an nvm install under a 0700 home), copy the
+ * binary to a system location and point the unit at that copy instead.
+ */
+export async function ensureServiceNode(input: {
+	nodePath: string;
+	scope: ServiceScope;
+	target?: ServiceTarget;
+	copyPath?: string;
+}): Promise<{ nodePath: string; copied: boolean }> {
+	if (input.scope !== "system" || !input.target) return { nodePath: input.nodePath, copied: false };
+	if (await canExecuteAs(input.nodePath, input.target.account)) {
+		return { nodePath: input.nodePath, copied: false };
+	}
+	const destination = input.copyPath ?? join("/usr/local/lib", SERVICE_NAME, "node");
+	const directory = dirname(destination);
+	await mkdir(directory, { recursive: true, mode: 0o755 });
+	await chmod(directory, 0o755);
+	await copyFile(input.nodePath, destination);
+	await chmod(destination, 0o755);
+	return { nodePath: destination, copied: true };
 }
 
 export async function readUserAccount(name: string, runner: CommandRunner): Promise<UserAccount | undefined> {

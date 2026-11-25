@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import { after, describe, it } from "node:test";
 
 import {
+	canExecuteAs,
+	ensureServiceNode,
 	generateUnit,
 	installService,
 	parseUnitMetadata,
@@ -373,6 +375,38 @@ describe("service command helpers", () => {
 			/cannot find/,
 		);
 		await assert.rejects(resolveExecutable("/nonexistent/node"), /not executable/);
+	});
+
+	it("copies node when the system service user cannot execute it", async () => {
+		const root = await tempRoot("pixip-service-node-");
+		const source = join(root, "node");
+		const copy = join(root, "system", "node");
+		await writeFile(source, "node-binary");
+		await chmod(source, 0o700);
+		const other = { name: "other", uid: 12345, gid: 12345, home: root, shell: "/bin/bash" };
+		assert.equal(await canExecuteAs(source, other), false);
+		const copied = await ensureServiceNode({
+			nodePath: source,
+			scope: "system",
+			target: { account: other, group: "other", defaulted: false },
+			copyPath: copy,
+		});
+		assert.equal(copied.copied, true);
+		assert.equal(copied.nodePath, copy);
+		assert.equal(await readFile(copy, "utf8"), "node-binary");
+		assert.equal((await stat(copy)).mode & 0o777, 0o755);
+
+		await chmod(source, 0o755);
+		await chmod(root, 0o755);
+		assert.equal(await canExecuteAs(source, other), true);
+		const reused = await ensureServiceNode({
+			nodePath: source,
+			scope: "system",
+			target: { account: other, group: "other", defaulted: false },
+			copyPath: join(root, "unused"),
+		});
+		assert.equal(reused.copied, false);
+		assert.equal(reused.nodePath, source);
 	});
 
 	it("detects the systemd marker and MainPID ownership", async () => {

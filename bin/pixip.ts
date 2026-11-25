@@ -36,6 +36,7 @@ import type { SessionInfo } from "../src/wire.ts";
 import { spawnEnv } from "../src/spawnEnv.ts";
 import {
 	defaultRunner,
+	ensureServiceNode,
 	findInstalledService,
 	generateUnit,
 	installService,
@@ -87,6 +88,8 @@ interface Options {
 	port: number;
 	dataDir: string;
 	piBin: string;
+	/** True when `--pi` was supplied, rather than the default lookup. */
+	piExplicit: boolean;
 	/** `--pi-host [path]` / `PIXIP_PI_HOST`; `""` means resolve the installed host bin. */
 	piHost?: string;
 	idleMs: number;
@@ -159,6 +162,7 @@ function parseArgs(argv: string[]): Options {
 		port: 8137,
 		dataDir: resolve(process.env["PIXIP_DATA_DIR"] ?? "tmp/dev"),
 		piBin: "pi",
+		piExplicit: false,
 		piHost: undefined,
 		idleMs: 15 * 60_000,
 		pendingUiTimeoutMs: 5 * 60 * 60_000,
@@ -210,6 +214,7 @@ function parseArgs(argv: string[]): Options {
 				break;
 			case "--pi":
 				options.piBin = next();
+				options.piExplicit = true;
 				break;
 			case "--pi-host": {
 				// The value is optional: a bare flag means "resolve the installed host".
@@ -554,6 +559,11 @@ function resolvePiHost(value: string | undefined): string {
 	const path = resolve(dirname(packagePath), bin);
 	if (!existsSync(path)) throw new Error(`pixip-pi-host bin not found: ${path}`);
 	return path;
+}
+
+function vendoredPiPath(): string | undefined {
+	const path = join(dirname(fileURLToPath(import.meta.url)), "..", "node_modules", ".bin", "pi");
+	return existsSync(path) ? path : undefined;
 }
 
 async function serve(options: Options): Promise<void> {
@@ -1048,12 +1058,15 @@ async function cmdServiceInstall(options: Options): Promise<void> {
 	const targetHome = target.account.home || home;
 	const dataDir = options.dataDirExplicit ? options.dataDir : join(targetHome, "pixip_data");
 	const workingDirectory = join(targetHome, "dev");
-	const nodePath = await resolveExecutable(process.execPath);
+	const serviceNode = await ensureServiceNode({ nodePath: process.execPath, scope, target });
+	const nodePath = serviceNode.nodePath;
 
 	const piHostBin = options.piHost !== undefined ? resolvePiHost(options.piHost || undefined) : undefined;
 	let piBin = options.piBin;
 	if (piHostBin) {
 		piBin = await resolveExecutable(options.piBin).catch(() => options.piBin);
+	} else if (!options.piExplicit && vendoredPiPath()) {
+		piBin = await resolveExecutable(vendoredPiPath() ?? options.piBin);
 	} else {
 		piBin = await resolveExecutable(options.piBin);
 	}
@@ -1084,6 +1097,7 @@ async function cmdServiceInstall(options: Options): Promise<void> {
 
 	process.stdout.write(`installed ${scope} service at ${result.unitPath}\n`);
 	process.stdout.write(`runs as ${target.account.name}; data dir ${dataDir}\n`);
+	if (serviceNode.copied) process.stdout.write(`copied node for the service user to ${nodePath}\n`);
 	if (result.lingerCommand) {
 		process.stderr.write(
 			`could not enable lingering for ${target.account.name}. Boot startup needs it, so run:\n  ${result.lingerCommand}\n`,
