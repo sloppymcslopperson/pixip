@@ -8,6 +8,8 @@ export const ui = {
 	title: $("#title"),
 	sub: $("#sub"),
 	dot: $("#dot"),
+	inbox: $("#inbox"),
+	inboxBadge: $("#inbox-badge"),
 	settings: $("#settings"),
 	reload: $("#reload"),
 	more: $("#more"),

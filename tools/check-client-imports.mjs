@@ -33,6 +33,7 @@ export const CLUSTERS = {
 		"dashboardModel",
 		"dashboardWorktree",
 	],
+	inbox: ["inbox", "inboxModel"],
 	session: ["session", "sessionEffects", "sessionPlan"],
 	composer: ["composer", "composerAttachments", "composerBash"],
 };

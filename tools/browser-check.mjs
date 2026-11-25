@@ -84,6 +84,12 @@ async function bootFixture() {
 	const main = await hub.create(repo, "repo main");
 	const peer = await hub.create(repo, "repo peer");
 	const worktree = await hub.create(repo, "worktree agent", { branch: "ui-check" });
+	await hub.inboxSend({
+		subject: "browser inbox",
+		body: "This message checks the inbox sheet, filters and sender row.",
+		purpose: "attention-needed",
+		sessionId: main.logicalId,
+	});
 	return {
 		paths,
 		hub,
@@ -501,6 +507,71 @@ async function runWorktreeFlow(page, base, fixture) {
 	await checkNoOverflow(page, "worktree dashboard");
 }
 
+async function clickInboxChip(page, prefix) {
+	const clicked = await page.evaluate((prefix) => {
+		const chip = [...document.querySelectorAll("#sheet .inbox-chip")].find((button) =>
+			(button.textContent ?? "").trim().startsWith(prefix),
+		);
+		chip?.click();
+		return Boolean(chip);
+	}, prefix);
+	assert.equal(clicked, true, `inbox chip ${prefix} exists`);
+}
+
+async function runInboxFlow(page, base) {
+	await page.goto(base, { waitUntil: "domcontentloaded", timeout: FLOW_TIMEOUT });
+	await page.waitForSelector("#inbox:not([hidden])", { timeout: FLOW_TIMEOUT });
+	await page.evaluate(() => document.querySelector("#inbox").click());
+	await page.waitForSelector("#sheet .inbox-card", { timeout: FLOW_TIMEOUT });
+	await checkNoOverflow(page, "inbox sheet");
+
+	// Reading a message is expanding it; that marks it read without a reload.
+	await page.evaluate(() => document.querySelector("#sheet .inbox-card").click());
+	await page.waitForSelector("#sheet .inbox-body:not(.preview)", { timeout: FLOW_TIMEOUT });
+	await page.waitForFunction(() => (document.querySelector("#sheet .inbox-meta")?.textContent ?? "").includes("read"), {
+		timeout: FLOW_TIMEOUT,
+	});
+	await checkNoOverflow(page, "inbox message expanded");
+
+	// Archive hides the row; the archived toggle restores visibility.
+	await page.evaluate(() =>
+		[...document.querySelectorAll("#sheet .inbox-actions button")]
+			.find((button) => (button.textContent ?? "").trim() === "archive")
+			?.click(),
+	);
+	await page.waitForFunction(() => document.querySelector("#sheet .inbox-card") === null, { timeout: FLOW_TIMEOUT });
+	await clickInboxChip(page, "archived");
+	await page.waitForSelector("#sheet .inbox-card", { timeout: FLOW_TIMEOUT });
+	await page.evaluate(() =>
+		[...document.querySelectorAll("#sheet .inbox-actions button")]
+			.find((button) => (button.textContent ?? "").trim() === "restore")
+			?.click(),
+	);
+	await page.waitForFunction(() => document.querySelector("#sheet .inbox-card") === null, { timeout: FLOW_TIMEOUT });
+	await clickInboxChip(page, "active");
+	await page.waitForSelector("#sheet .inbox-card", { timeout: FLOW_TIMEOUT });
+
+	// Delete asks for confirmation; cancel keeps the message.
+	await page.evaluate(() =>
+		[...document.querySelectorAll("#sheet .inbox-actions button")]
+			.find((button) => (button.textContent ?? "").trim() === "delete")
+			?.click(),
+	);
+	await page.waitForFunction(
+		() => (document.querySelector("#sheet .sheet-title")?.textContent ?? "").includes("delete message"),
+		{ timeout: FLOW_TIMEOUT },
+	);
+	await page.click("#sheet .sheet-actions button:last-child");
+	await page.waitForSelector("#sheet .inbox-card", { timeout: FLOW_TIMEOUT });
+	await checkNoOverflow(page, "inbox archived filter");
+
+	// A live sender opens its session and prefills the reply marker.
+	await page.evaluate(() => document.querySelector("#sheet .inbox-sender")?.click());
+	await waitForSession(page);
+	const draft = await page.evaluate(() => document.querySelector("#input")?.value ?? "");
+	assert.match(draft, /^\[inbox [0-9a-f]{8}\] $/, "sender tap prefills the inbox reply marker");
+}
+
 async function runViewport(browser, base, fixture, viewport) {
 	const page = await browser.newPage();
 	const problems = [];
@@ -524,6 +595,7 @@ async function runViewport(browser, base, fixture, viewport) {
 	});
 	try {
 		await runDashboardFlow(page, base, fixture.sessionId);
+		await runInboxFlow(page, base);
 		await runWorktreeFlow(page, base, fixture);
 		await runComposerFlow(page, base, fixture.sessionId, fixture.paths, viewport);
 		await runSelectFlow(page, base, fixture.sessionId, fixture.hub, fixture.paths);

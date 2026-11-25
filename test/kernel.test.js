@@ -72,7 +72,9 @@ describe("kernel ui map", () => {
 		assert.deepEqual(ui.footerAbove, { selector: "#footer .addon-widgets.above" });
 		assert.deepEqual(ui.surface, { selector: "#surface" });
 		assert.deepEqual(ui.toast, { selector: "#toast" });
-		assert.equal(Object.keys(ui).length, 35);
+		assert.deepEqual(ui.inbox, { selector: "#inbox" });
+		assert.deepEqual(ui.inboxBadge, { selector: "#inbox-badge" });
+		assert.equal(Object.keys(ui).length, 37);
 		assert.equal(selectors.filter((selector) => selector === "#bar").length, 1);
 	});
 });
