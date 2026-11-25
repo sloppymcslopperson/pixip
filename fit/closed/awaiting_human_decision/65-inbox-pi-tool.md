@@ -1,6 +1,7 @@
 ---
 grilled: true
 project: pixip
+commit: "03e00a073352320e041c96b5fcb778c260d0ab7f"
 ---
 
 Ship an opt-in Pi extension that registers an `inbox_send` tool, so agents can message the inbox without shell quoting. It is a thin wrapper over the hub endpoint and must not change any existing extension behaviour.
