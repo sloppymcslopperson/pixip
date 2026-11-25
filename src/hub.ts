@@ -239,11 +239,19 @@ export class Hub {
 		return await hubStore.deleteSession.apply(this, arguments as any);
 	}
 
-	/** Archive the requested stopped sessions (all of them when `ids` is omitted), skipping failures so one bad file cannot block the batch. */
+	/** Archive the requested stopped sessions (all of them when `ids` is omitted), skipping failures so one bad file cannot block the batch. Sessions with `protected` set are never included. */
 	async archiveInactive(
 		ids?: string[],
 	): Promise<{ archived: SessionInfo[]; failed: Array<{ id: string; error: string }> }> {
 		return await hubStore.archiveInactive.apply(this, arguments as any);
+	}
+
+	/**
+	 * Set or clear the bulk-archive protection flag (`POST /api/sessions/:id/protect`,
+	 * `pixip protect`). Persisted in the session index, so it survives restarts.
+	 */
+	async setProtected(id: string, value: boolean): Promise<SessionInfo> {
+		return await hubStore.setProtected.apply(this, arguments as any);
 	}
 
 	async listArchived(): Promise<StoredSessionInfo[]> {

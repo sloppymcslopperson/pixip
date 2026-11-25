@@ -66,6 +66,20 @@ describe("bulkArchiveTargets", () => {
 		assert.deepEqual(bulkArchiveTargets([{ id: "only", cwd: "/e", state: "stopped" }]), []);
 		assert.deepEqual(bulkArchiveTargets(undefined), []);
 	});
+
+	it("never targets a protected session, even as the group's newest row", () => {
+		const sessions = [
+			{ id: "new", cwd: "/p", state: "stopped", protected: true, lastActivity: 300 },
+			{ id: "mid", cwd: "/p", state: "stopped", lastActivity: 200 },
+			{ id: "old", cwd: "/p", state: "stopped", lastActivity: 100 },
+		];
+		// The protected row keeps the group visible, so both unprotected rows go.
+		assert.deepEqual(
+			bulkArchiveTargets(sessions).map((session) => session.id),
+			["mid", "old"],
+		);
+		assert.deepEqual(bulkArchiveTargets([sessions[0]]), []);
+	});
 });
 
 describe("groupDisplay", () => {

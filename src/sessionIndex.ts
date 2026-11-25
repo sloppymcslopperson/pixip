@@ -28,6 +28,8 @@ export interface SessionIndexRecord {
 	/** Main repository root for a git session; absent for plain directories. */
 	repo?: string;
 	worktree?: WorktreeInfo;
+	/** Agent/user flag: never hide this session with the dashboard bulk archive. */
+	protected?: boolean;
 	createdAt: string;
 }
 
@@ -97,6 +99,7 @@ export function normalizeRecord(raw: unknown, fallbackCwd: string): SessionIndex
 			sessionFile: typeof record.sessionFile === "string" ? record.sessionFile : undefined,
 			repo: typeof record.repo === "string" ? record.repo : undefined,
 			worktree: normalizeWorktree(record.worktree),
+			protected: record.protected === true ? true : undefined,
 			createdAt: typeof record.createdAt === "string" ? record.createdAt : new Date().toISOString(),
 		},
 	];
@@ -114,6 +117,7 @@ export function storedInfo(record: StoredSessionRecord, kind: "archive" | "trash
 		sessionFile: record.sessionFile,
 		repo: record.repo,
 		worktree: record.worktree,
+		...(record.protected ? { protected: true } : {}),
 		lastActivity: at,
 		...(kind === "archive" ? { archivedAt: record.storedAt } : { deletedAt: record.storedAt, expiresAt: at + graceMs }),
 	};

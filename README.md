@@ -171,6 +171,7 @@ pixip status [--json]                     # non-zero when not running
 pixip logs [-f] [--lines 200]             # tails <data-dir>/pixip.log
 pixip refresh                             # soft: assets, policy, session index
 pixip restart [--force] [--when-idle]     # replace the process, JSONL survives
+pixip protect [<session-id>] [--off]      # exclude a session from bulk archive
 pixip stop
 ```
 
@@ -186,6 +187,13 @@ stop/start runs in a detached helper that survives the calling session, and
 `pixip stop` issued from inside a session restarts instead of taking the service
 down (use a shell outside pixip to really stop it). The phone reconnects with
 backoff and its durable cursor, and sessions reattach from their JSONL.
+
+`pixip protect` marks one session as excluded from the dashboard's bulk archive
+(the protected row shows a purple dot). With no id it uses the caller's
+`PIXIP_SESSION_ID`, so an agent can protect its own session; `--off` clears it,
+and the flag is stored in the session index so it survives restarts and
+archive/restore. The explicit `archive` action still works on a protected
+session.
 
 ## Worktrees
 

@@ -140,6 +140,48 @@ describe("archive and trash", () => {
 		await busyHub.shutdown();
 	});
 
+	it("never bulk-archives a protected session, and keeps the flag across archive/restore", async () => {
+		const paths = await fixtureRoot("pixip-archive-");
+		const hub = hubFor(paths);
+		const keep = await hub.create(paths.dir, "keep");
+		const gone = await hub.create(paths.dir, "gone");
+		await writeSession(paths, keep.id, "keep");
+		await writeSession(paths, gone.id, "gone");
+		await hub.stop(keep.id);
+		await hub.stop(gone.id);
+
+		const protectedInfo = await hub.setProtected(keep.id, true);
+		assert.equal(protectedInfo.protected, true);
+		assert.equal((await hub.list()).find((session) => session.id === keep.id)?.protected, true);
+
+		const bulk = await hub.archiveInactive([keep.id, gone.id]);
+		assert.deepEqual(
+			bulk.archived.map((session) => session.id),
+			[gone.id],
+		);
+		const listed = await hub.list();
+		assert.equal(
+			listed.some((session) => session.id === keep.id),
+			true,
+		);
+		assert.equal(
+			listed.some((session) => session.id === gone.id),
+			false,
+		);
+
+		// A manual archive is still explicit; the flag rides along and comes back.
+		await hub.archive(keep.id);
+		const archived = (await hub.listArchived()).find((session) => session.logicalId === keep.logicalId);
+		assert.equal(archived?.protected, true);
+		const restored = await hub.restoreArchived(keep.logicalId ?? keep.id);
+		assert.equal(restored.protected, true);
+
+		await hub.setProtected(restored.id, false);
+		assert.equal((await hub.list()).find((session) => session.id === restored.id)?.protected, undefined);
+		assert.equal((await hub.archiveInactive()).archived.length, 1);
+		await hub.shutdown();
+	});
+
 	it("archives only the requested ids for a bulk call", async () => {
 		const paths = await fixtureRoot("pixip-archive-");
 		const hub = hubFor(paths);
@@ -168,6 +210,52 @@ describe("archive and trash", () => {
 });
 
 describe("archive REST routes", () => {
+	it("toggles bulk-archive protection over HTTP", async () => {
+		const paths = await fixtureRoot("pixip-archive-");
+		const hub = hubFor(paths);
+		let server: RunningServer | undefined;
+		try {
+			server = await startServer({
+				host: "127.0.0.1",
+				port: 0,
+				hub,
+				clientDir: paths.clientDir,
+				log: () => {},
+			});
+			const base = server.url;
+			const create = await hub.create(paths.dir, "pinned");
+			await writeSession(paths, create.id, "pinned");
+			await hub.stop(create.id);
+			const protect = (value: boolean) =>
+				fetch(new URL(`api/sessions/${create.id}/protect`, base), {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ protected: value }),
+				});
+
+			assert.equal((await protect(true)).status, 200);
+			const listed = (await (await fetch(new URL("api/sessions", base))).json()) as Array<{
+				id: string;
+				protected?: boolean;
+			}>;
+			assert.equal(listed.find((session) => session.id === create.id)?.protected, true);
+
+			const bulk = (await (await fetch(new URL("api/sessions/archive-inactive", base), { method: "POST" })).json()) as {
+				archived: number;
+			};
+			assert.equal(bulk.archived, 0);
+
+			assert.equal((await protect(false)).status, 200);
+			const again = (await (
+				await fetch(new URL("api/sessions/archive-inactive", base), { method: "POST" })
+			).json()) as { archived: number };
+			assert.equal(again.archived, 1);
+		} finally {
+			await server?.close();
+			await hub.shutdown();
+		}
+	});
+
 	it("serves archive, restore, delete, trash restore and bulk archive", async () => {
 		const paths = await fixtureRoot("pixip-archive-");
 		const hub = hubFor(paths);

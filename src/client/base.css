@@ -7,6 +7,7 @@
 	--fg-dim: #9b93b4;
 	--fg-faint: #6f6889;
 	--accent: #bb9af7;
+	--protected: #c084fc;
 	--user: #7aa2f7;
 	--ok: #9ece6a;
 	--warn: #e0af68;
@@ -187,6 +188,13 @@ textarea {
 }
 .dot.error {
 	background: var(--err);
+}
+/* The purple pin next to a row's state dot: excluded from bulk archive. */
+.row-protected {
+	color: var(--protected);
+	font-size: 11px;
+	line-height: 1;
+	flex: none;
 }
 @keyframes pulse {
 	50% {

@@ -22,6 +22,7 @@ export function openSessionActions(session) {
 	const actions = [];
 	const live = ["starting", "idle", "busy"].includes(session.state);
 	if (live) actions.push(["stop", () => void stopSession(session)]);
+	actions.push([session.protected ? "unprotect" : "protect", () => void toggleProtected(session)]);
 	actions.push(["archive", () => confirmSessionAction("archive", session)]);
 	actions.push(["delete", () => confirmSessionAction("delete", session)]);
 	deps.sheet(`session · ${label}`, actions);
@@ -34,6 +35,22 @@ async function stopSession(session) {
 		toast("stopped");
 	} catch (error) {
 		toast(`stop failed: ${error.message}`);
+	}
+}
+
+/** Toggle the purple bulk-archive protection flag (also settable by `pixip protect`). */
+async function toggleProtected(session) {
+	const next = !session.protected;
+	try {
+		await apiJson(`/api/sessions/${encodeURIComponent(session.id)}/protect`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ protected: next }),
+		});
+		await refreshDashboard();
+		toast(next ? "protected from bulk archive" : "protection removed");
+	} catch (error) {
+		toast(`protect failed: ${error.message}`);
 	}
 }
 

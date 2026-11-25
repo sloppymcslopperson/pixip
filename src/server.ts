@@ -344,6 +344,15 @@ async function handleHttp(
 			);
 			return;
 		}
+		const protectMatch = /^\/api\/sessions\/([^/]+)\/protect$/.exec(url.pathname);
+		if (req.method === "POST" && protectMatch?.[1]) {
+			const body = await readBody(req);
+			const parsed = JSON.parse(body || "{}") as { protected?: unknown; value?: unknown };
+			const value = parsed.protected ?? parsed.value ?? true;
+			const info = await hub.setProtected(decodeURIComponent(protectMatch[1]), value !== false);
+			send(200, JSON.stringify({ ok: true, session: info }));
+			return;
+		}
 		const archiveMatch = /^\/api\/sessions\/([^/]+)\/archive$/.exec(url.pathname);
 		if (req.method === "POST" && archiveMatch?.[1]) {
 			const info = await hub.archive(decodeURIComponent(archiveMatch[1]));

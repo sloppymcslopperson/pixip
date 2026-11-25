@@ -45,9 +45,9 @@ import { spawnEnv } from "../src/spawnEnv.ts";
  * serve path; `stop`/`status`/`logs`/`refresh`/`restart` manage it.
  */
 
-type Command = "serve" | "start" | "stop" | "status" | "logs" | "refresh" | "restart" | "worktree";
+type Command = "serve" | "start" | "stop" | "status" | "logs" | "refresh" | "restart" | "worktree" | "protect";
 
-const SUBCOMMANDS = new Set<string>(["start", "stop", "status", "logs", "refresh", "restart", "worktree"]);
+const SUBCOMMANDS = new Set<string>(["start", "stop", "status", "logs", "refresh", "restart", "worktree", "protect"]);
 
 interface Options {
 	host: string;
@@ -76,6 +76,8 @@ interface Options {
 	lines: number;
 	/** `restart --force` */
 	force: boolean;
+	/** `protect --off`: clear the flag instead of setting it. */
+	off: boolean;
 	/** `restart --when-idle` */
 	whenIdle: boolean;
 	/** `restart --timeout <seconds>` */
@@ -124,6 +126,7 @@ function parseArgs(argv: string[]): Options {
 		follow: false,
 		lines: 200,
 		force: false,
+		off: false,
 		whenIdle: false,
 		timeoutS: 300,
 		detached: false,
@@ -203,6 +206,9 @@ function parseArgs(argv: string[]): Options {
 				break;
 			case "--force":
 				options.force = true;
+				break;
+			case "--off":
+				options.off = true;
 				break;
 			case "--when-idle":
 				options.whenIdle = true;
@@ -298,6 +304,12 @@ Commands:
                       busy unless --force; --when-idle waits for the other
                       sessions (the calling one does not count) up to --timeout
                       (default 300s, exit 2)
+  protect [<session-id>] [--off] [--json]
+                      mark one session as protected from the dashboard bulk
+                      archive (or clear it with --off). Defaults to the caller's
+                      PIXIP_SESSION_ID, so an agent can protect its own session.
+                      The flag is stored in the session index and survives
+                      restarts and archive/restore; manual archive still works
   worktree <list|remove|prune>
                       inspect or remove git worktrees (see 'pixip worktree --help')
 
@@ -379,7 +391,9 @@ async function main(): Promise<void> {
 		return await cmdWorktree(action, options);
 	}
 	const options = parseArgs(argv);
-	if (options.positionals.length > 0) throw new Error(`unknown argument ${options.positionals[0]}`);
+	if (options.positionals.length > 0 && command !== "protect") {
+		throw new Error(`unknown argument ${options.positionals[0]}`);
+	}
 	switch (command) {
 		case "start":
 			return await cmdStart(options);
@@ -393,6 +407,8 @@ async function main(): Promise<void> {
 			return await cmdRefresh(options);
 		case "restart":
 			return await cmdRestart(options);
+		case "protect":
+			return await cmdProtect(options);
 		default:
 			return await serve(options);
 	}
@@ -631,6 +647,44 @@ async function cmdLogs(options: Options): Promise<void> {
 async function cmdRefresh(options: Options): Promise<void> {
 	const report = await refreshDaemon(options.dataDir);
 	process.stdout.write(`reloaded ${report.reloaded.join(", ")} (${report.reloads} total)\n`);
+}
+
+/**
+ * Protect a session from the dashboard bulk archive. With no id, the caller's
+ * `PIXIP_SESSION_ID` is used, which is how a Pi child marks its own session.
+ */
+async function cmdProtect(options: Options): Promise<void> {
+	const id = options.positionals[0] ?? callerSession();
+	if (!id) {
+		throw new Error("protect needs a session id, or PIXIP_SESSION_ID when run inside a pixip session");
+	}
+	const value = !options.off;
+	const daemon = await runningDaemon(options.dataDir);
+	let info: SessionInfo & { protected?: boolean };
+	if (daemon) {
+		const result = await fetchJson<{ session: SessionInfo }>(
+			new URL(`api/sessions/${encodeURIComponent(id)}/protect`, daemon.url),
+			{
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ protected: value }),
+			},
+		);
+		info = result.session;
+	} else {
+		const hub = offlineHub(options);
+		try {
+			info = await hub.setProtected(id, value);
+		} finally {
+			await hub.shutdown();
+		}
+	}
+	const label = info.name || info.logicalId || id;
+	if (options.json) {
+		process.stdout.write(`${JSON.stringify({ ok: true, protected: value, session: info })}\n`);
+		return;
+	}
+	process.stdout.write(`${value ? "protected" : "unprotected"} ${label}\n`);
 }
 
 /**

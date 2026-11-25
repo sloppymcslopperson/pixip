@@ -98,6 +98,8 @@ export interface SessionInfo {
 	worktree?: WorktreeInfo;
 	/** Other live sessions sharing this realpath cwd; refreshed on lifecycle changes. */
 	peers?: SessionPeer[];
+	/** Excluded from the dashboard bulk archive; set by the session itself or a user. */
+	protected?: boolean;
 	lastActivity: number;
 }
 

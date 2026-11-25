@@ -223,7 +223,10 @@ export function sessionRow(session) {
 	open.type = "button";
 	open.className = "row-open";
 	const stateClass = escapeHtml(session.state);
-	open.innerHTML = `<div class="row-top"><span class="dot ${stateClass}"></span><span class="row-name">${escapeHtml(session.name ?? session.id.slice(0, 8))}</span><span class="row-state">${stateClass} · ${relativeTime(session.lastActivity)}</span></div>`;
+	const protectedMark = session.protected
+		? '<span class="row-protected" title="protected from bulk archive" aria-label="protected from bulk archive">●</span>'
+		: "";
+	open.innerHTML = `<div class="row-top"><span class="dot ${stateClass}"></span>${protectedMark}<span class="row-name">${escapeHtml(session.name ?? session.id.slice(0, 8))}</span><span class="row-state">${stateClass} · ${relativeTime(session.lastActivity)}</span></div>`;
 	open.addEventListener("click", () => {
 		location.hash = `s=${encodeURIComponent(session.id)}`;
 	});

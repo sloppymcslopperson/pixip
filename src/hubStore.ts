@@ -175,8 +175,16 @@ export async function list(this: any): Promise<SessionInfo[]> {
 			sessionFile: record.sessionFile,
 			...(record.repo ? { repo: record.repo } : {}),
 			...(record.worktree ? { worktree: record.worktree } : {}),
+			...(record.protected ? { protected: true } : {}),
 			lastActivity: Date.parse(record.createdAt) || 0,
 		});
+	}
+	for (const info of infos) {
+		if (info.protected) continue;
+		const record = records.find(
+			(entry) => entry.logicalId === info.logicalId || entry.piId === info.id || entry.piIds.includes(info.id),
+		);
+		if (record?.protected) info.protected = true;
 	}
 	infos.sort((a, b) => b.lastActivity - a.lastActivity);
 	// One git call per distinct cwd, shared by every session in that repo.
@@ -252,6 +260,7 @@ export async function archiveInactive(
 	const failed: Array<{ id: string; error: string }> = [];
 	for (const session of sessions) {
 		if (session.state !== "stopped") continue;
+		if (session.protected) continue;
 		if (selected && !selected.has(session.id) && !selected.has(session.logicalId)) continue;
 		try {
 			archived.push((await this.storeSession(session.id, this.archiveRoot)).info);
@@ -261,6 +270,25 @@ export async function archiveInactive(
 	}
 	await this.broadcastSessions();
 	return { archived, failed };
+}
+
+/**
+ * Set or clear the session's bulk-archive protection. The flag lives on the
+ * index record, so it survives restarts, archive/restore and reattaches; it is
+ * independent of the live child and only affects stopped sessions.
+ */
+export async function setProtected(this: any, id: string, value: boolean): Promise<SessionInfo> {
+	const target = await this.resolveTarget(id);
+	const logicalId = target.record.logicalId;
+	await this.mutateIndex((records) => {
+		const next = records.filter((record) => record.logicalId !== logicalId);
+		const { protected: _previous, ...rest } = target.record;
+		return [...next, value ? { ...rest, protected: true } : rest];
+	});
+	const live = this.findLive(id) ?? this.findLive(logicalId);
+	if (live) live.info.protected = value || undefined;
+	await this.broadcastSessions();
+	return { ...target.info, protected: value || undefined };
 }
 
 export async function listArchived(this: any): Promise<StoredSessionInfo[]> {
@@ -381,6 +409,7 @@ export async function upsertIndex(
 			sessionFile: info.sessionFile ?? existing?.sessionFile,
 			repo: info.repo ?? existing?.repo,
 			worktree: info.worktree ?? existing?.worktree,
+			protected: existing?.protected,
 			createdAt: existing?.createdAt ?? createdAt ?? new Date().toISOString(),
 		};
 		const index = records.findIndex((record) => record.logicalId === logicalId);
@@ -454,6 +483,7 @@ export async function resolveTarget(this: any, id: string): Promise<SessionTarge
 			sessionFile: info.sessionFile,
 			repo: info.repo,
 			...(info.worktree ? { worktree: info.worktree } : {}),
+			...(record.protected ? { protected: true } : {}),
 			createdAt: new Date(info.lastActivity || Date.now()).toISOString(),
 		};
 	}
@@ -478,6 +508,7 @@ export async function resolveTarget(this: any, id: string): Promise<SessionTarge
 		sessionFile: record.sessionFile,
 		...(record.repo ? { repo: record.repo } : {}),
 		...(record.worktree ? { worktree: record.worktree } : {}),
+		...(record.protected ? { protected: true } : {}),
 		lastActivity: Date.parse(record.createdAt) || 0,
 	};
 	return { info: resolved, record, files };
@@ -553,6 +584,7 @@ export async function restoreStored(this: any, root: string, id: string): Promis
 		sessionFile: record.sessionFile,
 		repo: record.repo,
 		worktree: record.worktree,
+		...(record.protected ? { protected: true } : {}),
 		createdAt: record.createdAt,
 	};
 	const mapping = new Map<string, string>();
@@ -587,6 +619,7 @@ export async function restoreStored(this: any, root: string, id: string): Promis
 		sessionFile: restored.sessionFile,
 		...(restored.repo ? { repo: restored.repo } : {}),
 		...(restored.worktree ? { worktree: restored.worktree } : {}),
+		...(restored.protected ? { protected: true } : {}),
 		lastActivity: Date.now(),
 	};
 }
@@ -641,6 +674,7 @@ export async function readStoredRecord(this: any, dir: string): Promise<StoredSe
 			name: typeof parsed.name === "string" ? parsed.name : undefined,
 			nameSource: parsed.nameSource === "auto" || parsed.nameSource === "manual" ? parsed.nameSource : undefined,
 			sessionFile: typeof parsed.sessionFile === "string" ? parsed.sessionFile : undefined,
+			protected: parsed.protected === true ? true : undefined,
 			createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : parsed.storedAt,
 			storedAt: parsed.storedAt,
 			files,
