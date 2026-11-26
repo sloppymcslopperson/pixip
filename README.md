@@ -217,6 +217,8 @@ The inbox is `<data-dir>/inbox.json`, owned by the hub (atomic temp+rename, no
 expiry, default cap 200), so it survives restarts and the deletion of the
 sending session; each message keeps a sender snapshot (name, cwd, branch, Pi
 id), while its status (running/idle/stopped/archived/deleted) is resolved live.
+Deleted ids are kept as a bounded tombstone list, so a copied ref can report
+"deleted" instead of "unknown" after the message is gone.
 
 ```bash
 pixip inbox send --subject "Review the migration" --purpose attention-needed "tests pass"
@@ -251,6 +253,25 @@ the empty inbox bar appear.
 ```bash
 pi install /path/to/pixip/extensions/pixip-inbox
 ```
+
+## Refs
+
+Messages and inbox cards carry a copyable `[pixip-ref=…]` tag. `pixip ref`
+turns one back into a readable pointer without a daemon: it reads the session
+index, JSONL, archive metadata and `inbox.json` directly, so the same command
+works with pixip stopped.
+
+```bash
+pixip ref '[pixip-ref=history/<logical-session>/<entry-id>]'
+pixip ref '[pixip-ref=history/<logical-session>/msg:user:<timestamp>]'
+pixip ref '[pixip-ref=inbox/<inbox-id>]' --json
+```
+
+History output names the session, role, entry, time, cwd and branch, then the
+entry text capped at 4 KB (with an explicit truncation note). Inbox output names
+the subject, purpose, sender and creation time, then the body. `--json` emits
+the same data as a stable object for extensions. Unknown, archived-away and
+deleted refs exit `2`; a malformed tag or wrong flag exits `1`.
 
 ## Worktrees
 

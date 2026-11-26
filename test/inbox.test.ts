@@ -160,6 +160,19 @@ describe("inbox store", () => {
 		assert.equal((await store.snapshot({ filter: "unread" })).length, 0);
 		await store.delete(sent.id);
 		assert.deepEqual(await store.all(), []);
+		const tombstones = await store.tombstones();
+		assert.equal(tombstones.length, 1);
+		assert.equal(tombstones[0]?.id, sent.id);
+		assert.ok(tombstones[0]?.deletedAt);
+		const raw = JSON.parse(await readFile(join(dir, "inbox.json"), "utf8")) as {
+			deleted: Array<{ id: string }>;
+		};
+		assert.deepEqual(
+			raw.deleted.map((item) => item.id),
+			[sent.id],
+		);
+		// A fresh store sees the tombstone too, so `pixip ref` can say "deleted".
+		assert.equal((await new InboxStore({ path: join(dir, "inbox.json") }).tombstones())[0]?.id, sent.id);
 		await assert.rejects(() => store.delete(sent.id), /unknown inbox message/);
 	});
 });

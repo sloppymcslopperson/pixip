@@ -32,6 +32,7 @@ import { detectRepo, pruneWorktrees, realCwd } from "../src/worktree.ts";
 import type { WorktreeEntry } from "../src/worktree.ts";
 import type { SessionInfo } from "../src/wire.ts";
 import { INBOX_PURPOSES, type InboxList, type InboxView } from "../src/inbox.ts";
+import { RefResolutionError, formatRef, parseRefArg, resolveRef } from "../src/refResolve.ts";
 import { spawnEnv } from "../src/spawnEnv.ts";
 
 /**
@@ -47,7 +48,7 @@ import { spawnEnv } from "../src/spawnEnv.ts";
  */
 
 type Command =
-	"serve" | "start" | "stop" | "status" | "logs" | "refresh" | "restart" | "worktree" | "protect" | "inbox";
+	"serve" | "start" | "stop" | "status" | "logs" | "refresh" | "restart" | "worktree" | "protect" | "inbox" | "ref";
 
 const SUBCOMMANDS = new Set<string>([
 	"start",
@@ -59,6 +60,7 @@ const SUBCOMMANDS = new Set<string>([
 	"worktree",
 	"protect",
 	"inbox",
+	"ref",
 ]);
 
 interface Options {
@@ -377,6 +379,8 @@ Commands:
   inbox <send|list|read|archive|delete>
                       durable messages from agents, readable in the dashboard
                       (see 'pixip inbox --help')
+  ref <tag> [--json]  resolve a copied pixip ref offline: kind, session, role,
+                      time, cwd, branch and its text (capped at 4 KB)
 
 Options:
 ${serveOptions}
@@ -483,6 +487,10 @@ async function main(): Promise<void> {
 		}
 		const options = parseArgs(argv);
 		return await cmdWorktree(action, options);
+	}
+	if (command === "ref") {
+		const options = parseArgs(argv);
+		return await cmdRef(options);
 	}
 	if (command === "inbox") {
 		const action = argv.shift();
@@ -1080,6 +1088,24 @@ async function cmdInbox(action: string, options: Options): Promise<void> {
 			return await cmdInboxDelete(options);
 		default:
 			throw new Error(`unknown inbox command ${action}`);
+	}
+}
+
+// ------------------------------------------------------------------- ref
+
+async function cmdRef(options: Options): Promise<void> {
+	if (options.positionals.length !== 1) throw new Error("usage: pixip ref <tag> [--json]");
+	const ref = parseRefArg(options.positionals[0] as string);
+	const hub = offlineHub(options);
+	try {
+		const result = await resolveRef(hub, options.dataDir, ref);
+		process.stdout.write(options.json ? `${JSON.stringify(result)}\n` : `${formatRef(result)}\n`);
+	} catch (error) {
+		if (!(error instanceof RefResolutionError)) throw error;
+		process.stderr.write(`${error.message}\n`);
+		process.exitCode = 2;
+	} finally {
+		await hub.shutdown();
 	}
 }
 

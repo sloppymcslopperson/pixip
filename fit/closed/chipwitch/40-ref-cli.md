@@ -1,5 +1,5 @@
 ---
-grilled: false
+grilled: true
 project: pixip
 series: chipwitch
 ---
@@ -44,3 +44,22 @@ Add `pixip ref <tag>` so any agent can turn a ref into role, time, session, cwd,
 - Resolution must be proven offline: run it with this worktree's daemon stopped, using `--data-dir ./tmp/refs`, so no REST path can mask a broken JSONL read.
 - `npm run check` green, and `--help` must list the verb (existing CLI tests assert the help output).
 - Manual cross-check: a tag produced by ticket 10 resolves and prints the same text the user copied from.
+
+### Decisions (grilled)
+
+- `--json` is a flat object: `{ok, kind, tag, role, time, session:{logicalId,name,cwd,branch,state,archived}, entryId, messageKey, text, truncated}`. Fields that do not apply are `null`; the shape is stable.
+- `ref` always takes the offline path, even when a daemon is running: session index + JSONL + archive metadata + `inbox.json`. The earlier "prefer daemon" answer is superseded by the ticket's offline boundary and the required daemon-stopped test.
+- The CLI accepts only the bracketed `[pixip-ref=…]` form; the bare-address idea is dropped.
+- Exactly one tag per invocation; a malformed tag is a usage error (exit 1).
+- Inbox tombstones: `InboxStore.delete` appends `{id, deletedAt}` to a bounded `deleted` array in `inbox.json` (newest first, capped to the same inbox limit). `pixip ref` reads it and reports "inbox message <id> was deleted" with exit 2; a never-seen id reports unknown with exit 2. `ref` itself never writes. This is the one deliberate scope expansion into `src/inbox.ts`; all other boundaries stand.
+- Text is capped at 4096 characters with an explicit note naming the omitted character count; `truncated` is the boolean in `--json`.
+- Archived sessions resolve through the archive store metadata and the stored JSONL file; trashed sessions are unavailable (exit 2), not resolved.
+- Header fields: history → kind, session, role, ISO time, cwd, branch; inbox → kind, subject, purpose, sender name and id, created time, body. `role` is null for inbox.
+- Unknown tag/session/entry exits 2; flag and usage mistakes exit 1, matching the worktree CLI.
+
+### Implementation notes
+
+- The `--json` object keeps the agreed flat shape and adds three top-level fields so inbox refs are actually reusable: `subject`, `purpose` and `sender` (null for history). `session` is null for inbox; `role` is null there too.
+- Archived JSONL paths are derived from the archive `meta.json` `files[].stored` entry (relative to the archive directory), because `StoredSessionInfo.sessionFile` still names the original path.
+- Text extraction reuses the same content rules as the client: string content, text blocks joined with newlines, bash command plus output, then a JSON fallback.
+- README gained a Refs section and the inbox section now mentions the bounded tombstone list.

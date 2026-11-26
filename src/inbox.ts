@@ -91,6 +91,21 @@ export class InboxError extends Error {
 interface InboxFile {
 	version: 1;
 	messages: InboxMessage[];
+	/** Ids whose messages were deleted, newest first; bounded by the store cap. */
+	deleted?: InboxTombstone[];
+}
+
+/** A deleted inbox id, kept so `pixip ref` can say "deleted" not "unknown". */
+export interface InboxTombstone {
+	id: string;
+	deletedAt: string;
+}
+
+function normalizeTombstone(raw: unknown): InboxTombstone | undefined {
+	if (!raw || typeof raw !== "object") return undefined;
+	const item = raw as Partial<InboxTombstone>;
+	if (typeof item.id !== "string" || typeof item.deletedAt !== "string") return undefined;
+	return { id: item.id, deletedAt: item.deletedAt };
 }
 
 function isPurpose(value: unknown): value is InboxPurpose {
@@ -146,6 +161,7 @@ export class InboxStore {
 	private readonly cap: number;
 	private readonly log: (message: string) => void;
 	private messages: InboxMessage[] | null = null;
+	private deleted: InboxTombstone[] | null = null;
 	/** Serializes every read-modify-write and its atomic rename. */
 	private writes: Promise<unknown> = Promise.resolve();
 
@@ -165,6 +181,12 @@ export class InboxStore {
 
 	async all(): Promise<InboxMessage[]> {
 		return [...(await this.load())];
+	}
+
+	/** Deleted ids, newest first; used by the offline `pixip ref` resolution. */
+	async tombstones(): Promise<InboxTombstone[]> {
+		await this.load();
+		return [...(this.deleted ?? [])];
 	}
 
 	async snapshot(filter: InboxFilter = {}): Promise<InboxMessage[]> {
@@ -249,6 +271,8 @@ export class InboxStore {
 			if (index === -1) throw new InboxError(`unknown inbox message ${id}`, 404);
 			const [removed] = messages.splice(index, 1);
 			if (!removed) throw new InboxError(`unknown inbox message ${id}`, 404);
+			const tombstone = { id, deletedAt: new Date().toISOString() };
+			this.deleted = [tombstone, ...(this.deleted ?? []).filter((item) => item.id !== id)].slice(0, this.cap);
 			return removed;
 		});
 	}
@@ -283,6 +307,7 @@ export class InboxStore {
 				this.log(`inbox unreadable (${(error as Error).message}); starting empty`);
 			}
 			this.messages = [];
+			this.deleted = [];
 			return this.messages;
 		}
 		try {
@@ -291,11 +316,16 @@ export class InboxStore {
 			const messages = Array.isArray(raw)
 				? raw.map(normalizeMessage).filter((message): message is InboxMessage => Boolean(message))
 				: [];
+			const deleted = Array.isArray(parsed) ? [] : parsed.deleted;
+			this.deleted = Array.isArray(deleted)
+				? deleted.map(normalizeTombstone).filter((item): item is InboxTombstone => Boolean(item))
+				: [];
 			if (!Array.isArray(raw)) this.log(`inbox file ${this.path} has no message array; starting empty`);
 			this.messages = messages;
 		} catch (error) {
 			this.log(`inbox file ${this.path} is malformed (${(error as Error).message}); starting empty`);
 			this.messages = [];
+			this.deleted = [];
 		}
 		return this.messages;
 	}
@@ -316,7 +346,7 @@ export class InboxStore {
 	private async persist(messages: InboxMessage[]): Promise<void> {
 		await mkdir(dirname(this.path), { recursive: true });
 		const temp = `${this.path}.${process.pid}.tmp`;
-		const body: InboxFile = { version: 1, messages };
+		const body: InboxFile = { version: 1, messages, deleted: this.deleted ?? [] };
 		await writeFile(temp, `${JSON.stringify(body, null, 2)}\n`);
 		await rename(temp, this.path);
 	}
