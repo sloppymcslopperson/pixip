@@ -43,4 +43,15 @@ export function copySheet(text) {
 	close.addEventListener("click", closeSheet);
 	actions.append(copy, close);
 	target.append(heading, body, actions);
+	// Non-secure contexts (LAN http on a phone) have no clipboard API; leaving
+	// the text selected makes the browser's own copy work in one gesture.
+	try {
+		const range = document.createRange();
+		range.selectNodeContents(body);
+		const selection = window.getSelection();
+		selection?.removeAllRanges();
+		selection?.addRange(range);
+	} catch {
+		// selection is a convenience; the sheet still shows the text
+	}
 }

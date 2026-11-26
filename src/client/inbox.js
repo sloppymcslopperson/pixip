@@ -25,6 +25,7 @@ import {
 	shortId,
 } from "./inboxModel.js";
 import { relativeTime } from "./render.js";
+import { inboxRefButton } from "./reftagActions.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
 
@@ -302,6 +303,7 @@ function renderCard(message) {
 
 	const actions = document.createElement("div");
 	actions.className = "inbox-actions";
+	const copy = inboxRefButton(message.id);
 	const archive = document.createElement("button");
 	archive.type = "button";
 	archive.textContent = message.archivedAt ? "restore" : "archive";
@@ -317,7 +319,7 @@ function renderCard(message) {
 		event.stopPropagation();
 		confirmDelete(message);
 	});
-	actions.append(archive, remove);
+	actions.append(copy, archive, remove);
 	card.append(actions);
 
 	card.addEventListener("click", () => {

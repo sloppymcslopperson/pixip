@@ -63,7 +63,7 @@ describe("rendering", () => {
 		);
 	});
 
-	it("renders recorded user images as thumbnails without losing text or the fork action", () => {
+	it("renders recorded user images as thumbnails without losing text", () => {
 		const html = renderMessage(
 			{
 				role: "user",
@@ -77,7 +77,8 @@ describe("rendering", () => {
 		assert.match(html, /look at this/);
 		assert.match(html, /class="msg-images"/);
 		assert.match(html, /src="data:image\/png;base64,aGVsbG8="/);
-		assert.match(html, /data-fork="entry-1"/);
+		// Fork and reftag actions are attached by reftagActions.js, not this HTML.
+		assert.equal(html.includes("data-fork"), false);
 	});
 
 	it("renders an image-only user message and falls back to [image] when empty", () => {
@@ -270,17 +271,16 @@ describe("markdown", () => {
 		assert.match(assistant, /<strong>bold<\/strong>/);
 	});
 
-	it("offers a fork affordance only when the user entry has an id", () => {
+	it("keeps message actions out of rendered HTML", () => {
 		const message = { role: "user", content: [{ type: "text", text: "fork me" }] };
-		assert.equal(renderMessage(message).includes("data-fork"), false);
-		const withId = renderMessage(message, 'e"1');
-		assert.match(withId, /data-fork="e&quot;1"/);
-		assert.match(withId, /class="fork-action"/);
-		// Assistant messages never get the affordance.
-		assert.equal(
-			renderMessage({ role: "assistant", content: [{ type: "text", text: "hi" }] }, "a1").includes("data-fork"),
-			false,
-		);
+		for (const html of [
+			renderMessage(message, 'e"1'),
+			renderMessage({ role: "assistant", content: [{ type: "text", text: "hi" }] }, "a1"),
+		]) {
+			assert.equal(html.includes("data-fork"), false);
+			assert.equal(html.includes("data-reftag"), false);
+			assert.equal(html.includes("fork-action"), false);
+		}
 	});
 
 	it("keeps thinking blocks as escaped ansi text", () => {

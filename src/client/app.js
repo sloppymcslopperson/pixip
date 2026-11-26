@@ -35,6 +35,7 @@ import { dismissSheet } from "./sheetShell.js";
 import { configureSheets, handleUiRequest, openSessionSheet, sheet } from "./sheets.js";
 import { cancelSurface, openFixturePanel, openSurfaceRequest, resetSurface, surfaceOpen } from "./surface.js";
 import { openImageSheet } from "./toast.js";
+import { handleRefTagAction } from "./reftagActions.js";
 import { DEFAULT_PERCENT, nextPercent, previousPercent } from "./transcriptScale.js";
 import {
 	appendRestartNotice,
@@ -351,18 +352,15 @@ ui.jump.addEventListener("click", () => {
 	ui.log.scrollTo({ top: ui.log.scrollHeight, behavior: "smooth" });
 });
 
-/** The small "fork" affordance on user blocks (08) is delegated: the transcript
- *  is repainted in chunks, so per-button listeners would be lost. */
+/** Message actions (copy reftag, fork, copy with text) are delegated: the
+ *  transcript is repainted in chunks, so per-button listeners would be lost. */
 ui.log.addEventListener("click", (event) => {
 	const image = event.target.closest(".msg-image img");
 	if (image) {
 		openImageSheet(image.src);
 		return;
 	}
-	const button = event.target.closest("[data-fork]");
-	if (!button) return;
-	const entryId = button.dataset.fork;
-	if (entryId) send({ t: "fork", entryId });
+	handleRefTagAction(event);
 });
 
 /** Toast with one action (delete undo); stays up long enough to be reachable. */

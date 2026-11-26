@@ -4,6 +4,7 @@ import { endCompaction, startCompaction } from "./compaction.js";
 import { applyLiveThinkingFrame, applyThinkingEvent, createLiveThought } from "./thinkingStream.js";
 import { installDeps } from "./configure.js";
 import { renderQueue } from "./queueView.js";
+import { decorateRefBlocks, stampRef, tagForLiveMessage } from "./reftagActions.js";
 import { scheduleScroll, scrollToEnd } from "./scroll.js";
 import { applyInfo, renderPeerNotice, setBusy } from "./sessionView.js";
 import { queueCount, queueFromEvent } from "./queue.js";
@@ -46,6 +47,9 @@ export function configureTranscript(next) {
 export let fillTimer = 0;
 
 export let fillToken = 0;
+
+/** Assistant timestamp for the live coverage key, mirroring coverageKey(). */
+let liveAssistantTs;
 
 export function mergeTail(entries, more) {
 	const result = mergeWindow(state.entries, entries, more);
@@ -200,6 +204,7 @@ export function applyFullEntry(frame) {
 	ui.log.scrollTop = restoreScrollTop(distance, ui.log.scrollHeight);
 	trackTools();
 	trackTruncated();
+	decorateRefBlocks(ui.log);
 }
 
 ui.log.addEventListener("click", (event) => {
@@ -246,6 +251,7 @@ export function renderTranscript(distance = null) {
 	restore();
 	trackTools();
 	trackTruncated();
+	decorateRefBlocks(ui.log);
 
 	// Older entries of the same window fill in above, chunk by chunk. The
 	// distance from the bottom is held constant, so a pinned view stays pinned.
@@ -258,6 +264,7 @@ export function renderTranscript(distance = null) {
 		restore();
 		trackTools();
 		trackTruncated();
+		decorateRefBlocks(ui.log);
 		start = from;
 		if (start > 0) fillTimer = setTimeout(fill, 0);
 	};
@@ -302,6 +309,7 @@ export function handleEvent(event) {
 	if (!event || typeof event !== "object") return;
 	switch (event.type) {
 		case "agent_start":
+			liveAssistantTs = undefined;
 			setBusy(true);
 			state.liveThought = createLiveThought(false);
 			showThinkingIndicator();
@@ -316,9 +324,11 @@ export function handleEvent(event) {
 			if (message.role === "user") {
 				state.pendingUser?.remove();
 				state.pendingUser = null;
-				appendBlock("user", `<div class="who">you</div>${renderUserBody(message)}`, true);
+				const section = appendBlock("user", `<div class="who">you</div>${renderUserBody(message)}`, true);
+				stampRef(section, tagForLiveMessage(message));
 				if (state.info?.state === "busy") showThinkingIndicator();
 			} else if (message.role === "assistant") {
+				if (typeof message.timestamp === "number") liveAssistantTs = message.timestamp;
 				// Lazy: the block is created by the first text delta, so a turn that
 				// only thinks never leaves an empty labelled block behind.
 				state.streaming = null;
@@ -338,6 +348,7 @@ export function handleEvent(event) {
 		case "message_end": {
 			const message = event.message ?? {};
 			if (message.role === "assistant") {
+				if (typeof message.timestamp === "number") liveAssistantTs = message.timestamp;
 				const expanded = state.liveThought?.expanded === true;
 				hideThinkingIndicator();
 				const body = renderAssistantBody(message.content ?? [], false, { openThinking: expanded });
@@ -346,8 +357,10 @@ export function handleEvent(event) {
 				if (section) {
 					if (body) section.innerHTML = `<div class="who">pi</div>${body}`;
 					else section.remove();
+					if (body) stampRef(section, tagForLiveMessage(message));
 				} else if (body) {
-					appendBlock("assistant", `<div class="who">pi</div>${body}`, true);
+					const painted = appendBlock("assistant", `<div class="who">pi</div>${body}`, true);
+					stampRef(painted, tagForLiveMessage(message));
 				}
 				state.liveThought = { text: "", active: false, expanded };
 			}
@@ -370,6 +383,9 @@ export function handleEvent(event) {
 			const el = appendBlock("", html, true);
 			el.classList.add("tool-host");
 			if (event.toolCallId && el.firstElementChild) state.tools.set(event.toolCallId, el.firstElementChild);
+			if (el.firstElementChild && typeof liveAssistantTs === "number") {
+				stampRef(el.firstElementChild, tagForLiveMessage({ role: "assistant", timestamp: liveAssistantTs }));
+			}
 			break;
 		}
 		case "tool_execution_update": {
@@ -414,6 +430,9 @@ export function handleEvent(event) {
 				);
 				const next = ui.log.querySelector(`.tool[data-call="${CSS.escape(event.toolCallId)}"]`);
 				if (next) state.tools.set(event.toolCallId, next);
+				if (next && typeof liveAssistantTs === "number") {
+					stampRef(next, tagForLiveMessage({ role: "assistant", timestamp: liveAssistantTs }));
+				}
 				if (next) {
 					if (event.isError) next.classList.add("error");
 					const time = next.querySelector(".tool-time");

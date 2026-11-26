@@ -173,6 +173,92 @@ async function checkNoOverflow(page, label) {
 	assert.ok(documentWidth <= innerWidth, `${label}: horizontal overflow (${documentWidth} > ${innerWidth})`);
 }
 
+async function lastCopied(page) {
+	return await page.evaluate(() => window.__copied?.at(-1) ?? null);
+}
+
+async function clickRefCopy(page, selector) {
+	const clicked = await page.evaluate((selector) => {
+		const button = document.querySelector(`${selector} [data-reftag-copy]`);
+		button?.click();
+		return Boolean(button);
+	}, selector);
+	assert.equal(clicked, true, `reftag copy button exists in ${selector}`);
+}
+
+async function runRefCopyFlow(page, base, sessionId, hub) {
+	await page.goto(`${base}?flow=reftags#s=${sessionId}`, { waitUntil: "domcontentloaded", timeout: FLOW_TIMEOUT });
+	await waitForSession(page);
+	await page.waitForSelector("#log [data-entry] .reftag-actions", { timeout: FLOW_TIMEOUT });
+
+	// Snapshot block: one tap copies the bare history tag.
+	const first = await page.evaluate(
+		() => document.querySelector("#log [data-entry]")?.getAttribute("data-entry") ?? null,
+	);
+	assert.ok(first, "a snapshot block is addressable");
+	await clickRefCopy(page, "#log [data-entry]");
+	assert.match(await lastCopied(page), /^\[pixip-ref=history\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+\]$/);
+
+	// The menu carries fork on a user block and tag-plus-text on every block.
+	const menu = await page.evaluate(() => {
+		document.querySelector("#log .reftag-actions [data-reftag-more]")?.click();
+		const labels = [...document.querySelectorAll("body > .reftag-menu button")].map((button) =>
+			(button.textContent ?? "").trim(),
+		);
+		return { labels };
+	});
+	assert.deepEqual(menu.labels, ["fork", "copy with text"], "user menu has fork and tag plus text");
+	await page.evaluate(() => {
+		const button = [...document.querySelectorAll("body > .reftag-menu button")].find(
+			(node) => (node.textContent ?? "").trim() === "copy with text",
+		);
+		button?.click();
+	});
+	const withText = await lastCopied(page);
+	assert.match(withText, /^\[pixip-ref=history\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+\]\n\n> /);
+
+	// Live block: copy works as soon as the message is painted. The fake Pi does
+	// not echo prompts, so inject the same record a real child would emit.
+	const stamp = 1735689600123;
+	const text = "live ref copy";
+	await inject(hub, sessionId, {
+		type: "message_start",
+		message: { role: "user", timestamp: stamp, content: [{ type: "text", text }] },
+	});
+	await page.waitForFunction(
+		(text) =>
+			[...document.querySelectorAll("#log .block.user[data-reftag]")].some((node) =>
+				(node.textContent ?? "").includes(text),
+			),
+		{ timeout: FLOW_TIMEOUT },
+		text,
+	);
+	await page.evaluate(() => {
+		const block = [...document.querySelectorAll("#log .block.user[data-reftag]")].at(-1);
+		block?.querySelector("[data-reftag-copy]")?.click();
+	});
+	assert.match(await lastCopied(page), new RegExp(`/msg:user:${stamp}\\]$`));
+
+	// Denied clipboard: the sheet opens with the tag selected.
+	await page.evaluate(() => {
+		window.__clipboardDenied = true;
+	});
+	await clickRefCopy(page, "#log [data-entry]");
+	await page.waitForSelector("#sheet:not([hidden]) .sheet-text", { timeout: FLOW_TIMEOUT });
+	const fallback = await page.evaluate(() => ({
+		text: document.querySelector("#sheet .sheet-text")?.textContent ?? "",
+		selected: window.getSelection()?.toString() ?? "",
+	}));
+	assert.match(fallback.text, /^\[pixip-ref=history\//);
+	assert.equal(fallback.selected, fallback.text, "denied clipboard selects the tag in the sheet");
+	await page.evaluate(() => {
+		window.__clipboardDenied = false;
+	});
+	await page.click("#sheet .sheet-actions button:last-child");
+	await page.waitForFunction(() => document.querySelector("#sheet")?.hidden === true, { timeout: FLOW_TIMEOUT });
+	await checkNoOverflow(page, "reftag copy");
+}
+
 async function runDashboardFlow(page, base, sessionId) {
 	await page.goto(base, { waitUntil: "domcontentloaded", timeout: FLOW_TIMEOUT });
 	const row = await page.waitForSelector(`.row[data-id="${sessionId}"]`, { timeout: FLOW_TIMEOUT });
@@ -572,6 +658,9 @@ async function runInboxFlow(page, base) {
 	);
 	await checkNoOverflow(page, "inbox message expanded");
 
+	await clickRefCopy(page, "#inbox-page .inbox-card");
+	assert.match(await lastCopied(page), /^\[pixip-ref=inbox\/[A-Za-z0-9._-]+\]$/);
+
 	// Archive hides the row; the archived toggle restores visibility.
 	await page.evaluate(() =>
 		[...document.querySelectorAll("#inbox-page .inbox-actions button")]
@@ -593,6 +682,8 @@ async function runInboxFlow(page, base) {
 	});
 	await clickInboxChip(page, "archived");
 	await page.waitForSelector("#inbox-page .inbox-card", { timeout: FLOW_TIMEOUT });
+	await clickRefCopy(page, "#inbox-page .inbox-card");
+	assert.match(await lastCopied(page), /^\[pixip-ref=inbox\/[A-Za-z0-9._-]+\]$/);
 
 	// Delete asks for confirmation; cancel keeps the message.
 	await page.evaluate(() =>
@@ -637,6 +728,20 @@ async function runViewport(browser, base, fixture, viewport) {
 		if (message.text().includes("Failed to load resource") && location.includes("/api/worktrees")) return;
 		problems.push(`console: ${message.text()}`);
 	});
+	await page.evaluateOnNewDocument(() => {
+		window.__copied = [];
+		window.__clipboardDenied = false;
+		Object.defineProperty(navigator, "clipboard", {
+			configurable: true,
+			value: {
+				writeText: (text) => {
+					if (window.__clipboardDenied) return Promise.reject(new Error("clipboard denied"));
+					window.__copied.push(text);
+					return Promise.resolve();
+				},
+			},
+		});
+	});
 	await page.setViewport({
 		width: viewport.width,
 		height: viewport.height,
@@ -649,6 +754,7 @@ async function runViewport(browser, base, fixture, viewport) {
 		await runInboxFlow(page, base);
 		await runWorktreeFlow(page, base, fixture);
 		await runComposerFlow(page, base, fixture.sessionId, fixture.paths, viewport);
+		await runRefCopyFlow(page, base, fixture.sessionId, fixture.hub);
 		await runSelectFlow(page, base, fixture.sessionId, fixture.hub, fixture.paths);
 		await runPanelFlow(page, base, fixture.sessionId);
 		await runHistoryFlow(page, base, fixture.sessionId);

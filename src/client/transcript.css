@@ -63,22 +63,66 @@
 	margin: 0 auto;
 	border-radius: 10px;
 }
-/* Small fork affordance on snapshot user blocks (08); live-painted blocks gain
-   it on the next snapshot, when their entry id is known. */
-.fork-action {
-	margin-left: auto;
+/* Per-message reftag actions: `#` copies the tag, `…` opens fork and the
+   tag-plus-excerpt escape hatch. In flow at the block's bottom-right corner so
+   they never cover text at phone widths. */
+.reftag-actions {
+	display: flex;
+	justify-content: flex-end;
+	align-items: center;
+	gap: 4px;
+	margin-top: 2px;
+	opacity: 0.55;
+}
+.reftag-actions:hover,
+.reftag-actions:focus-within {
+	opacity: 1;
+}
+.reftag-actions button {
 	background: none;
 	border: 1px solid var(--line);
 	border-radius: 6px;
-	padding: 0 5px;
-	font-size: 0.85em;
-	letter-spacing: 0;
-	text-transform: none;
+	padding: 0 6px;
+	font: inherit;
+	font-size: 0.8em;
+	line-height: 1.5;
 	color: var(--fg-faint);
+	cursor: pointer;
 }
-.fork-action:hover {
+.reftag-actions button:hover {
 	color: var(--accent);
 	border-color: var(--accent);
+}
+.reftag-menu {
+	position: fixed;
+	z-index: 60;
+	display: flex;
+	flex-direction: column;
+	min-width: 9rem;
+	padding: 4px;
+	background: var(--bg-raised);
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	box-shadow: 0 6px 18px rgb(0 0 0 / 35%);
+}
+.reftag-menu button {
+	text-align: left;
+	border: 0;
+	border-radius: 5px;
+	padding: 5px 8px;
+	font: inherit;
+	color: var(--fg-dim);
+	background: none;
+	cursor: pointer;
+}
+.reftag-menu button:hover {
+	background: var(--bg-soft);
+	color: var(--accent);
+}
+@media (pointer: coarse) {
+	.reftag-actions {
+		opacity: 0.8;
+	}
 }
 .block.assistant {
 	border-left-color: var(--accent);

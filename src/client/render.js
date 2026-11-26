@@ -343,13 +343,9 @@ export function renderUserBody(message) {
 export function renderMessage(message, entryId, context = {}) {
 	if (!message || typeof message !== "object") return "";
 	if (message.role === "user") {
-		// Snapshot entries carry their id; live `message_start` records do not, so
-		// the affordance appears once the message is part of the loaded window.
-		const fork =
-			typeof entryId === "string" && entryId
-				? ` <button type="button" class="fork-action" data-fork="${escapeHtml(entryId)}" aria-label="Fork from this message" title="Fork from this message">fork</button>`
-				: "";
-		return `<section class="block user"><div class="who">you${fork}</div>${renderUserBody(message)}</section>`;
+		// Fork and copy actions are attached by reftagActions.js; snapshot entries
+		// carry their id there, live blocks derive the msg: key instead.
+		return `<section class="block user"><div class="who">you</div>${renderUserBody(message)}</section>`;
 	}
 	if (message.role === "assistant") {
 		return renderAssistant(message.content ?? []);
