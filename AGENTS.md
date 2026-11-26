@@ -115,6 +115,17 @@ pid on 8137 and relaunch, or start a second instance on another
 instead. If a change moves the numbers in ARCHITECTURE.md, update them there
 (that file is the source of truth for the latency budget).
 
+Client tickets need a real browser pass, not just screenshots: drive the flow with
+the `browser` tool (agent-browser) against a running daemon, and say which
+commands you ran and what you saw. `tools/shot.mjs` is a layout probe;
+`npm run check` silently skips `check:browser` unless `PIXIP_CHROME` is set, so a
+green `check` is not browser evidence. Scripted regressions go in
+`tools/browser-check.mjs`:
+
+```bash
+PIXIP_CHROME=$(ls -d ~/.agent-browser/browsers/chrome-*/chrome | tail -1) npm run check:browser
+```
+
 `backlog/` is not a queue: those tickets are either blocked on a human decision
 (desktop surface, phone-only ergonomics, auth posture) or deliberately later
 (worktrees, fork/clone, theme tokens).

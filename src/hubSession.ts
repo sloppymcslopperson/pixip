@@ -535,6 +535,7 @@ export function uiResponse(this: any, id: string, requestId: string, fields: Rec
 	const live = this.require(id);
 	this.clearPendingUi(live, requestId);
 	live.proc.send({ type: "extension_ui_response", id: requestId, ...fields });
+	void this.refreshAwaitingUser(live);
 }
 
 export function addonUiFrames(this: any, id: string): string[] {

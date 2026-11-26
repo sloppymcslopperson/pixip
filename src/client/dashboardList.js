@@ -8,6 +8,7 @@ import { openNewWorktreeSheet, openWorktreeSheet } from "./dashboardWorktree.js"
 import { bulkArchiveTargets, draftInputValue, groupDisplay } from "./dashboardModel.js";
 import { beginNewSession } from "./navigation.js";
 import { escapeHtml, relativeTime } from "./render.js";
+import { displayState } from "./sessionInfo.js";
 import {
 	COLLAPSED_STORAGE_KEY,
 	countLabel,
@@ -222,7 +223,7 @@ export function sessionRow(session) {
 	const open = document.createElement("button");
 	open.type = "button";
 	open.className = "row-open";
-	const stateClass = escapeHtml(session.state);
+	const stateClass = escapeHtml(displayState(session));
 	const protectedMark = session.protected
 		? '<span class="row-protected" title="protected from bulk archive" aria-label="protected from bulk archive">●</span>'
 		: "";

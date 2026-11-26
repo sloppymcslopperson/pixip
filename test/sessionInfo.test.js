@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { exportFileName, formatSession } from "../src/client/sessionInfo.js";
+import { displayState, exportFileName, formatSession } from "../src/client/sessionInfo.js";
 
 const info = {
 	id: "pi-id",
@@ -58,6 +58,24 @@ describe("formatSession", () => {
 			context: { percent: null, window: 200_000 },
 		});
 		assert.match(text, /^context\s+200000 tokens$/m);
+	});
+});
+
+describe("displayState", () => {
+	it("lets error win over waiting", () => {
+		assert.equal(displayState({ state: "error", awaitingUser: true }), "error");
+	});
+
+	it("lets waiting win over every other non-error state", () => {
+		for (const state of ["busy", "idle", "stopped", "starting"]) {
+			assert.equal(displayState({ state, awaitingUser: true }), "waiting");
+		}
+		assert.equal(displayState({ awaitingUser: true }), "waiting");
+	});
+
+	it("otherwise keeps the session state", () => {
+		assert.equal(displayState({ state: "busy" }), "busy");
+		assert.equal(displayState({ state: "stopped", awaitingUser: false }), "stopped");
 	});
 });
 

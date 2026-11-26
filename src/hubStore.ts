@@ -21,7 +21,7 @@ import {
 } from "./sessionIndex.ts";
 import { moveFile, nameFromLines, pathExists, readFromEnd, readHead, uniquePath, SYMBOL_PENDING } from "./jsonl.ts";
 import { type CommandLayer } from "./commands.ts";
-import { clearPendingReasks } from "./pendingReask.ts";
+import { clearPendingReasks, pendingUiKey, readPendingReasks } from "./pendingReask.ts";
 import { detectRepo, realCwd } from "./worktree.ts";
 import type { CommandPolicy, SessionInfo } from "./wire.ts";
 
@@ -185,6 +185,23 @@ export async function list(this: any): Promise<SessionInfo[]> {
 			(entry) => entry.logicalId === info.logicalId || entry.piId === info.id || entry.piIds.includes(info.id),
 		);
 		if (record?.protected) info.protected = true;
+	}
+	// Waiting needs a human: a live blocking request or a recorded re-ask card.
+	// The record is keyed by the logical id, so this also covers a stopped session.
+	const dataDir = this.options.dataDir ?? dirname(this.options.sessionsDir);
+	const reaskByKey = new Map<string, boolean>();
+	for (const info of infos) {
+		const live = this.live.get(info.id);
+		let waiting = (live?.pendingUi?.size ?? 0) > 0;
+		if (!waiting) {
+			const key = pendingUiKey(info);
+			if (!reaskByKey.has(key)) {
+				reaskByKey.set(key, (await readPendingReasks(dataDir, key)).length > 0);
+			}
+			waiting = reaskByKey.get(key) === true;
+		}
+		if (waiting) info.awaitingUser = true;
+		else delete info.awaitingUser;
 	}
 	infos.sort((a, b) => b.lastActivity - a.lastActivity);
 	// One git call per distinct cwd, shared by every session in that repo.
