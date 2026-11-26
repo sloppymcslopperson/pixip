@@ -559,10 +559,13 @@
 	display: flex;
 	flex-direction: column;
 	gap: 7px;
-	max-height: 56dvh;
 	overflow-y: auto;
 	overscroll-behavior: contain;
-	margin-bottom: 10px;
+}
+/* Cards are flex items: without this they shrink to the list height and a long
+   message is clipped instead of scrolling (the same trap as `#log > *`). */
+.inbox-list > * {
+	flex: 0 0 auto;
 }
 .inbox-card {
 	min-width: 0;

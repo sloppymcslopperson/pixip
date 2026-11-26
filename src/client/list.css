@@ -13,13 +13,30 @@
 
 #inbox-page {
 	padding: var(--pad);
+	padding-bottom: calc(var(--pad) + var(--safe-b));
 	display: flex;
 	flex-direction: column;
 	gap: 10px;
-	overflow-y: auto;
+	/* The message list is the only scroller: a nested 56dvh box clipped long
+	   messages and left half the screen blank below them. */
+	overflow: hidden;
 	width: 100%;
 	max-width: 760px;
 	margin-inline: auto;
+	min-height: 0;
+}
+
+#inbox-page .inbox-toolbar {
+	flex: none;
+}
+
+#inbox-page .inbox-list {
+	flex: 1;
+	min-height: 0;
+	max-height: none;
+	margin-bottom: 0;
+	/* Keep the last card clear of a phone's home indicator / browser bar. */
+	padding-bottom: 2px;
 }
 
 .row {
