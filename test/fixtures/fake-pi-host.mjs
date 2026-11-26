@@ -2,7 +2,7 @@
 // Minimal `pixip-pi-host` peer for tests. It speaks the host's protocol deltas
 // (`hello`, blocking `panel`) and the subset of Pi RPC the hub uses. Behaviour is
 // driven by FAKE_HOST_* env vars; it never touches the real agent or sessions.
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 
@@ -38,8 +38,16 @@ log({ type: "spawn", args: argv });
 
 const sessionDir = option("--session-dir") ?? process.cwd();
 let sessionName = option("--name");
-const sessionId = env.FAKE_HOST_SESSION_ID ?? randomUUID();
 const requested = option("--session");
+let sessionId = env.FAKE_HOST_SESSION_ID;
+if (!sessionId && requested && existsSync(requested)) {
+	try {
+		sessionId = JSON.parse(readFileSync(requested, "utf8").split("\n")[0] ?? "{}").id;
+	} catch {
+		// unreadable file: fall through to a fresh id
+	}
+}
+sessionId ??= randomUUID();
 const models = [{ id: "fake-model", provider: "fake", contextWindow: 100_000, reasoning: false }];
 const entries = JSON.parse(env.FAKE_HOST_ENTRIES ?? "[]");
 const onPrompt = JSON.parse(env.FAKE_HOST_ON_PROMPT ?? "[]");

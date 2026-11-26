@@ -131,6 +131,8 @@ interface LiveSession {
 	reaskAsk?: ReaskAsk;
 	/** Consumed `hello` from `pixip-pi-host`; never forwarded as a transcript event. */
 	host?: { protocol?: number; piVersion?: string; capabilities?: string[] };
+	/** Effective backend for this child, used by `/reload` to migrate system-pi sessions. */
+	backend?: "host" | "system";
 	idleTimer?: NodeJS.Timeout;
 	branch?: string;
 	footerTimer?: NodeJS.Timeout;
@@ -498,6 +500,15 @@ export class Hub {
 
 	async abort(id: string): Promise<void> {
 		return await hubControl.abort.apply(this, arguments as any);
+	}
+
+	/**
+	 * Replace one idle session's child from its own JSONL using the daemon's
+	 * current spawn configuration. The logical id, session file and subscribers
+	 * stay put; a failed spawn leaves the old child serving.
+	 */
+	async respawnSession(id: string): Promise<SessionInfo> {
+		return await hubLive.respawnSession.apply(this, arguments as any);
 	}
 
 	async models(id: string): Promise<{ models: ModelSummary[]; current: string | null }> {
