@@ -43,6 +43,27 @@ remote terminal.
 6. **Isolation for development.** `--data-dir` sets `--session-dir`; nothing in
    `~/.pi/agent/sessions` is read or written by tests.
 
+## Live thinking
+
+Pi streams reasoning as `message_update` records whose `assistantMessageEvent`
+is `thinking_start`, `thinking_delta`, or `thinking_end`. The client shows the
+usual `agent is thinking…` marker until text arrives, then turns the marker into
+a disclosure that streams the thought with the same ANSI rendering as the final
+box. Tapping it toggles; if it is open at `message_end`, the final single
+`details.think` box for that assistant message starts open. A message with no
+thinking text keeps the plain, non-clickable marker.
+
+The hub keeps one volatile buffer per attached session for the current assistant
+message (`src/liveThinking.ts`): aggregate text by content block, capped at
+256 KB newest-first, cleared at `message_end`, `tool_execution_start`, and
+`agent_settled`, and never written to disk. The hot path still forwards the
+original Pi record; only attach reads this buffer. After the snapshot the server
+sends one derived `live_thinking` frame so a reloaded page can restore the
+in-progress thought collapsed; a same-tab reconnect keeps its open choice.
+Thinking events carry a monotonic sequence so buffered deltas already folded into
+the derived frame are not appended twice. Completed thoughts are not replayed:
+they come from the normal transcript snapshot.
+
 ## Inline panel surface and A2UI
 
 The inline surface is a dedicated slot between the transcript and the composer,

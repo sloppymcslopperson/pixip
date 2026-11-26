@@ -414,17 +414,23 @@ export function renderAssistant(content, includeTools = true) {
 }
 
 /** Just the inside of an assistant block (no wrapper, no "pi" label). */
-export function renderAssistantBody(content, includeTools = true) {
+export function renderAssistantBody(content, includeTools = true, options = {}) {
 	let html = "";
 	const text = [];
+	const thinking = [];
 	const tools = [];
 	for (const block of content) {
 		if (!block) continue;
 		if (block.type === "text") text.push(block.text ?? "");
-		else if (block.type === "thinking") {
-			const inner = ansiToHtml(block.thinking ?? "");
-			if (inner.trim()) html += `<details class="think"><summary>thinking</summary><div>${inner}</div></details>`;
-		} else if (block.type === "toolCall") tools.push(block);
+		else if (block.type === "thinking") thinking.push(block.thinking ?? "");
+		else if (block.type === "toolCall") tools.push(block);
+	}
+	// One thinking box per assistant message: Pi can split reasoning into several
+	// blocks, but the reader experiences a single thought stream.
+	const thought = thinking.filter((part) => part.length > 0).join("\n\n");
+	const inner = thought ? ansiToHtml(thought) : "";
+	if (inner.trim()) {
+		html += `<details class="think"${options.openThinking === true ? " open" : ""}><summary>thinking</summary><div>${inner}</div></details>`;
 	}
 	const body = markdownToHtml(text.join(""));
 	if (body.trim()) html += `<div class="text">${body}</div>`;

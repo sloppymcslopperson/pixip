@@ -289,6 +289,21 @@ describe("markdown", () => {
 		assert.match(html, /\*\*raw\*\* &lt;i&gt;/);
 		assert.equal(html.includes("<strong>"), false);
 	});
+
+	it("combines several thinking blocks into one box and can keep it open", () => {
+		const html = renderAssistantBody(
+			[
+				{ type: "thinking", thinking: "first" },
+				{ type: "thinking", thinking: "second" },
+				{ type: "text", text: "answer" },
+			],
+			false,
+			{ openThinking: true },
+		);
+		assert.equal((html.match(/<details class="think"/g) ?? []).length, 1);
+		assert.match(html, /<details class="think" open><summary>thinking<\/summary>/);
+		assert.ok(html.indexOf("first") < html.indexOf("second"));
+	});
 });
 
 describe("pending new session", () => {

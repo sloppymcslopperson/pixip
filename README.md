@@ -128,8 +128,9 @@ do in the TUI.
   boilerplate (a command is labeled from the user message it expands into;
   `--title-model` / `PIXIP_TITLE_MODEL` overrides the current session model;
   local fallback), while a manual rename always wins;
-- streamed transcript: user/assistant text, thinking collapsed, tool calls with
-  ANSI output, error styling, durations;
+- streamed transcript: user/assistant text, thinking collapsed into one box per
+  assistant message with an expandable live stream while the agent is thinking,
+  tool calls with ANSI output, error styling, durations;
 - composer: send while idle, steer while streaming, abort via `stop`; a `+`
   menu attaches one image (camera/library, downscaled client-side) or one
   arbitrary file (uploaded under `<data-dir>/uploads/` and handed to Pi as a

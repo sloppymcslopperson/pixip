@@ -46,6 +46,7 @@ export const state = {
 	// session: the transcript window and live event state.
 	stick: true,
 	streaming: null, // { section, text }
+	liveThought: null, // { text, active, expanded } for the current assistant message
 	pendingUser: null,
 	tools: new Map(), // toolCallId -> <details>
 	renderQueued: false,

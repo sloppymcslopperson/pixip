@@ -49,6 +49,7 @@ export function handleSnapshot(frame) {
 		// then repaint from entries so a half-rendered turn or a prompt that
 		// never reached Pi cannot survive as a ghost block.
 		state.streaming = null;
+		state.liveThought = null;
 		state.pendingUser = null;
 	}
 	state.info = frame.session;
@@ -124,6 +125,7 @@ export function handleOpened(frame) {
 			state.more = false;
 			state.tools.clear();
 			state.streaming = null;
+			state.liveThought = null;
 			state.pendingUser = null;
 			deps.clearPendingAttachment();
 			state.bashRunning = false;

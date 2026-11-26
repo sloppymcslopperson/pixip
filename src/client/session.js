@@ -44,6 +44,7 @@ export function showPendingSession() {
 	state.info = null;
 	state.tools.clear();
 	state.streaming = null;
+	state.liveThought = null;
 	state.pendingUser = null;
 	deps.clearPendingAttachment();
 	resetPeerNotice();
@@ -112,6 +113,7 @@ export function openSession(id) {
 	state.restartNoticePending = false;
 	state.tools.clear();
 	state.streaming = null;
+	state.liveThought = null;
 	state.pendingUser = null;
 	deps.clearPendingAttachment();
 	resetPeerNotice();

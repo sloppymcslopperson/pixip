@@ -131,6 +131,11 @@ export function frameSnapshot(
 	return JSON.stringify(frame);
 }
 
+/** A reconnect's live thought, derived from the hub buffer (attach path only). */
+export function frameLiveThinking(thought: { text: string; active: boolean }): string {
+	return JSON.stringify({ t: "live_thinking", text: thought.text, active: thought.active });
+}
+
 /** A blocking request is about to expire; ask the user whether to keep it. */
 export function frameNeedTime(id: string, method: string, title: string, timeoutMs: number): string {
 	return JSON.stringify({ t: "ui_need_time", id, method, title, timeoutMs });

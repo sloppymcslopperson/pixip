@@ -127,6 +127,8 @@ interface LiveSession {
 	bashId?: string;
 	/** Timestamp of the assistant message currently streaming (or last done). */
 	assistantTs?: number;
+	/** Volatile live thinking for the current assistant message. */
+	thinking?: import("./liveThinking.ts").LiveThinkingState;
 	/** The automatic title has already been attempted for this session. */
 	titleAttempted?: boolean;
 	/** First prompt whose title call lost the provider race; retried at settle. */
@@ -138,7 +140,7 @@ interface LiveSession {
 	nameSource?: NameSource;
 }
 
-type Subscriber = (frame: string, key?: string) => void;
+type Subscriber = (frame: string, key?: string, seq?: number) => void;
 
 export { PENDING_UI_GRACE_MS, PENDING_UI_OPEN_MS, REASK_REPLY_MS } from "./pendingReask.ts";
 
@@ -581,6 +583,11 @@ export class Hub {
 
 	subscribe(id: string, subscriber: Subscriber): () => void {
 		return hubSession.subscribe.apply(this, arguments as any);
+	}
+
+	/** Volatile live thinking for a reattaching client, or null before any turn. */
+	liveThinking(id: string): import("./liveThinking.ts").LiveThinkingSnapshot | null {
+		return hubLive.liveThinking.apply(this, arguments as any);
 	}
 
 	/** Timed-out requests recorded for a possible re-ask after resume. */
