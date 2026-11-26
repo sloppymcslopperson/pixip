@@ -1,6 +1,7 @@
 import { dirname, join } from "node:path";
 
 import * as hubControl from "./hubControl.ts";
+import * as hubInbox from "./hubInbox.ts";
 import * as hubLive from "./hubLive.ts";
 import * as hubSession from "./hubSession.ts";
 import * as hubStore from "./hubStore.ts";
@@ -8,6 +9,14 @@ import * as hubWorktree from "./hubWorktree.ts";
 import { PENDING_UI_GRACE_MS, PENDING_UI_OPEN_MS, REASK_REPLY_MS } from "./pendingReask.ts";
 import type { PiBackend } from "./backend.ts";
 import { WINDOW_BYTES, WINDOW_ENTRIES } from "./jsonl.ts";
+import {
+	InboxStore,
+	type InboxFilter,
+	type InboxList,
+	type InboxPurpose,
+	type InboxSummary,
+	type InboxView,
+} from "./inbox.ts";
 import type { CommandLayer } from "./commands.ts";
 import type { CreateWorktreeRequest } from "./worktree.ts";
 import type { RemoveWorktreeRequest, RemoveWorktreeResult, WorktreeListing } from "./hubWorktree.ts";
@@ -82,6 +91,10 @@ export interface HubOptions {
 	titleModel?: string;
 	/** One-shot title call timeout. Default 15 s. */
 	titleTimeoutMs?: number;
+	/** Maximum retained inbox messages; archived then read are evicted first. */
+	inboxLimit?: number;
+	/** Bearer token for the inbox API; absent means the auth seam is off. */
+	inboxToken?: string;
 	log: (message: string) => void;
 }
 
@@ -167,6 +180,10 @@ export class Hub {
 	private readonly startupTrash: Promise<void>;
 	/** Branch per cwd, so list refreshes do not run git every time. */
 	private readonly branchCache = new Map<string, { branch?: string; at: number }>();
+	/** Durable inbox shared by every session and the dashboard. */
+	readonly inboxStore: InboxStore;
+	/** Daemon URL injected into every Pi child, set once the server is listening. */
+	private daemonUrl?: string;
 
 	constructor(options: HubOptions) {
 		this.options = options;
@@ -178,6 +195,11 @@ export class Hub {
 		this.pendingUiOpenTimeoutMs = options.pendingUiOpenTimeoutMs ?? PENDING_UI_OPEN_MS;
 		this.pendingUiMoreTimeMs = options.pendingUiMoreTimeMs ?? 120_000;
 		this.reaskReplyMs = options.reaskReplyMs ?? REASK_REPLY_MS;
+		this.inboxStore = new InboxStore({
+			path: join(dataDir, "inbox.json"),
+			...(options.inboxLimit !== undefined ? { limit: options.inboxLimit } : {}),
+			log: options.log,
+		});
 		this.startupTrash = options.skipStartupTrash ? Promise.resolve() : this.purgeTrashOnStart();
 	}
 
@@ -189,6 +211,55 @@ export class Hub {
 
 	watch(subscriber: Subscriber): () => void {
 		return hubStore.watch.apply(this, arguments as any);
+	}
+
+	/** The running daemon URL; the hub injects it into every Pi child. */
+	setDaemonUrl(url: string): void {
+		this.daemonUrl = url.replace(/\/$/, "");
+	}
+
+	/** URL children receive as `PIXIP_DAEMON_URL`, when the server is up. */
+	get childDaemonUrl(): string | undefined {
+		return this.daemonUrl;
+	}
+
+	get inboxToken(): string | undefined {
+		return this.options.inboxToken;
+	}
+
+	// ------------------------------------------------------------------ inbox
+
+	async inboxSummary(): Promise<InboxSummary> {
+		return await hubInbox.inboxSummary.apply(this, arguments as any);
+	}
+
+	async inboxList(filter: InboxFilter = {}): Promise<InboxList> {
+		return await hubInbox.inboxList.apply(this, arguments as any);
+	}
+
+	async inboxSend(input: {
+		subject: string;
+		body: string;
+		purpose: InboxPurpose;
+		sessionId?: string;
+	}): Promise<InboxView> {
+		return await hubInbox.inboxSend.apply(this, arguments as any);
+	}
+
+	async inboxRead(id: string): Promise<number> {
+		return await hubInbox.inboxRead.apply(this, arguments as any);
+	}
+
+	async inboxArchive(id: string): Promise<void> {
+		return await hubInbox.inboxArchive.apply(this, arguments as any);
+	}
+
+	async inboxRestore(id: string): Promise<void> {
+		return await hubInbox.inboxRestore.apply(this, arguments as any);
+	}
+
+	async inboxDelete(id: string): Promise<void> {
+		return await hubInbox.inboxDelete.apply(this, arguments as any);
 	}
 
 	/** Recompute live peer lists after a create, stop, archive or child exit. */

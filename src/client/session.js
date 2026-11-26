@@ -69,6 +69,8 @@ export function showPendingSession() {
 	ui.stop.hidden = true;
 	ui.back.hidden = false;
 	ui.settings.hidden = true;
+	ui.inboxBar.hidden = true;
+	ui.inboxPage.hidden = true;
 	ui.log.innerHTML = pendingSessionHtml();
 	ui.title.textContent = "new session";
 	ui.sub.textContent = "starting…";
@@ -133,6 +135,8 @@ export function openSession(id) {
 	ui.stop.hidden = false;
 	ui.back.hidden = false;
 	ui.settings.hidden = true;
+	ui.inboxBar.hidden = true;
+	ui.inboxPage.hidden = true;
 	ui.log.textContent = "";
 	state.entries = [];
 	state.more = false;

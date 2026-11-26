@@ -31,6 +31,7 @@ import {
 import { detectRepo, pruneWorktrees, realCwd } from "../src/worktree.ts";
 import type { WorktreeEntry } from "../src/worktree.ts";
 import type { SessionInfo } from "../src/wire.ts";
+import { INBOX_PURPOSES, type InboxList, type InboxView } from "../src/inbox.ts";
 import { spawnEnv } from "../src/spawnEnv.ts";
 
 /**
@@ -45,9 +46,20 @@ import { spawnEnv } from "../src/spawnEnv.ts";
  * serve path; `stop`/`status`/`logs`/`refresh`/`restart` manage it.
  */
 
-type Command = "serve" | "start" | "stop" | "status" | "logs" | "refresh" | "restart" | "worktree" | "protect";
+type Command =
+	"serve" | "start" | "stop" | "status" | "logs" | "refresh" | "restart" | "worktree" | "protect" | "inbox";
 
-const SUBCOMMANDS = new Set<string>(["start", "stop", "status", "logs", "refresh", "restart", "worktree", "protect"]);
+const SUBCOMMANDS = new Set<string>([
+	"start",
+	"stop",
+	"status",
+	"logs",
+	"refresh",
+	"restart",
+	"worktree",
+	"protect",
+	"inbox",
+]);
 
 interface Options {
 	host: string;
@@ -82,6 +94,20 @@ interface Options {
 	whenIdle: boolean;
 	/** `restart --timeout <seconds>` */
 	timeoutS: number;
+	/** Maximum retained inbox messages. */
+	inboxLimit: number;
+	/** Bearer token guarding the inbox API; empty means auth is off. */
+	inboxToken: string;
+	/** `inbox send --subject` */
+	subject: string;
+	/** `inbox send --purpose` */
+	purpose: string;
+	/** `inbox send --quiet` */
+	quiet: boolean;
+	/** `inbox list --unread` */
+	unread: boolean;
+	/** `inbox list --archived` */
+	archived: boolean;
 	/** Internal: this process is the detached restart helper. */
 	detached: boolean;
 	/** Non-flag arguments after the subcommand (`worktree list [<path>]`). */
@@ -129,6 +155,13 @@ function parseArgs(argv: string[]): Options {
 		off: false,
 		whenIdle: false,
 		timeoutS: 300,
+		inboxLimit: 200,
+		inboxToken: process.env["PIXIP_INBOX_TOKEN"] ?? "",
+		subject: "",
+		purpose: "attention-needed",
+		quiet: false,
+		unread: false,
+		archived: false,
 		detached: false,
 		positionals: [],
 	};
@@ -216,6 +249,27 @@ function parseArgs(argv: string[]): Options {
 			case "--timeout":
 				options.timeoutS = Number(next());
 				break;
+			case "--inbox-limit":
+				options.inboxLimit = Number(next());
+				break;
+			case "--inbox-token":
+				options.inboxToken = next();
+				break;
+			case "--subject":
+				options.subject = next();
+				break;
+			case "--purpose":
+				options.purpose = next();
+				break;
+			case "--quiet":
+				options.quiet = true;
+				break;
+			case "--unread":
+				options.unread = true;
+				break;
+			case "--archived":
+				options.archived = true;
+				break;
 			case "--detached":
 				// Internal flag of the restart helper; not part of the public surface.
 				options.detached = true;
@@ -247,6 +301,9 @@ function parseArgs(argv: string[]): Options {
 	}
 	if (!Number.isInteger(options.lines) || options.lines < 1) throw new Error("--lines must be 1 or more");
 	if (!Number.isFinite(options.timeoutS) || options.timeoutS < 0) throw new Error("--timeout must be 0 or more");
+	if (!Number.isInteger(options.inboxLimit) || options.inboxLimit < 1) {
+		throw new Error("--inbox-limit must be an integer of 1 or more");
+	}
 	if (options.piHost === undefined && process.env["PIXIP_PI_HOST"]) {
 		options.piHost = process.env["PIXIP_PI_HOST"];
 	}
@@ -277,6 +334,11 @@ function printHelp(): void {
   --title-model <p/id> model for the automatic 3-5 word session label
                       (default: the session's current model; env: PIXIP_TITLE_MODEL)
   --dev               re-read client assets per request (no restart on CSS/JS edits)
+  --inbox-limit <n>   maximum retained inbox messages (default 200; archived
+                      then read messages are evicted first)
+  --inbox-token <t>   require Authorization: Bearer <t> on the inbox API and
+                      pass PIXIP_INBOX_TOKEN to Pi children (default: off;
+                      env: PIXIP_INBOX_TOKEN)
   --allow-command <name>
                       allow only these commands (repeatable); merged with
                       <data-dir>/pixip.json and <cwd>/.pixip.json, which can
@@ -312,9 +374,38 @@ Commands:
                       restarts and archive/restore; manual archive still works
   worktree <list|remove|prune>
                       inspect or remove git worktrees (see 'pixip worktree --help')
+  inbox <send|list|read|archive|delete>
+                      durable messages from agents, readable in the dashboard
+                      (see 'pixip inbox --help')
 
 Options:
 ${serveOptions}
+`;
+	process.stdout.write(usage);
+}
+
+function printInboxHelp(): void {
+	const usage = `Usage: pixip inbox <command> [options]
+
+Commands:
+  send --subject <text> [--purpose <purpose>] [--quiet] <body>
+                      post one message. Purpose is attention-needed (default),
+                      deliverable, extra-info or no-rush. Inside a pixip session
+                      the sender is the calling session (PIXIP_SESSION_ID);
+                      otherwise it is labelled "local shell"
+  list [--unread] [--archived] [--json]
+                      newest first; archived messages are hidden by default
+  read <id|all>       mark one message read, or every unread message
+  archive <id>        hide a message; restore it from the dashboard
+  delete <id>         remove a message permanently
+
+The command talks to the daemon at PIXIP_DAEMON_URL when set, otherwise to
+the running daemon for --data-dir. It never edits <data-dir>/inbox.json.
+
+Options:
+  --data-dir <path>   isolation root used to find the running daemon
+                      (default ./tmp/dev)
+  --json              machine-readable output for list
 `;
 	process.stdout.write(usage);
 }
@@ -366,7 +457,10 @@ function serveArgs(options: Options): string[] {
 		String(options.pendingUiOpenTimeoutMs),
 		"--pending-ui-more-time-ms",
 		String(options.pendingUiMoreTimeMs),
+		"--inbox-limit",
+		String(options.inboxLimit),
 	];
+	if (options.inboxToken) args.push("--inbox-token", options.inboxToken);
 	if (options.piHost !== undefined) {
 		args.push("--pi-host");
 		if (options.piHost) args.push(options.piHost);
@@ -389,6 +483,15 @@ async function main(): Promise<void> {
 		}
 		const options = parseArgs(argv);
 		return await cmdWorktree(action, options);
+	}
+	if (command === "inbox") {
+		const action = argv.shift();
+		if (!action || action === "--help" || action === "-h" || action === "help") {
+			printInboxHelp();
+			return;
+		}
+		const options = parseArgs(argv);
+		return await cmdInbox(action, options);
 	}
 	const options = parseArgs(argv);
 	if (options.positionals.length > 0 && command !== "protect") {
@@ -461,6 +564,8 @@ async function serve(options: Options): Promise<void> {
 		pendingUiOpenTimeoutMs: options.pendingUiOpenTimeoutMs,
 		pendingUiMoreTimeMs: options.pendingUiMoreTimeMs,
 		titleModel: options.titleModel,
+		inboxLimit: options.inboxLimit,
+		...(options.inboxToken ? { inboxToken: options.inboxToken } : {}),
 		extraPiArgs: [],
 		cliCommands: {
 			allow: options.allowCommands,
@@ -479,6 +584,7 @@ async function serve(options: Options): Promise<void> {
 		log,
 		dev: options.dev,
 	});
+	hub.setDaemonUrl(server.url);
 
 	// The state file is what `status`, `stop`, `refresh` and `restart` read; it
 	// records the actual port (so `--port 0` works) and the serve flags.
@@ -815,6 +921,165 @@ async function cmdRestart(options: Options): Promise<void> {
 			return;
 		}
 		await delay(100);
+	}
+}
+
+// ------------------------------------------------------------------ inbox
+
+interface InboxTarget {
+	url: string;
+	token?: string;
+}
+
+async function inboxTarget(options: Options): Promise<InboxTarget> {
+	const fromEnv = process.env["PIXIP_DAEMON_URL"]?.trim();
+	if (fromEnv)
+		return {
+			url: fromEnv.endsWith("/") ? fromEnv : `${fromEnv}/`,
+			token: process.env["PIXIP_INBOX_TOKEN"] || undefined,
+		};
+	const state = await runningDaemon(options.dataDir);
+	if (!state) {
+		throw new Error(`pixip is not running for ${options.dataDir}; start it with \`pixip start\``);
+	}
+	return { url: state.url, token: process.env["PIXIP_INBOX_TOKEN"] || undefined };
+}
+
+async function inboxRequest<T>(options: Options, path: string, init: RequestInit = {}): Promise<T> {
+	const target = await inboxTarget(options);
+	const headers = new Headers(init.headers);
+	if (target.token) headers.set("authorization", `Bearer ${target.token}`);
+	let response: Response;
+	try {
+		response = await fetch(new URL(path, target.url), { ...init, headers, signal: AbortSignal.timeout(10_000) });
+	} catch (error) {
+		throw new Error(`cannot reach pixip at ${target.url}: ${(error as Error).message}`);
+	}
+	const text = await response.text();
+	let body: unknown = {};
+	try {
+		body = text ? JSON.parse(text) : {};
+	} catch {
+		body = {};
+	}
+	if (!response.ok) {
+		const message = (body as { error?: unknown }).error;
+		throw new Error(typeof message === "string" ? message : `request failed (${response.status})`);
+	}
+	return body as T;
+}
+
+async function inboxMessages(options: Options, includeArchived = true): Promise<InboxList> {
+	const query = includeArchived ? "?all=1&filter=all" : "?filter=all";
+	return await inboxRequest<InboxList>(options, `api/inbox${query}`);
+}
+
+/** Users copy the short ids the list prints, so resolve a unique prefix locally. */
+async function resolveInboxId(options: Options, target: string): Promise<string> {
+	const list = await inboxMessages(options, true);
+	if (list.messages.some((message) => message.id === target)) return target;
+	const matches = list.messages.filter((message) => message.id.startsWith(target));
+	if (matches.length === 1 && matches[0]) return matches[0].id;
+	if (matches.length > 1) throw new Error(`ambiguous inbox id ${target}`);
+	throw new Error(`unknown inbox message ${target}`);
+}
+
+function formatInboxTable(messages: InboxView[]): string {
+	const headers = ["ID", "PURPOSE", "FROM", "STATUS", "WHEN", "SUBJECT"];
+	const data = messages.map((message) => [
+		message.id.slice(0, 8),
+		message.purpose,
+		message.sender.name,
+		message.senderStatus,
+		message.createdAt.slice(0, 16).replace("T", " "),
+		`${message.readAt ? "" : "● "}${message.subject}${message.archivedAt ? " (archived)" : ""}`,
+	]);
+	const widths = headers.map((header, index) => Math.max(header.length, ...data.map((row) => row[index]?.length ?? 0)));
+	const line = (cells: string[]) =>
+		cells.map((cell, index) => (index === cells.length - 1 ? cell : cell.padEnd(widths[index] ?? 0))).join("  ");
+	return [line(headers), line(widths.map((width) => "-".repeat(width))), ...data.map(line)].join("\n") + "\n";
+}
+
+async function cmdInboxSend(options: Options): Promise<void> {
+	const body = options.positionals.join(" ").trim();
+	if (!options.subject.trim() || !body) {
+		throw new Error("usage: pixip inbox send --subject <text> [--purpose <purpose>] <body>");
+	}
+	if (!(INBOX_PURPOSES as readonly string[]).includes(options.purpose)) {
+		throw new Error(`--purpose must be one of ${INBOX_PURPOSES.join(", ")}`);
+	}
+	const result = await inboxRequest<{ message: InboxView }>(options, "api/inbox", {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({
+			subject: options.subject,
+			body,
+			purpose: options.purpose,
+			...(callerSession() ? { sessionId: callerSession() } : {}),
+		}),
+	});
+	if (!options.quiet) {
+		process.stdout.write(
+			`sent ${result.message.id.slice(0, 8)} · ${result.message.purpose} · ${result.message.subject}\n`,
+		);
+	}
+}
+
+async function cmdInboxList(options: Options): Promise<void> {
+	if (options.positionals.length > 0) throw new Error("usage: pixip inbox list [--unread] [--archived] [--json]");
+	const params = new URLSearchParams({ filter: options.unread ? "unread" : "all" });
+	if (options.archived) params.set("archived", "1");
+	const list = await inboxRequest<InboxList>(options, `api/inbox?${params.toString()}`);
+	if (options.json) {
+		process.stdout.write(`${JSON.stringify(list)}\n`);
+		return;
+	}
+	process.stdout.write(list.messages.length > 0 ? formatInboxTable(list.messages) : "inbox is empty\n");
+}
+
+async function cmdInboxRead(options: Options): Promise<void> {
+	if (options.positionals.length !== 1) throw new Error("usage: pixip inbox read <id|all>");
+	const target = options.positionals[0] as string;
+	if (target === "all") {
+		const result = await inboxRequest<{ read: number }>(options, "api/inbox/read-all", { method: "POST" });
+		process.stdout.write(`marked ${result.read} message(s) read\n`);
+		return;
+	}
+	const id = await resolveInboxId(options, target);
+	const result = await inboxRequest<{ read: number }>(options, `api/inbox/${encodeURIComponent(id)}/read`, {
+		method: "POST",
+	});
+	process.stdout.write(result.read > 0 ? `marked ${id.slice(0, 8)} read\n` : `${id.slice(0, 8)} was already read\n`);
+}
+
+async function cmdInboxArchive(options: Options): Promise<void> {
+	if (options.positionals.length !== 1) throw new Error("usage: pixip inbox archive <id>");
+	const id = await resolveInboxId(options, options.positionals[0] as string);
+	await inboxRequest(options, `api/inbox/${encodeURIComponent(id)}/archive`, { method: "POST" });
+	process.stdout.write(`archived ${id.slice(0, 8)}\n`);
+}
+
+async function cmdInboxDelete(options: Options): Promise<void> {
+	if (options.positionals.length !== 1) throw new Error("usage: pixip inbox delete <id>");
+	const id = await resolveInboxId(options, options.positionals[0] as string);
+	await inboxRequest(options, `api/inbox/${encodeURIComponent(id)}`, { method: "DELETE" });
+	process.stdout.write(`deleted ${id.slice(0, 8)}\n`);
+}
+
+async function cmdInbox(action: string, options: Options): Promise<void> {
+	switch (action) {
+		case "send":
+			return await cmdInboxSend(options);
+		case "list":
+			return await cmdInboxList(options);
+		case "read":
+			return await cmdInboxRead(options);
+		case "archive":
+			return await cmdInboxArchive(options);
+		case "delete":
+			return await cmdInboxDelete(options);
+		default:
+			throw new Error(`unknown inbox command ${action}`);
 	}
 }
 

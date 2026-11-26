@@ -36,6 +36,7 @@ export const state = {
 	restartNoticePending: false, // paint the interruption notice after the reconnect snapshot
 
 	// dashboard: the session list and its directory/settings state.
+	inbox: { unread: 0, total: 0, limit: 200, newest: null }, // live badge summary from the hub
 	home: "", // $HOME for dashboard path shortening (device-local cache)
 	defaultCwd: "", // last discovery value, so list refreshes do not clear the form
 	sessions: [], // last dashboard list, for local re-renders

@@ -88,6 +88,79 @@ textarea {
 	text-overflow: ellipsis;
 }
 
+/* Dashboard inbox bar: newest-message preview and the live unread badge. */
+.inbox-bar {
+	position: fixed;
+	inset: auto 0 0 0;
+	z-index: 15;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	text-align: left;
+	padding: 9px max(var(--pad), calc((100% - 760px) / 2));
+	padding-bottom: calc(9px + var(--safe-b));
+	background: color-mix(in srgb, var(--bg-raised) 96%, transparent);
+	backdrop-filter: blur(8px);
+	border: 0;
+	border-top: 1px solid var(--line);
+	color: inherit;
+	box-shadow: 0 -8px 24px #0006;
+}
+.inbox-bar:hover .inbox-bar-subject {
+	color: var(--accent);
+}
+.inbox-bar-icon {
+	flex: none;
+	color: var(--fg-dim);
+	font-size: 16px;
+	line-height: 1;
+}
+.inbox-bar-text {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+.inbox-bar-subject {
+	font-size: 12.5px;
+	font-weight: 600;
+	color: var(--fg);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.inbox-bar-preview {
+	font-size: 11px;
+	color: var(--fg-dim);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.inbox-badge {
+	flex: none;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 18px;
+	height: 18px;
+	padding: 0 5px;
+	border-radius: 999px;
+	background: var(--accent);
+	color: #16141f;
+	font-size: 10.5px;
+	font-weight: 700;
+	line-height: 18px;
+	text-align: center;
+}
+.inbox-badge.warn {
+	background: var(--warn);
+}
+.inbox-badge.full {
+	background: var(--err);
+}
+
 .ghost {
 	background: none;
 	border: 1px solid transparent;

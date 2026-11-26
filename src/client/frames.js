@@ -13,6 +13,7 @@ import { renderList } from "./dashboardList.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
 import { renderMenu, restoreClearedQueue } from "./menu.js";
+import { applyInboxFrame } from "./inbox.js";
 import { openExportSheet, openModelSheet, openThinkingSheet, openTreeSheet } from "./sheets.js";
 import { dropSurface, handleNeedTime, handleReasks } from "./surface.js";
 import { applyFullEntry, applyLiveThinking, handleEvent, prependHistory, renderTranscript } from "./transcript.js";
@@ -71,6 +72,9 @@ export function handleFrame(fromSessionId, frame) {
 		return;
 	}
 	switch (frame.t) {
+		case "inbox":
+			applyInboxFrame(frame.inbox);
+			break;
 		case "hello":
 			if (!state.sessionId) {
 				if (typeof frame.defaultCwd === "string") state.defaultCwd = frame.defaultCwd;

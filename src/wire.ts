@@ -7,6 +7,8 @@
  * to `serde_json::value::RawValue` in Rust without a translation layer.
  */
 
+import type { InboxSummary } from "./inbox.ts";
+
 export const WIRE_VERSION = 1;
 
 /** Everything the TUI footer shows, unformatted: the client formats it. */
@@ -229,6 +231,11 @@ export function frameCommands(commands: DynamicCommand[]): string {
 
 export function frameHello(sessions: SessionInfo[], defaultCwd?: string, home?: string): string {
 	return JSON.stringify({ t: "hello", v: WIRE_VERSION, sessions, defaultCwd, home });
+}
+
+/** Badge frame for the dashboard: unread count, cap state and newest summary. */
+export function frameInbox(inbox: InboxSummary): string {
+	return JSON.stringify({ t: "inbox", inbox });
 }
 
 /**

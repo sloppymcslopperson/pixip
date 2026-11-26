@@ -1,6 +1,7 @@
 /* ---- list ---- */
 #list {
 	padding: var(--pad);
+	padding-bottom: calc(var(--pad) + 74px + var(--safe-b));
 	display: flex;
 	flex-direction: column;
 	gap: 8px;
@@ -9,6 +10,18 @@
 	max-width: 760px;
 	margin-inline: auto;
 }
+
+#inbox-page {
+	padding: var(--pad);
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	overflow-y: auto;
+	width: 100%;
+	max-width: 760px;
+	margin-inline: auto;
+}
+
 .row {
 	display: flex;
 	align-items: stretch;

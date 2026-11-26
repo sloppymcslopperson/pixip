@@ -1,0 +1,44 @@
+{
+	"name": "pixip-inbox",
+	"version": "0.1.0",
+	"private": true,
+	"description": "inbox_send: let a Pi agent leave a durable message in the pixip dashboard inbox",
+	"type": "module",
+	"license": "Unlicense",
+	"keywords": [
+		"pi-package",
+		"pi",
+		"extension",
+		"inbox",
+		"pixip"
+	],
+	"pi": {
+		"extensions": [
+			"./src/index.ts"
+		]
+	},
+	"files": [
+		"src",
+		"README.md"
+	],
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"scripts": {
+		"test": "node --test test/*.test.ts",
+		"typecheck": "tsc --noEmit",
+		"lint": "eslint .",
+		"format:check": "prettier --check .",
+		"check": "npm run typecheck && npm run lint && npm run format:check && npm test"
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*",
+		"typebox": "*"
+	},
+	"devDependencies": {
+		"@earendil-works/pi-coding-agent": "1.5.2",
+		"@types/node": "^22.19.0",
+		"typebox": "*",
+		"typescript": "^5.9.0"
+	}
+}

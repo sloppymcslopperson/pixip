@@ -304,6 +304,8 @@ export async function spawn(
 			PIXIP_SESSION_ID: logicalId,
 			PIXIP_INSIDE: "1",
 			...(this.options.dataDir ? { PIXIP_DATA_DIR: this.options.dataDir } : {}),
+			...(this.childDaemonUrl ? { PIXIP_DAEMON_URL: this.childDaemonUrl } : {}),
+			...(this.inboxToken ? { PIXIP_INBOX_TOKEN: this.inboxToken } : {}),
 		},
 		onRecord: (raw, record) => this.onRecord(info, raw, record),
 		onStderr: (chunk) => this.options.log(`[${host ? "host" : "pi"} ${input.cwd}] ${chunk.trimEnd()}`),
