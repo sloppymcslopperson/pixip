@@ -4,6 +4,7 @@
 import { addonStatusText, addonWidgets } from "./addonUi.js";
 import { contextLevel, footerPwdLine, footerStatsLeft, footerStatsRight } from "./footer.js";
 import { ansiToHtml, escapeHtml } from "./render.js";
+import { displayState } from "./sessionInfo.js";
 import { openSession } from "./navigation.js";
 import { scrollToEnd } from "./scroll.js";
 import { refreshComposerState } from "./sendState.js";
@@ -97,18 +98,20 @@ export function applyInfo() {
 	if (!info) return;
 	const restarting = state.restarting;
 	const name = info.name ?? info.id.slice(0, 8);
+	const viewState = displayState(info);
+	const stateLabel = viewState === "waiting" ? "waiting for you" : info.state;
 	ui.title.textContent = name;
 	document.title = `${name} · pixip`;
 	// Separators live inside the `.wide` wrapper so hiding it on narrow screens
 	// does not leave dangling "· ·" separators behind.
-	let subtitle = escapeHtml(restarting ? "restarting…" : info.state);
+	let subtitle = escapeHtml(restarting ? "restarting…" : stateLabel);
 	const wide = [info.model, info.thinkingLevel].filter(Boolean).map((part) => escapeHtml(part));
 	if (wide.length > 0) subtitle += ` · <span class="wide">${wide.join(" · ")}</span>`;
 	if (info.messageCount) subtitle += ` · ${info.messageCount} msg`;
 	ui.sub.innerHTML = subtitle;
-	ui.sub.title = [restarting ? "restarting" : info.state, info.model, info.thinkingLevel].filter(Boolean).join(" · ");
+	ui.sub.title = [restarting ? "restarting" : stateLabel, info.model, info.thinkingLevel].filter(Boolean).join(" · ");
 	ui.dot.hidden = false;
-	ui.dot.className = `dot ${restarting ? "busy" : info.state}`;
+	ui.dot.className = `dot ${restarting ? "busy" : viewState}`;
 	const stopped = !restarting && (info.state === "stopped" || info.state === "error");
 	const starting = !restarting && info.state === "starting";
 	if (stopped || starting) hideThinkingIndicator();

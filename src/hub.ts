@@ -824,6 +824,11 @@ export class Hub {
 		hubLive.emitStatus.apply(this, arguments as any);
 	}
 
+	/** Recompute `awaitingUser` and refresh both status and sessions when it changes. */
+	private async refreshAwaitingUser(live: LiveSession): Promise<void> {
+		return await hubLive.refreshAwaitingUser.apply(this, arguments as any);
+	}
+
 	/** Fresh `sessions` frame to the list sockets after a soft refresh. */
 	private broadcastList(infos: SessionInfo[]): void {
 		hubLive.broadcastList.apply(this, arguments as any);

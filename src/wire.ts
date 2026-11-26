@@ -100,6 +100,8 @@ export interface SessionInfo {
 	peers?: SessionPeer[];
 	/** Excluded from the dashboard bulk archive; set by the session itself or a user. */
 	protected?: boolean;
+	/** A blocking UI request or a recorded re-ask card still needs a human answer. */
+	awaitingUser?: boolean;
 	lastActivity: number;
 }
 

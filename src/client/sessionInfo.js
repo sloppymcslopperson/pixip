@@ -55,6 +55,17 @@ export function formatSession(info, footer) {
 }
 
 /**
+ * The state a dot and row label should show. An error always wins, then a
+ * session waiting on a human (a blocking request or a recorded re-ask card).
+ * Pure so the header and dashboard cannot disagree.
+ */
+export function displayState(info) {
+	if (info?.state === "error") return "error";
+	if (info?.awaitingUser === true) return "waiting";
+	return info?.state ?? "stopped";
+}
+
+/**
  * Download filename for `/export` (08): a slug of the session name plus a short
  * id, never the raw id or any path separator. Deterministic for the same info.
  */

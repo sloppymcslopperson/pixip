@@ -35,7 +35,12 @@ remote terminal.
    (default yes), and records the raw request under
    `<data-dir>/pending-ui/<logical-id>.json`. Reopening the session shows a
    read-only re-ask card; the button prompts the agent to issue the same call
-   again. The client renders active requests in a collapsible inline surface
+   again. A live pending request or a recorded re-ask (even for a stopped
+   session) sets `SessionInfo.awaitingUser`; the header subtitle says
+   `waiting for you` with a pink-red dot, and dashboard rows use the same dot.
+   `error` outranks waiting, which outranks `idle`, `busy`, `stopped` and
+   `starting`; both status and sessions frames are refreshed when it changes.
+   The client renders active requests in a collapsible inline surface
    between `#log` and the composer, not as a modal: history stays scrollable,
    the composer is hidden while any blocking request is up, and a second
    pending request is queued behind a Replace banner. App-owned sheets stay
