@@ -48,6 +48,8 @@ export interface ServerOptions {
 	log: (message: string) => void;
 	/** Re-read client assets per request, so CSS/JS edits need no restart. */
 	dev?: boolean;
+	/** Replace the daemon through the detached restart helper. */
+	restart?: () => Promise<void>;
 }
 
 export interface RunningServer {
@@ -73,6 +75,9 @@ interface ServerState {
 	nonce: string;
 	refresh: () => Promise<RefreshReport>;
 	reload: () => Promise<ReloadReport>;
+	/** Browser-only `/pixup-restart`: one replacement at a time. */
+	restart?: () => Promise<void>;
+	restarting: boolean;
 }
 
 const LOOPBACK = /^(127\.|::1$|::ffff:127\.)/;
@@ -167,6 +172,8 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
 		assets: await loadAssets(options.clientDir),
 		startedAt: Date.now(),
 		reloads: 0,
+		restarting: false,
+		...(options.restart ? { restart: options.restart } : {}),
 		nonce: randomBytes(16).toString("hex"),
 		refresh: async () => {
 			// Hub caches first (policy is re-resolved for live sessions); only then
@@ -881,6 +888,38 @@ async function handleCommand(
 				}
 				const report = await state.reload();
 				if (!report.ok) send(frameNotice(report.message));
+				return;
+			}
+			case "restart": {
+				const nonce = typeof message["nonce"] === "string" ? message["nonce"] : "";
+				if (nonce.length === 0 || nonce !== state.nonce) {
+					log("restart refused: missing or stale browser nonce");
+					send(frameNotice("restart refused: this page has a stale nonce; reload the page and try again"));
+					return;
+				}
+				if (state.restarting) {
+					send(frameNotice("restart already in progress", { restart: true, status: "refused" }));
+					return;
+				}
+				const force = message["force"] === true;
+				const blockers = hub.restartBlockers();
+				if (blockers.length > 0 && !force) {
+					const names = blockers.map((blocker) => `${blocker.name ?? blocker.id} (${blocker.reason})`).join(", ");
+					const text = `restart refused: ${names}`;
+					log(text);
+					send(frameNotice(text, { restart: true, status: "refused", blockers }));
+					return;
+				}
+				if (!state.restart) {
+					send(frameNotice("restart is unavailable in this daemon", { restart: true, status: "refused" }));
+					return;
+				}
+				state.restarting = true;
+				const names = blockers.map((blocker) => blocker.name ?? blocker.id).join(", ");
+				const text = force && blockers.length > 0 ? `restarting — interrupting ${names}` : "restarting…";
+				log(text);
+				send(frameNotice(text, { restart: true, status: "ok" }));
+				await state.restart();
 				return;
 			}
 			default:

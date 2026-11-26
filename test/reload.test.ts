@@ -22,7 +22,7 @@ import {
 
 async function boot(
 	paths: TestPaths,
-	options: { dev?: boolean; host?: boolean; env?: Record<string, string> } = {},
+	options: { dev?: boolean; host?: boolean; env?: Record<string, string>; restart?: () => Promise<void> } = {},
 ): Promise<{ hub: Hub; server: RunningServer }> {
 	const hub = hubFor(paths, {
 		...(options.host ? { piHostBin: HOST_FIXTURE } : {}),
@@ -35,6 +35,7 @@ async function boot(
 		clientDir: paths.clientDir,
 		log: (message) => paths.logs.push(message),
 		dev: options.dev ?? false,
+		...(options.restart ? { restart: options.restart } : {}),
 	});
 	return { hub, server };
 }
@@ -213,6 +214,68 @@ describe("daemon-wide /reload", () => {
 			inbox.ws.send(JSON.stringify({ t: "reload", nonce: nonceFrom(await page(server.url)) }));
 			await waitFor(() => inbox.frames.filter((frame) => frame["t"] === "notice").length >= 2);
 			assert.equal((await server.reload()).ok, true);
+		} finally {
+			inbox.close();
+			await server.close();
+			await hub.shutdown();
+		}
+	});
+});
+
+describe("/pixup-restart", () => {
+	it("refuses with the blocking sessions unless force is set", async () => {
+		const paths = await fixtureRoot("pixip-restart-");
+		await writeFile(join(paths.clientDir, "index.html"), "v1");
+		let restarted = false;
+		const { hub, server } = await boot(paths, {
+			env: { FAKE_PI_IS_STREAMING: "1" },
+			restart: () => {
+				restarted = true;
+				return Promise.resolve();
+			},
+		});
+		const created = await hub.create(paths.dir);
+		const inbox = await connect(server.url, created.id);
+		try {
+			await waitFor(() => inbox.frames.some((frame) => frame["t"] === "snapshot"));
+			inbox.ws.send(JSON.stringify({ t: "restart", nonce: nonceFrom(await page(server.url)) }));
+			await waitFor(() => inbox.frames.some((frame) => frame["t"] === "notice"));
+			const refusal = inbox.frames.find((frame) => frame["t"] === "notice");
+			assert.equal(refusal?.["restart"], true);
+			assert.equal(refusal?.["status"], "refused");
+			assert.match(String(refusal?.["text"]), /restart refused/);
+			assert.equal((refusal?.["blockers"] as unknown[]).length, 1);
+			assert.equal(restarted, false);
+
+			inbox.ws.send(JSON.stringify({ t: "restart", nonce: nonceFrom(await page(server.url)), force: true }));
+			await waitFor(() => inbox.frames.some((frame) => frame["t"] === "notice" && frame["status"] === "ok"));
+			assert.equal(restarted, true);
+		} finally {
+			inbox.close();
+			await hub.stop(created.id).catch(() => {});
+			await server.close();
+			await hub.shutdown();
+		}
+	});
+
+	it("rejects a stale nonce without invoking the restart helper", async () => {
+		const paths = await fixtureRoot("pixip-restart-");
+		await writeFile(join(paths.clientDir, "index.html"), "v1");
+		let restarted = false;
+		const { hub, server } = await boot(paths, {
+			restart: () => {
+				restarted = true;
+				return Promise.resolve();
+			},
+		});
+		const inbox = await connect(server.url);
+		try {
+			await waitFor(() => inbox.frames.some((frame) => frame["t"] === "hello"));
+			inbox.ws.send(JSON.stringify({ t: "restart", nonce: "stale" }));
+			await waitFor(() => inbox.frames.some((frame) => frame["t"] === "notice"));
+			const notice = inbox.frames.find((frame) => frame["t"] === "notice");
+			assert.match(String(notice?.["text"]), /stale nonce/);
+			assert.equal(restarted, false);
 		} finally {
 			inbox.close();
 			await server.close();

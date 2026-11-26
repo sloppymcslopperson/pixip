@@ -10,6 +10,11 @@ function nonce() {
 	return document.querySelector('meta[name="pixip-reload-nonce"]')?.getAttribute("content") ?? "";
 }
 
+/** The per-daemon capability both `/reload` and `/pixup-restart` send back. */
+export function reloadNonce() {
+	return nonce();
+}
+
 /** Ask the daemon to reload assets and every live child. */
 export function sendReload() {
 	if (!state.sessionId) return;

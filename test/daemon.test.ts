@@ -221,15 +221,15 @@ describe("daemon lifecycle", () => {
 		await cli(["stop", "--data-dir", dir]);
 	});
 
-	it("turns stop from inside a pixip session into a restart", async () => {
+	it("refuses stop from inside a pixip session instead of replacing the daemon", async () => {
 		const dir = await tempRoot("pixip-daemon-");
 		const { pid } = await daemon(dir);
 		const result = await cli(["stop", "--data-dir", dir], { PIXIP_INSIDE: "1" });
-		assert.equal(result.code, 0, result.stderr);
-		assert.match(result.stderr, /restarting instead/);
+		assert.equal(result.code, 2, result.stderr);
+		assert.match(result.stderr, /stop is user-only inside a pixip session/);
 		const state = await readDaemonState(dir);
-		assert.ok(state && state.pid !== pid);
-		assert.equal(pidAlive(pid), false);
+		assert.equal(state?.pid, pid);
+		assert.equal(pidAlive(pid), true);
 		// From a normal shell the same command really stops it.
 		const stopped = await cli(["stop", "--data-dir", dir]);
 		assert.equal(stopped.code, 0, stopped.stderr);
@@ -237,11 +237,11 @@ describe("daemon lifecycle", () => {
 		assert.equal(await runningDaemon(dir), undefined);
 	});
 
-	it("does not start a daemon when an inside stop finds none running", async () => {
+	it("refuses an inside stop even when no daemon is running", async () => {
 		const dir = await tempRoot("pixip-daemon-");
 		const result = await cli(["stop", "--data-dir", dir], { PIXIP_INSIDE: "1" });
-		assert.equal(result.code, 0, result.stderr);
-		assert.match(result.stdout, /not running/);
+		assert.equal(result.code, 2, result.stderr);
+		assert.match(result.stderr, /stop is user-only inside a pixip session/);
 		assert.equal(await runningDaemon(dir), undefined);
 	});
 
@@ -461,6 +461,13 @@ describe("hard restart", () => {
 		assert.ok(frames.some((frame) => frame["t"] === "restarting"));
 		const state = await readDaemonState(dir);
 		assert.ok(state && state.pid !== pid);
+
+		// The new daemon reattaches the pre-restart live set before any browser
+		// reconnects, so the dashboard's hot/warm grouping does not change.
+		await waitFor(async () => {
+			const sessions = await fetchSessions(state.url).catch(() => []);
+			return sessions.some((session) => session.logicalId === logicalId && session.state !== "stopped");
+		}, 15_000);
 
 		// Reconnect with the durable cursor: the new daemon reattaches the same
 		// logical session and the delta is empty, so the known entry is not painted

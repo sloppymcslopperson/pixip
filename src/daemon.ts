@@ -31,6 +31,8 @@ export const STATE_FILE = "pixip.state.json";
 export const LOG_FILE = "pixip.log";
 /** Last `pixip reload` result, written by the daemon for the polling CLI. */
 export const RELOAD_FILE = "pixip.reload.json";
+/** Logical sessions to reattach after a restart, so the hot set looks unchanged. */
+export const RESUME_FILE = "pixip.resume.json";
 
 export interface DaemonState {
 	pid: number;
@@ -51,6 +53,7 @@ export interface DaemonPaths {
 	state: string;
 	log: string;
 	reload: string;
+	resume: string;
 }
 
 export interface Health {
@@ -73,6 +76,7 @@ export function daemonPaths(dataDir: string): DaemonPaths {
 		state: join(dataDir, STATE_FILE),
 		log: join(dataDir, LOG_FILE),
 		reload: join(dataDir, RELOAD_FILE),
+		resume: join(dataDir, RESUME_FILE),
 	};
 }
 
@@ -82,6 +86,53 @@ export async function writeReloadResult(dataDir: string, report: ReloadReport): 
 	const temp = `${path}.${process.pid}.tmp`;
 	await writeFile(temp, `${JSON.stringify(report, null, 2)}\n`);
 	await rename(temp, path);
+}
+
+/** Which sessions were hot/warm at restart time, keyed by stable logical id. */
+export interface ResumeSet {
+	at: string;
+	sessions: string[];
+}
+
+/** Sessions that had a live child and should come back after a restart. */
+export function liveSessionIds(sessions: SessionInfo[]): string[] {
+	return sessions
+		.filter((session) => session.state === "idle" || session.state === "busy" || session.state === "starting")
+		.map((session) => session.logicalId ?? session.id)
+		.filter((id): id is string => Boolean(id));
+}
+
+/** Persist the pre-restart live set atomically; an empty set removes the file. */
+export async function writeResumeSet(dataDir: string, sessions: string[]): Promise<void> {
+	const path = daemonPaths(dataDir).resume;
+	if (sessions.length === 0) {
+		await unlink(path).catch(() => {});
+		return;
+	}
+	const temp = `${path}.${process.pid}.tmp`;
+	await mkdir(dataDir, { recursive: true });
+	await writeFile(temp, `${JSON.stringify({ at: new Date().toISOString(), sessions }, null, 2)}\n`);
+	await rename(temp, path);
+}
+
+/** Read and consume the resume set: only the daemon that replaces the old one sees it. */
+export async function takeResumeSet(dataDir: string): Promise<string[]> {
+	const path = daemonPaths(dataDir).resume;
+	let text: string;
+	try {
+		text = await readFile(path, "utf8");
+	} catch {
+		return [];
+	}
+	await unlink(path).catch(() => {});
+	try {
+		const raw = JSON.parse(text) as Partial<ResumeSet>;
+		return Array.isArray(raw.sessions)
+			? raw.sessions.filter((id): id is string => typeof id === "string" && id.length > 0)
+			: [];
+	} catch {
+		return [];
+	}
 }
 
 /** The script a detached daemon runs: this package's own bin entry. */

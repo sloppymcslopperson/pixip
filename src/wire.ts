@@ -8,6 +8,7 @@
  */
 
 import type { InboxSummary } from "./inbox.ts";
+import type { ReloadBlocker } from "./reload.ts";
 
 export const WIRE_VERSION = 1;
 
@@ -212,9 +213,13 @@ export function frameRestarting(): string {
 /**
  * A local, ephemeral transcript notice (never a Pi record). `/reload` sets
  * `reload` so clients paint the row, store it for the post-reload reconnect and
- * then reload the page for the new assets/nonce.
+ * then reload the page for the new assets/nonce. `/pixup-restart` sets
+ * `restart`; a refusal carries the blockers for the inline force card.
  */
-export function frameNotice(text: string, options: { reload?: boolean; status?: string } = {}): string {
+export function frameNotice(
+	text: string,
+	options: { reload?: boolean; restart?: boolean; status?: string; blockers?: ReloadBlocker[] } = {},
+): string {
 	return JSON.stringify({ t: "notice", text, ...options });
 }
 

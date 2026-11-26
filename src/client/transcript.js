@@ -298,6 +298,26 @@ export function appendReloadNotice(text) {
 	scrollToEnd();
 }
 
+/** `/pixup-restart` refusal: the blocker list plus the one Force action. */
+export function appendRestartCard(text, onForce) {
+	const note = document.createElement("div");
+	note.className = "block meta reload restart-confirm";
+	const message = document.createElement("div");
+	message.textContent = text;
+	note.append(message);
+	const button = document.createElement("button");
+	button.type = "button";
+	button.className = "restart-force";
+	button.textContent = "Force restart";
+	button.addEventListener("click", () => {
+		note.remove();
+		onForce();
+	});
+	note.append(button);
+	ui.log.append(note);
+	scrollToEnd();
+}
+
 export function prependHistory(entries, more) {
 	state.loadingEarlier = false;
 	const distance = readingDistance(state.stick, ui.log.clientHeight, ui.log.scrollHeight, ui.log.scrollTop);

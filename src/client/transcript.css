@@ -131,6 +131,26 @@
 	border-left-color: var(--accent);
 	color: var(--fg-dim);
 }
+.restart-confirm {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+}
+.restart-confirm .restart-force {
+	margin-left: auto;
+	padding: 4px 10px;
+	border: 1px solid var(--accent);
+	border-radius: 6px;
+	background: transparent;
+	color: var(--accent);
+	font: inherit;
+	cursor: pointer;
+}
+.restart-confirm .restart-force:active {
+	background: var(--accent);
+	color: var(--bg);
+}
 /* Compaction is a long-running operation: keep a visible row, not a toast. */
 .block.compaction-indicator {
 	border-left-color: var(--warn);

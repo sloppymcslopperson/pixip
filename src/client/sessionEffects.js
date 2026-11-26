@@ -73,7 +73,7 @@ export function handleSnapshot(frame) {
 	restoreReloadNotice();
 	if (state.restartNoticePending) {
 		state.restartNoticePending = false;
-		deps.appendRestartNotice(plan.interrupted);
+		void deps.appendRestartNotice(plan.interrupted);
 	}
 }
 

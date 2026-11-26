@@ -15,6 +15,7 @@ import { ui } from "./kernel/ui.js";
 import { renderMenu, restoreClearedQueue } from "./menu.js";
 import { applyInboxFrame } from "./inbox.js";
 import { handleNotice } from "./reload.js";
+import { handleRestartNotice, markRestartPending } from "./restart.js";
 import { openExportSheet, openModelSheet, openThinkingSheet, openTreeSheet } from "./sheets.js";
 import { dropSurface, handleNeedTime, handleReasks } from "./surface.js";
 import { applyFullEntry, applyLiveThinking, handleEvent, prependHistory, renderTranscript } from "./transcript.js";
@@ -114,10 +115,11 @@ export function handleFrame(fromSessionId, frame) {
 			applyLiveThinking(frame);
 			break;
 		case "restarting":
+			markRestartPending();
 			handleRestarting();
 			break;
 		case "notice":
-			handleNotice(frame);
+			if (!handleRestartNotice(frame)) handleNotice(frame);
 			break;
 		case "history":
 			prependHistory(frame.entries ?? [], frame.more === true);

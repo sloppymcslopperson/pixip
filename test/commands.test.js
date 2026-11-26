@@ -28,6 +28,18 @@ describe("reload command", () => {
 	});
 });
 
+describe("pixup-restart command", () => {
+	it("is a builtin distinct from reload and accepts force", () => {
+		const command = findCommand("pixup-restart");
+		assert.equal(command?.source, "builtin");
+		assert.ok(BUILTIN_COMMANDS.some((entry) => entry.name === "pixup-restart"));
+		assert.ok(!TUI_ONLY_COMMANDS.some((entry) => entry.name === "pixup-restart"));
+		assert.equal(classifyInput("/pixup-restart").kind, "builtin");
+		assert.equal(classifyInput("/pixup-restart force").args, "force");
+		assert.notEqual(findCommand("pixup-restart")?.summary, findCommand("reload")?.summary);
+	});
+});
+
 describe("classifyInput", () => {
 	it("treats blank input as empty", () => {
 		assert.equal(classifyInput("").kind, "empty");
@@ -130,6 +142,7 @@ describe("catalog", () => {
 				"import",
 				"export",
 				"reload",
+				"pixup-restart",
 			],
 		);
 		assert.ok(TUI_ONLY_COMMANDS.length >= 10);

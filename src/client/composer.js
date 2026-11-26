@@ -4,6 +4,7 @@ import { clearPendingAttachment } from "./composerAttachments.js";
 import { submitBash } from "./composerBash.js";
 import { classifyInput, isAllowed } from "./commands.js";
 import { sendReload } from "./reload.js";
+import { sendRestart } from "./restart.js";
 import { installDeps } from "./configure.js";
 import { clearInput } from "./composerInput.js";
 import { scrollToEnd } from "./scroll.js";
@@ -78,6 +79,9 @@ export const builtinHandlers = {
 	},
 	reload() {
 		sendReload();
+	},
+	"pixup-restart"(args) {
+		sendRestart(args.trim().toLowerCase() === "force");
 	},
 	import(args) {
 		if (!args) {

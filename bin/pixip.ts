@@ -19,6 +19,7 @@ import {
 	fetchHealth,
 	fetchSessions,
 	logSize,
+	liveSessionIds,
 	portAvailable,
 	readDaemonState,
 	readLogTail,
@@ -26,9 +27,11 @@ import {
 	runningDaemon,
 	startDaemon,
 	stopDaemon,
+	takeResumeSet,
 	waitForHealth,
 	writeDaemonState,
 	writeReloadResult,
+	writeResumeSet,
 } from "../src/daemon.ts";
 import { detectRepo, pruneWorktrees, realCwd } from "../src/worktree.ts";
 import type { WorktreeEntry } from "../src/worktree.ts";
@@ -374,8 +377,9 @@ Commands:
   (none)|run          serve in the foreground (default)
   daemon              detach a daemon, write the pid/state, print the URL
   stop                SIGTERM the daemon and clean its pid file. From inside a
-                      pixip session this restarts instead, so an agent cannot
-                      take the service down; use a shell outside pixip to stop it
+                      pixip session this refuses (exit 2) with a user-only
+                      message; use /pixup-restart from the browser to replace
+                      the daemon
   status [--json]     pid, URL, uptime and session count; non-zero when down
   logs [-f] [--lines] tail <data-dir>/pixip.log (-f follows)
   refresh             soft reload: assets, command policy, session index and the
@@ -385,13 +389,14 @@ Commands:
                       child. Writes <data-dir>/pixip.reload.json (exit 1 when
                       refused, exit 2 from inside an agent)
   restart [--force] [--when-idle] [--timeout <s>]
-                      replace the process; sessions survive in their JSONL.
-                      The stop/start runs in a detached helper, so this also
-                      works when issued from inside a pixip session (that turn
-                      ends, the daemon comes back). Refuses while a session is
-                      busy unless --force; --when-idle waits for the other
-                      sessions (the calling one does not count) up to --timeout
-                      (default 300s, exit 2)
+                      replace the process; sessions survive in their JSONL and
+                      the new daemon reattaches the ones that were live. The
+                      stop/start runs in a detached helper, so this also works
+                      when issued from inside a pixip session (that turn ends,
+                      the daemon comes back). Refuses while a session is busy
+                      unless --force; --when-idle waits for the other sessions
+                      (the calling one does not count) up to --timeout (default
+                      300s, exit 2)
   protect [<session-id>] [--off] [--json]
                       mark one session as protected from the dashboard bulk
                       archive (or clear it with --off). Defaults to the caller's
@@ -616,6 +621,10 @@ async function serve(options: Options): Promise<void> {
 		clientDir,
 		log,
 		dev: options.dev,
+		restart: async () => {
+			await writeResumeSet(options.dataDir, liveSessionIds(await hub.list()));
+			spawnRestartHelper(options);
+		},
 	});
 	hub.setDaemonUrl(server.url);
 
@@ -645,6 +654,10 @@ async function serve(options: Options): Promise<void> {
 	if (options.host !== "127.0.0.1" && options.host !== "::1") {
 		log(`warning: bound to ${options.host}; this UI has no authentication`);
 	}
+
+	// A restart persists the sessions that were live so the new daemon can put
+	// the dashboard's hot/warm set back before the browser even reconnects.
+	void resumeRestartedSessions(hub, options.dataDir);
 
 	const softRefresh = async (label: string) => {
 		try {
@@ -713,17 +726,15 @@ async function cmdDaemon(options: Options): Promise<void> {
 }
 
 async function cmdStop(options: Options): Promise<void> {
-	// Never let a bash tool inside a session take the service down. A stop from
-	// inside pixip is a restart from the caller's point of view: the calling turn
-	// ends, the daemon comes back. A shell outside pixip still stops for real.
+	// Never let a bash tool inside a session take the service down. Stopping the
+	// daemon is a user action now; the old "stop means restart" conversion made
+	// an agent-triggered stop indistinguishable from a real one.
 	if (insidePixip()) {
-		const running = await runningDaemon(options.dataDir);
-		if (!running) {
-			process.stdout.write(`pixip is not running for ${options.dataDir}\n`);
-			return;
-		}
-		process.stderr.write("pixip stop requested from inside a pixip session: restarting instead\n");
-		return await cmdRestart({ ...options, force: true });
+		process.stderr.write(
+			"stop is user-only inside a pixip session, please ask your user to run the /pixup-restart command\n",
+		);
+		process.exitCode = 2;
+		return;
 	}
 
 	const result = await stopDaemon(options.dataDir);
@@ -879,6 +890,26 @@ function isCaller(session: SessionInfo, caller: string | undefined): boolean {
 	return session.logicalId === caller || session.id === caller;
 }
 
+/** Persist the current live set before the helper replaces the daemon. */
+async function recordLiveSessions(url: string, dataDir: string): Promise<void> {
+	const sessions = await fetchSessions(url).catch(() => []);
+	await writeResumeSet(dataDir, liveSessionIds(sessions));
+}
+
+/** New daemon side: put back the live children the old daemon had. */
+async function resumeRestartedSessions(hub: Hub, dataDir: string): Promise<void> {
+	const ids = await takeResumeSet(dataDir);
+	if (ids.length === 0) return;
+	log(`[restart] resuming ${ids.length} session(s)`);
+	for (const id of ids) {
+		try {
+			await hub.attach(id);
+		} catch (error) {
+			log(`[restart] could not resume ${id}: ${(error as Error).message}`);
+		}
+	}
+}
+
 /** Spawn the detached helper that performs the actual stop/start. */
 function spawnRestartHelper(options: Options): void {
 	const logFd = openSync(daemonPaths(options.dataDir).log, "a");
@@ -964,6 +995,7 @@ async function cmdRestart(options: Options): Promise<void> {
 	// Hand the destructive half to a detached helper. This process may be a child
 	// of a Pi child that is about to be stopped, so it must not be the one doing
 	// `stopDaemon()`; the helper survives the shutdown and starts the replacement.
+	await recordLiveSessions(running.url, options.dataDir);
 	spawnRestartHelper(options);
 
 	// A normal shell waits here and prints the new URL. Inside a session this

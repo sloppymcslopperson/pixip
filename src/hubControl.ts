@@ -535,6 +535,31 @@ export function reloadBlockers(this: any): ReloadBlocker[] {
 }
 
 /**
+ * Sessions that make a daemon restart visibly disruptive. A restart is allowed
+ * to interrupt an unsettled turn (that is what force is for), but a pending UI
+ * request or a running bash command is a concrete thing the user chose to do.
+ */
+export function restartBlockers(this: any): ReloadBlocker[] {
+	const blockers: ReloadBlocker[] = [];
+	for (const live of this.live.values()) {
+		const reasons: string[] = [];
+		if (live.info.id === "") reasons.push("starting");
+		else if (live.info.state !== "idle" && live.info.state !== "stopped" && live.info.state !== "error") {
+			reasons.push(live.info.state);
+		}
+		if (live.pendingUi && live.pendingUi.size > 0) reasons.push("pending UI request");
+		if (live.bashId) reasons.push("running bash");
+		if (reasons.length === 0) continue;
+		blockers.push({
+			id: live.info.id || live.info.logicalId || "starting",
+			...(live.info.name ? { name: live.info.name } : {}),
+			reason: reasons.join(", "),
+		});
+	}
+	return blockers;
+}
+
+/**
  * Reload every live child after the assets/policy have been swapped. A
  * system-pi child is respawned into the current host configuration; host
  * children answer the new `reload` command. Failures are per-child and do not

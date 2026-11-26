@@ -517,6 +517,11 @@ export class Hub {
 		return hubControl.reloadBlockers.apply(this, arguments as any);
 	}
 
+	/** Every live session that makes a daemon replacement disruptive. */
+	restartBlockers(): ReloadBlocker[] {
+		return hubControl.restartBlockers.apply(this, arguments as any);
+	}
+
 	/**
 	 * Reload every live child after the asset/policy swap. System-pi children are
 	 * respawned with the daemon's current configuration; failures are reported

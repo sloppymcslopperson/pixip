@@ -29,6 +29,12 @@ export const BUILTIN_COMMANDS = [
 	{ name: "import", args: "<path>", source: "builtin", summary: "import a JSONL session file" },
 	{ name: "export", args: "", source: "builtin", summary: "download this session as HTML or JSONL" },
 	{ name: "reload", args: "", source: "builtin", summary: "reload assets and every live session" },
+	{
+		name: "pixup-restart",
+		args: "[force]",
+		source: "builtin",
+		summary: "replace the pixip daemon; force interrupts live sessions",
+	},
 ];
 
 /**
