@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, statSync } from "node:fs";
 import { mkdir, open, stat } from "node:fs/promises";
-import { createRequire } from "node:module";
+import { createRequire, register } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Hub } from "../src/hub.ts";
 import type { RemoveWorktreeResult, WorktreeListing } from "../src/hub.ts";
-import { startServer } from "../src/server.ts";
+import type { RunningServer } from "../src/server.ts";
+import { GenerationManager } from "../src/reload/manager.ts";
 import type { ReloadReport } from "../src/reload.ts";
 import {
 	busySessions,
@@ -38,6 +39,10 @@ import type { WorktreeEntry } from "../src/worktree.ts";
 import type { SessionInfo } from "../src/wire.ts";
 import { INBOX_PURPOSES, type InboxList, type InboxView } from "../src/inbox.ts";
 import { spawnEnv } from "../src/spawnEnv.ts";
+
+// Install the generation-aware resolve hook before the serve path imports any
+// reloadable module. CLI-only imports (daemon, worktree, inbox) stay shared.
+register(new URL("../src/reload/register.ts", import.meta.url).href, import.meta.url);
 
 /**
  * pixip — supervisor + web UI for Pi sessions.
@@ -591,7 +596,18 @@ async function serve(options: Options): Promise<void> {
 		throw new Error(`another pixip is running for ${options.dataDir} (pid ${existing.pid}); stop it first`);
 	}
 
-	const hub = new Hub({
+	const entryPath = fileURLToPath(import.meta.url);
+	const entryMtime = statSync(entryPath).mtimeMs;
+	const startupArgs = serveArgs(options).join("\u0000");
+	const loadGeneration = async (generation: number) => {
+		const suffix = generation === 0 ? "" : `?gen=${generation}`;
+		const hubModule = await import(new URL(`../src/hub.ts${suffix}`, import.meta.url).href);
+		const serverModule = await import(new URL(`../src/server.ts${suffix}`, import.meta.url).href);
+		return { hub: hubModule, server: serverModule };
+	};
+
+	const initial = await loadGeneration(0);
+	const hub = new initial.hub.Hub({
 		piBin: options.piBin,
 		piHostBin,
 		sessionsDir: join(options.dataDir, "sessions"),
@@ -613,19 +629,34 @@ async function serve(options: Options): Promise<void> {
 		log,
 	});
 
+	const running: { server?: RunningServer } = {};
+	const manager = new GenerationManager({
+		initial,
+		load: loadGeneration,
+		apply: (next: any) => running.server?.applyGeneration(next),
+		rollback: (previous: any) => running.server?.rollbackGeneration(previous),
+		requiresRestart: () => {
+			if (statSync(entryPath).mtimeMs !== entryMtime) return "bin/pixip.ts changed";
+			if (serveArgs(options).join("\u0000") !== startupArgs) return "serve flags changed";
+			return undefined;
+		},
+	});
+
 	const clientDir = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "client");
-	const server = await startServer({
+	const server = await initial.server.startServer({
 		host: options.host,
 		port: options.port,
 		hub,
 		clientDir,
 		log,
 		dev: options.dev,
+		reloadCode: manager,
 		restart: async () => {
 			await writeResumeSet(options.dataDir, liveSessionIds(await hub.list()));
 			spawnRestartHelper(options);
 		},
 	});
+	running.server = server;
 	hub.setDaemonUrl(server.url);
 
 	// The state file is what `status`, `stop`, `refresh` and `restart` read; it

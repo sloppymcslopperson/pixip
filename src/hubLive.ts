@@ -774,7 +774,7 @@ export async function finishReaskAsk(this: any, live: LiveSession, ask: ReaskAsk
 	}
 	const dataDir = this.options.dataDir ?? dirname(this.options.sessionsDir);
 	try {
-		await addPendingReask(dataDir, pendingUiKey(live.info), ask.record);
+		await addPendingReask(this.pendingWrites, dataDir, pendingUiKey(live.info), ask.record);
 		this.broadcast(live, frameReask(publicReask(ask.record)));
 		this.options.log(`ui request ${ask.record.id} recorded for re-ask on resume`);
 	} catch (error) {
@@ -811,12 +811,12 @@ export async function reask(this: any, id: string, requestId: string, action: st
 	const record = records.find((entry) => entry.id === requestId);
 	if (!record) throw new Error(`unknown timed-out request ${requestId}`);
 	if (action === "dismiss") {
-		await removePendingReask(dataDir, key, requestId);
+		await removePendingReask(this.pendingWrites, dataDir, key, requestId);
 		return;
 	}
 	if (action !== "ask") throw new Error(`unknown re-ask action ${action}`);
 	await this.prompt(id, reaskPrompt(record), "followUp");
-	await removePendingReask(dataDir, key, requestId);
+	await removePendingReask(this.pendingWrites, dataDir, key, requestId);
 }
 
 export function clearPendingUi(this: any, live: LiveSession, id?: string): void {

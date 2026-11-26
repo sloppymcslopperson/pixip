@@ -339,6 +339,25 @@ describe("pixip reload", () => {
 		const report = JSON.parse(await readFile(join(dir, "pixip.reload.json"), "utf8")) as Record<string, unknown>;
 		assert.equal(report["ok"], true);
 		assert.equal(report["status"], "ok");
+		assert.equal(report["generation"], 1);
+		await cli(["stop", "--data-dir", dir]);
+	});
+
+	it("swaps daemon code into a fresh generation without replacing the process", async () => {
+		const dir = await tempRoot("pixip-reload-");
+		const { url, pid } = await daemon(dir);
+		const first = await cli(["reload", "--data-dir", dir]);
+		assert.equal(first.code, 0, first.stderr);
+		let report = JSON.parse(await readFile(join(dir, "pixip.reload.json"), "utf8")) as Record<string, unknown>;
+		assert.equal(report["generation"], 1);
+
+		const second = await cli(["reload", "--data-dir", dir]);
+		assert.equal(second.code, 0, second.stderr);
+		report = JSON.parse(await readFile(join(dir, "pixip.reload.json"), "utf8")) as Record<string, unknown>;
+		assert.equal(report["generation"], 2);
+		assert.equal(report["requiresRestart"], undefined);
+		assert.ok(pidAlive(pid));
+		assert.equal((await fetchHealth(url)).pid, pid);
 		await cli(["stop", "--data-dir", dir]);
 	});
 

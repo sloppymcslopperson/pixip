@@ -37,7 +37,7 @@ import {
 	WIRE_VERSION,
 } from "./wire.ts";
 import type { SessionInfo } from "./wire.ts";
-import type { ReloadChildResult, ReloadReport } from "./reload.ts";
+import type { ReloadChildResult, ReloadCode, ReloadReport } from "./reload.ts";
 import { normalizeWorktreeRequest } from "./worktree.ts";
 
 export interface ServerOptions {
@@ -50,6 +50,16 @@ export interface ServerOptions {
 	dev?: boolean;
 	/** Replace the daemon through the detached restart helper. */
 	restart?: () => Promise<void>;
+	/** In-place daemon-code reload, supplied by the CLI entry. */
+	reloadCode?: ReloadCode;
+}
+
+/** The swappable half of the server: a new generation replaces this object. */
+export interface ServerImpl {
+	handleHttp: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;
+	handleSocket: (ws: WebSocket, url: URL) => Promise<void>;
+	refresh: () => Promise<RefreshReport>;
+	reload: () => Promise<ReloadReport>;
 }
 
 export interface RunningServer {
@@ -58,6 +68,10 @@ export interface RunningServer {
 	refresh: () => Promise<RefreshReport>;
 	/** Daemon-wide `/reload`: gate, assets/policy swap, then every live child. */
 	reload: () => Promise<ReloadReport>;
+	/** Swap a prepared module generation; the old one stays available for rollback. */
+	applyGeneration: (next: { hub: any; server: any }) => void;
+	/** Put a previous generation back after a failed swap. */
+	rollbackGeneration: (previous: { hub: any; server: any }) => void;
 	close: () => Promise<void>;
 }
 
@@ -73,8 +87,12 @@ interface ServerState {
 	reloads: number;
 	/** Browser-only capability for the user-initiated `/reload` control frame. */
 	nonce: string;
-	refresh: () => Promise<RefreshReport>;
-	reload: () => Promise<ReloadReport>;
+	/** Read at call time so an open listener runs the current generation. */
+	impl: ServerImpl;
+	/** One reload at a time; reset when the promise settles. */
+	reloading?: Promise<ReloadReport>;
+	/** Broadcast to every connected socket, used by the reload notice. */
+	broadcast: (frame: string) => void;
 	/** Browser-only `/pixup-restart`: one replacement at a time. */
 	restart?: () => Promise<void>;
 	restarting: boolean;
@@ -159,26 +177,24 @@ async function requestSnapshot(
 	return { ...window, covered: coverageKeys(window.entries), resume: false };
 }
 
-export async function startServer(options: ServerOptions): Promise<RunningServer> {
-	const { hub, log } = options;
-	const clients = new Set<WebSocket>();
-	const broadcast = (frame: string) => {
-		for (const client of clients) {
-			if (client.readyState === client.OPEN) client.send(frame);
-		}
-	};
-	let reloading: Promise<ReloadReport> | undefined;
-	const state: ServerState = {
-		assets: await loadAssets(options.clientDir),
-		startedAt: Date.now(),
-		reloads: 0,
-		restarting: false,
-		...(options.restart ? { restart: options.restart } : {}),
-		nonce: randomBytes(16).toString("hex"),
+/**
+ * Build the swappable server surface. A new `src/server.ts` generation exposes
+ * this same factory, and `applyGeneration` installs its result on the live
+ * listener without restarting the daemon.
+ */
+export function createImpl(
+	hub: Hub,
+	state: ServerState,
+	options: ServerOptions,
+	broadcast: (frame: string) => void,
+): ServerImpl {
+	return {
+		handleHttp: (req, res) => handleHttp(req, res, hub, state, options.log, options),
+		handleSocket: (ws, url) => handleSocket(ws, url, hub, options.log, state),
 		refresh: async () => {
 			// Hub caches first (policy is re-resolved for live sessions); only then
 			// swap assets, so a bad config leaves the running daemon as it was.
-			const result = await options.hub.reload();
+			const result = await hub.reload();
 			state.assets = await loadAssets(options.clientDir);
 			state.reloads += 1;
 			options.log(
@@ -187,14 +203,34 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
 			return { reloaded: ["assets", "config", "index", "commands"], reloads: state.reloads };
 		},
 		reload: () =>
-			(reloading ??= runReload(hub, state, options, broadcast).finally(() => {
-				reloading = undefined;
+			(state.reloading ??= runReload(hub, state, options, broadcast).finally(() => {
+				state.reloading = undefined;
 			})),
 	};
+}
+
+export async function startServer(options: ServerOptions): Promise<RunningServer> {
+	const { hub } = options;
+	const clients = new Set<WebSocket>();
+	const broadcast = (frame: string) => {
+		for (const client of clients) {
+			if (client.readyState === client.OPEN) client.send(frame);
+		}
+	};
+	const state = {
+		assets: await loadAssets(options.clientDir),
+		startedAt: Date.now(),
+		reloads: 0,
+		restarting: false,
+		...(options.restart ? { restart: options.restart } : {}),
+		nonce: randomBytes(16).toString("hex"),
+		broadcast,
+	} as ServerState;
+	state.impl = createImpl(hub, state, options, broadcast);
 	const wss = new WebSocketServer({ noServer: true });
 
 	const server = createServer((req, res) => {
-		void handleHttp(req, res, hub, state, log, options);
+		void state.impl.handleHttp(req, res);
 	});
 
 	server.on("upgrade", (req, socket, head) => {
@@ -206,7 +242,7 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
 		wss.handleUpgrade(req, socket, head, (ws) => {
 			clients.add(ws);
 			ws.on("close", () => clients.delete(ws));
-			void handleSocket(ws, url, hub, log, state);
+			void state.impl.handleSocket(ws, url);
 		});
 	});
 
@@ -217,10 +253,16 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
 
 	const address = server.address();
 	const port = typeof address === "object" && address ? address.port : options.port;
+	const applyGeneration = (next: { hub: any; server: any }) => {
+		Object.setPrototypeOf(hub, next.hub.Hub.prototype);
+		state.impl = next.server.createImpl(hub, state, options, broadcast);
+	};
 	return {
 		url: `http://${options.host}:${port}/`,
-		refresh: state.refresh,
-		reload: state.reload,
+		refresh: () => state.impl.refresh(),
+		reload: () => state.impl.reload(),
+		applyGeneration,
+		rollbackGeneration: applyGeneration,
 		close: async () => {
 			for (const client of wss.clients) client.close();
 			wss.close();
@@ -284,7 +326,7 @@ async function handleHttp(
 				send(403, JSON.stringify({ error: "refresh is loopback-only" }));
 				return;
 			}
-			const report = await state.refresh();
+			const report = await state.impl.refresh();
 			send(200, JSON.stringify({ ok: true, ...report }));
 			return;
 		}
@@ -886,7 +928,7 @@ async function handleCommand(
 					send(frameNotice("reload refused: this page has a stale nonce; reload the page and try again"));
 					return;
 				}
-				const report = await state.reload();
+				const report = await state.impl.reload();
 				if (!report.ok) send(frameNotice(report.message));
 				return;
 			}
@@ -1108,11 +1150,49 @@ async function runReload(
 	broadcast: (frame: string) => void,
 ): Promise<ReloadReport> {
 	const blockers = hub.reloadBlockers();
+	const requiresRestart = options.reloadCode?.requiresRestart();
+	const generation = options.reloadCode?.generation;
 	if (blockers.length > 0) {
 		const names = blockers.map((blocker) => `${blocker.name ?? blocker.id} (${blocker.reason})`).join(", ");
 		const message = `reload refused: ${names}`;
 		options.log(message);
-		return { ok: false, status: "refused", message, blockers, children: [], reloaded: [], reloads: state.reloads };
+		return {
+			ok: false,
+			status: "refused",
+			message,
+			blockers,
+			children: [],
+			reloaded: [],
+			reloads: state.reloads,
+			...(generation !== undefined ? { generation } : {}),
+			...(requiresRestart ? { requiresRestart } : {}),
+		};
+	}
+
+	// Import the next daemon generation first: the risk is the edited
+	// TypeScript, so it must fail before assets, policy or children move.
+	let applied = false;
+	try {
+		if (options.reloadCode) {
+			await options.reloadCode.prepare();
+			options.reloadCode.applyPending();
+			applied = true;
+		}
+	} catch (error) {
+		options.reloadCode?.rollback();
+		const message = `reload failed before any change: ${(error as Error).message}`;
+		options.log(message);
+		return {
+			ok: false,
+			status: "error",
+			message,
+			blockers: [],
+			children: [],
+			reloaded: [],
+			reloads: state.reloads,
+			...(generation !== undefined ? { generation } : {}),
+			...(requiresRestart ? { requiresRestart } : {}),
+		};
 	}
 
 	let assets: Map<string, Buffer>;
@@ -1121,14 +1201,26 @@ async function runReload(
 		assets = await loadAssets(options.clientDir);
 		policy = await hub.reload();
 	} catch (error) {
+		if (applied) options.reloadCode?.rollback();
 		const message = `reload failed before any change: ${(error as Error).message}`;
 		options.log(message);
-		return { ok: false, status: "error", message, blockers: [], children: [], reloaded: [], reloads: state.reloads };
+		return {
+			ok: false,
+			status: "error",
+			message,
+			blockers: [],
+			children: [],
+			reloaded: [],
+			reloads: state.reloads,
+			...(generation !== undefined ? { generation } : {}),
+			...(requiresRestart ? { requiresRestart } : {}),
+		};
 	}
 
 	state.assets = assets;
 	state.nonce = randomBytes(16).toString("hex");
 	state.reloads += 1;
+	const committedGeneration = applied ? options.reloadCode?.commit() : generation;
 	const children = await hub
 		.reloadChildren()
 		.catch((error: unknown): ReloadChildResult[] => [{ id: "daemon", ok: false, error: (error as Error).message }]);
@@ -1140,6 +1232,7 @@ async function runReload(
 		`index (${policy.sessions} session(s))`,
 		`commands`,
 	];
+	if (committedGeneration !== undefined) parts.push(`daemon gen ${committedGeneration}`);
 	if (migrated > 0) parts.push(`${migrated} session(s) migrated to the host`);
 	if (failed.length > 0)
 		parts.push(`${failed.length} session(s) failed: ${failed.map((child) => child.name ?? child.id).join(", ")}`);
@@ -1148,6 +1241,7 @@ async function runReload(
 	if (errored.length > 0) {
 		parts.push(`error sessions not reloaded: ${errored.map((session) => session.name ?? session.id).join(", ")}`);
 	}
+	if (requiresRestart) parts.push(`restart required: ${requiresRestart}`);
 	const message = parts.join("; ");
 	options.log(`reload: ${message}`);
 	broadcast(frameNotice(message, { reload: true, status: failed.length > 0 ? "partial" : "ok" }));
@@ -1159,6 +1253,8 @@ async function runReload(
 		children,
 		reloaded: ["assets", "config", "index", "commands"],
 		reloads: state.reloads,
+		...(committedGeneration !== undefined ? { generation: committedGeneration } : {}),
+		...(requiresRestart ? { requiresRestart } : {}),
 	};
 }
 

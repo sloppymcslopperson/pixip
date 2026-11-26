@@ -208,6 +208,9 @@ export class Hub {
 		this.startupTrash = options.skipStartupTrash ? Promise.resolve() : this.purgeTrashOnStart();
 	}
 
+	/** Serializes pending-UI re-ask file writes per session; hub-owned so reload cannot fork it. */
+	private readonly pendingWrites = new Map<string, Promise<void>>();
+
 	// ---------------------------------------------------------------- listing
 
 	async list(): Promise<SessionInfo[]> {

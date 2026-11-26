@@ -22,7 +22,13 @@ import {
 
 async function boot(
 	paths: TestPaths,
-	options: { dev?: boolean; host?: boolean; env?: Record<string, string>; restart?: () => Promise<void> } = {},
+	options: {
+		dev?: boolean;
+		host?: boolean;
+		env?: Record<string, string>;
+		restart?: () => Promise<void>;
+		reloadCode?: import("../src/reload.ts").ReloadCode;
+	} = {},
 ): Promise<{ hub: Hub; server: RunningServer }> {
 	const hub = hubFor(paths, {
 		...(options.host ? { piHostBin: HOST_FIXTURE } : {}),
@@ -36,6 +42,7 @@ async function boot(
 		log: (message) => paths.logs.push(message),
 		dev: options.dev ?? false,
 		...(options.restart ? { restart: options.restart } : {}),
+		...(options.reloadCode ? { reloadCode: options.reloadCode } : {}),
 	});
 	return { hub, server };
 }
@@ -142,6 +149,41 @@ describe("daemon-wide /reload", () => {
 			assert.equal(report.ok, false);
 			assert.equal(report.status, "error");
 			assert.equal(report.reloads, 0);
+			assert.match(await page(server.url), /v1/);
+		} finally {
+			await server.close();
+			await hub.shutdown();
+		}
+	});
+
+	it("keeps the old generation when the code import fails", async () => {
+		const paths = await fixtureRoot("pixip-reload-");
+		await writeFile(join(paths.clientDir, "index.html"), "v1");
+		let applied = false;
+		let rollbacks = 0;
+		const reloadCode: import("../src/reload.ts").ReloadCode = {
+			generation: 0,
+			requiresRestart: () => undefined,
+			prepare: () => Promise.reject(new Error("broken edit")),
+			applyPending: () => {
+				applied = true;
+			},
+			commit: () => 1,
+			rollback: () => {
+				rollbacks += 1;
+			},
+			discard: () => {},
+		};
+		const { hub, server } = await boot(paths, { reloadCode });
+		try {
+			await writeFile(join(paths.clientDir, "index.html"), "v2");
+			const report = await server.reload();
+			assert.equal(report.ok, false);
+			assert.equal(report.status, "error");
+			assert.match(report.message, /broken edit/);
+			assert.equal(report.generation, 0);
+			assert.equal(applied, false);
+			assert.equal(rollbacks, 1);
 			assert.match(await page(server.url), /v1/);
 		} finally {
 			await server.close();
