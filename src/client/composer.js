@@ -3,6 +3,7 @@ import { optimisticContent, slashPayload, textPayload } from "./attachments.js";
 import { clearPendingAttachment } from "./composerAttachments.js";
 import { submitBash } from "./composerBash.js";
 import { classifyInput, isAllowed } from "./commands.js";
+import { sendReload } from "./reload.js";
 import { installDeps } from "./configure.js";
 import { clearInput } from "./composerInput.js";
 import { scrollToEnd } from "./scroll.js";
@@ -74,6 +75,9 @@ export const builtinHandlers = {
 	},
 	clone() {
 		send({ t: "clone" });
+	},
+	reload() {
+		sendReload();
 	},
 	import(args) {
 		if (!args) {

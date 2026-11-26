@@ -22,12 +22,15 @@ import { createServer } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import type { ReloadReport } from "./reload.ts";
 import type { SessionInfo } from "./wire.ts";
 import { spawnEnv } from "./spawnEnv.ts";
 
 export const PID_FILE = "pixip.pid";
 export const STATE_FILE = "pixip.state.json";
 export const LOG_FILE = "pixip.log";
+/** Last `pixip reload` result, written by the daemon for the polling CLI. */
+export const RELOAD_FILE = "pixip.reload.json";
 
 export interface DaemonState {
 	pid: number;
@@ -47,6 +50,7 @@ export interface DaemonPaths {
 	pid: string;
 	state: string;
 	log: string;
+	reload: string;
 }
 
 export interface Health {
@@ -68,7 +72,16 @@ export function daemonPaths(dataDir: string): DaemonPaths {
 		pid: join(dataDir, PID_FILE),
 		state: join(dataDir, STATE_FILE),
 		log: join(dataDir, LOG_FILE),
+		reload: join(dataDir, RELOAD_FILE),
 	};
+}
+
+/** Write the last reload result atomically; the CLI polls the mtime. */
+export async function writeReloadResult(dataDir: string, report: ReloadReport): Promise<void> {
+	const path = daemonPaths(dataDir).reload;
+	const temp = `${path}.${process.pid}.tmp`;
+	await writeFile(temp, `${JSON.stringify(report, null, 2)}\n`);
+	await rename(temp, path);
 }
 
 /** The script a detached daemon runs: this package's own bin entry. */

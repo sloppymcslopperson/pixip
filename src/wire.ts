@@ -209,6 +209,15 @@ export function frameRestarting(): string {
 	return JSON.stringify({ t: "restarting" });
 }
 
+/**
+ * A local, ephemeral transcript notice (never a Pi record). `/reload` sets
+ * `reload` so clients paint the row, store it for the post-reload reconnect and
+ * then reload the page for the new assets/nonce.
+ */
+export function frameNotice(text: string, options: { reload?: boolean; status?: string } = {}): string {
+	return JSON.stringify({ t: "notice", text, ...options });
+}
+
 export function frameFooter(footer: FooterData): string {
 	return JSON.stringify({ t: "footer", footer });
 }

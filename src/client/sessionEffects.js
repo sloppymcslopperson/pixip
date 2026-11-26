@@ -6,6 +6,7 @@ import { installDeps } from "./configure.js";
 import { applyInfo } from "./sessionView.js";
 import { closePlan, openedPlan, snapshotPlan, statusPlan } from "./sessionPlan.js";
 import { toast } from "./toast.js";
+import { restoreReloadNotice } from "./reload.js";
 import { connect, rekeyConnection, send } from "./transport.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
@@ -69,6 +70,7 @@ export function handleSnapshot(frame) {
 	else deps.renderSnapshot(entries, frame.more === true);
 	if (plan.repaint) deps.renderTranscript();
 	applyInfo();
+	restoreReloadNotice();
 	if (state.restartNoticePending) {
 		state.restartNoticePending = false;
 		deps.appendRestartNotice(plan.interrupted);

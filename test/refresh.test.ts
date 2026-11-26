@@ -67,14 +67,14 @@ describe("soft refresh", () => {
 		await writeFile(join(paths.clientDir, "index.html"), "v1");
 		const { hub, server } = await boot(paths);
 
-		assert.equal(await (await fetch(server.url)).text(), "v1");
+		assert.match(await (await fetch(server.url)).text(), /v1$/);
 		await writeFile(join(paths.clientDir, "index.html"), "v2");
 
 		const report = await postRefresh(server.url);
 		assert.equal(report.status, 200);
 		assert.deepEqual(report.body["reloaded"], ["assets", "config", "index", "commands"]);
 		assert.equal(report.body["reloads"], 1);
-		assert.equal(await (await fetch(server.url)).text(), "v2");
+		assert.match(await (await fetch(server.url)).text(), /v2$/);
 
 		const health = (await (await fetch(new URL("health", server.url))).json()) as Record<string, unknown>;
 		assert.equal(health["ok"], true);
@@ -162,7 +162,7 @@ describe("serious mode", () => {
 		const { hub, server } = await boot(paths);
 		await writeFile(join(paths.clientDir, "index.html"), "v2");
 
-		assert.equal(await (await fetch(server.url)).text(), "v1");
+		assert.match(await (await fetch(server.url)).text(), /v1$/);
 		const fixture = await fetch(new URL("api/dev/panel-fixture", server.url));
 		assert.equal(fixture.status, 404);
 

@@ -192,6 +192,7 @@ pixip daemon --data-dir ./tmp/dev         # prints the URL, writes pid/state/log
 pixip status [--json]                     # non-zero when not running
 pixip logs [-f] [--lines 200]             # tails <data-dir>/pixip.log
 pixip refresh                             # soft: assets, policy, session index
+pixip reload                              # assets + every live child, in place
 pixip restart [--force] [--when-idle]     # replace the process, JSONL survives
 pixip protect [<session-id>] [--off]      # exclude a session from bulk archive
 pixip stop
@@ -200,10 +201,15 @@ pixip stop
 `--data-dir` owns everything (`pixip.pid`, `pixip.state.json`, `pixip.log`,
 `sessions/`, `inbox.json`), so parallel instances on another `--port`/`--data-dir` never
 collide. One process owns a data dir at a time: the bare foreground command
-refuses to start when a daemon already owns it. Soft refresh (`pixip refresh`, `SIGHUP`, or the header's `reload`) keeps
-children and sockets, and its endpoint accepts loopback peers and the exact
-bind address because the UI has no
-auth. Hard restart refuses while a session is busy unless `--force`;
+refuses to start when a daemon already owns it. Soft refresh (`pixip refresh`,
+`SIGHUP`, or the header's `reload`) keeps children and sockets, and its endpoint
+accepts loopback peers and the exact bind address because the UI has no auth.
+`/reload` (or `pixip reload`) is the in-place step beyond that: it refuses while
+any session is busy, re-reads assets/policy/index, reloads every live host child
+(auto-respawning system-pi children to the current host), keeps a local
+transcript notice, and refreshes every connected page for the new nonce. It is
+user-only; a `pixip reload` run from inside an agent exits 2. Hard restart
+refuses while a session is busy unless `--force`;
 `--when-idle` waits up to `--timeout` seconds (default 300, exit 2) for the other
 sessions and is the safe way to pick up hub changes from inside pixip: the
 stop/start runs in a detached helper that survives the calling session, and

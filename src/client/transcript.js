@@ -289,6 +289,15 @@ export function appendRestartNotice(interrupted) {
 	scrollToEnd();
 }
 
+/** `/reload` result: a local row, never an entry in the session JSONL. */
+export function appendReloadNotice(text) {
+	const note = document.createElement("div");
+	note.className = "block meta reload";
+	note.textContent = text;
+	ui.log.append(note);
+	scrollToEnd();
+}
+
 export function prependHistory(entries, more) {
 	state.loadingEarlier = false;
 	const distance = readingDistance(state.stick, ui.log.clientHeight, ui.log.scrollHeight, ui.log.scrollTop);

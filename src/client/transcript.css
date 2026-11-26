@@ -127,6 +127,10 @@
 	border-left-color: var(--accent);
 	color: var(--fg-dim);
 }
+.block.reload {
+	border-left-color: var(--accent);
+	color: var(--fg-dim);
+}
 /* Compaction is a long-running operation: keep a visible row, not a toast. */
 .block.compaction-indicator {
 	border-left-color: var(--warn);

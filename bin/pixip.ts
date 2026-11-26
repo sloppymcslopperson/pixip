@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
-import { mkdir, open } from "node:fs/promises";
+import { mkdir, open, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { Hub } from "../src/hub.ts";
 import type { RemoveWorktreeResult, WorktreeListing } from "../src/hub.ts";
 import { startServer } from "../src/server.ts";
+import type { ReloadReport } from "../src/reload.ts";
 import {
 	busySessions,
 	clearDaemonState,
@@ -27,6 +28,7 @@ import {
 	stopDaemon,
 	waitForHealth,
 	writeDaemonState,
+	writeReloadResult,
 } from "../src/daemon.ts";
 import { detectRepo, pruneWorktrees, realCwd } from "../src/worktree.ts";
 import type { WorktreeEntry } from "../src/worktree.ts";
@@ -46,7 +48,8 @@ import { spawnEnv } from "../src/spawnEnv.ts";
  * same serve path; `stop`/`status`/`logs`/`refresh`/`restart` manage it.
  */
 
-type Command = "run" | "daemon" | "stop" | "status" | "logs" | "refresh" | "restart" | "worktree" | "protect" | "inbox";
+type Command =
+	"run" | "daemon" | "stop" | "status" | "logs" | "refresh" | "reload" | "restart" | "worktree" | "protect" | "inbox";
 
 const SUBCOMMANDS = new Set<string>([
 	"run",
@@ -55,6 +58,7 @@ const SUBCOMMANDS = new Set<string>([
 	"status",
 	"logs",
 	"refresh",
+	"reload",
 	"restart",
 	"worktree",
 	"protect",
@@ -376,6 +380,10 @@ Commands:
   logs [-f] [--lines] tail <data-dir>/pixip.log (-f follows)
   refresh             soft reload: assets, command policy, session index and the
                       catalog; live children and sockets stay up
+  reload              daemon-wide in-place reload: refuse while any session is
+                      busy, then re-read assets/policy and reload every live
+                      child. Writes <data-dir>/pixip.reload.json (exit 1 when
+                      refused, exit 2 from inside an agent)
   restart [--force] [--when-idle] [--timeout <s>]
                       replace the process; sessions survive in their JSONL.
                       The stop/start runs in a detached helper, so this also
@@ -526,6 +534,8 @@ async function main(): Promise<void> {
 			return await cmdLogs(options);
 		case "refresh":
 			return await cmdRefresh(options);
+		case "reload":
+			return await cmdReload(options);
 		case "restart":
 			return await cmdRestart(options);
 		case "protect":
@@ -645,6 +655,24 @@ async function serve(options: Options): Promise<void> {
 		}
 	};
 	process.on("SIGHUP", () => void softRefresh("SIGHUP"));
+
+	let reloadChain: Promise<unknown> = Promise.resolve();
+	const daemonReload = (label: string) => {
+		const run = reloadChain.then(() => server.reload());
+		reloadChain = run.then(
+			() => undefined,
+			() => undefined,
+		);
+		void run
+			.then(async (report) => {
+				log(`${label}: ${report.message}`);
+				await writeReloadResult(options.dataDir, report).catch((error: unknown) => {
+					log(`${label}: could not write reload result: ${(error as Error).message}`);
+				});
+			})
+			.catch((error: unknown) => log(`${label} failed: ${(error as Error).message}`));
+	};
+	process.on("SIGUSR1", () => daemonReload("SIGUSR1"));
 
 	let closing = false;
 	const shutdown = async (signal: string, restart = false) => {
@@ -958,6 +986,58 @@ async function cmdRestart(options: Options): Promise<void> {
 		}
 		await delay(100);
 	}
+}
+
+/** `pixip reload`: SIGUSR1 the daemon, then poll the result file for exit status. */
+async function cmdReload(options: Options): Promise<void> {
+	if (insidePixip()) {
+		process.stderr.write("reload is user-only, please ask your user to run the /reload command\n");
+		process.exitCode = 2;
+		return;
+	}
+	const running = await runningDaemon(options.dataDir);
+	if (!running) {
+		process.stderr.write(`pixip is not running for ${options.dataDir}\n`);
+		process.exitCode = 1;
+		return;
+	}
+	const path = daemonPaths(options.dataDir).reload;
+	const before = await stat(path)
+		.then((info) => info.mtimeMs)
+		.catch(() => 0);
+	try {
+		process.kill(running.pid, "SIGUSR1");
+	} catch (error) {
+		process.stderr.write(`could not signal pixip (${(error as Error).message})\n`);
+		process.exitCode = 1;
+		return;
+	}
+	const deadline = Date.now() + 30_000;
+	while (Date.now() < deadline) {
+		const after = await stat(path)
+			.then((info) => info.mtimeMs)
+			.catch(() => 0);
+		if (after > before) {
+			let report: ReloadReport;
+			try {
+				report = JSON.parse(readFileSync(path, "utf8")) as ReloadReport;
+			} catch (error) {
+				process.stderr.write(`could not read reload result: ${(error as Error).message}\n`);
+				process.exitCode = 1;
+				return;
+			}
+			if (report.ok) {
+				process.stdout.write(`${report.message}\n`);
+				return;
+			}
+			process.stderr.write(`${report.message}\n`);
+			process.exitCode = 1;
+			return;
+		}
+		await delay(100);
+	}
+	process.stderr.write(`reload timed out after 30s (see ${daemonPaths(options.dataDir).log})\n`);
+	process.exitCode = 1;
 }
 
 // ------------------------------------------------------------------ inbox

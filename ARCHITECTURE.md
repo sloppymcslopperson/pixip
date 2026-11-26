@@ -436,8 +436,8 @@ holds `{pid, host, port, url, startedAt, dataDir, args, env}` (args and the
 extra environment, so `restart` reproduces the configuration). `status`, `stop` and `refresh` read those files; a
 dead pid is stale and gets cleaned rather than reported.
 
-Soft refresh (`pixip refresh`, `SIGHUP`, `POST /api/refresh`) is the default and
-must never disturb a turn:
+Soft refresh (`pixip refresh`, `SIGHUP`, `POST /api/refresh`) must never disturb
+a turn:
 
 1. re-resolve the command policy for every live session — two-phase, so a
    malformed file fails the refresh before any policy is swapped;
@@ -446,11 +446,24 @@ must never disturb a turn:
 4. push the new `policy` frames and a fresh `sessions` frame to connected
    sockets.
 
-Children and websockets are untouched; `/health` exposes `startedAt` and a
-`reloads` counter so the CLI or the agent can verify it happened. The endpoint is
-loopback-only (the UI has no auth) and answers
+Children and websockets are untouched by a soft refresh; `/health` exposes
+`startedAt` and a `reloads` counter so the CLI or the agent can verify it
+happened. The endpoint is loopback-only (the UI has no auth) and answers
 `{reloaded: ["assets", "config", "index", "commands"], reloads}`; the catalog is a
 client asset, so `commands` rides on the asset re-read.
+
+Daemon-wide `/reload` is the in-place step above soft refresh. It first rejects
+the request if any live session is not `idle`/`stopped`, has a pending UI
+request, is running bash, or has an unsettled turn; a refusal lists every
+blocker and changes nothing. Otherwise it pre-reads the client asset map,
+re-applies policy/index (the same two-phase soft-refresh path), commits the
+assets and rotates the browser nonce, then sends `reload` to every host child
+and respawns system-pi children through `respawnSession`. Child failures are
+reported per session and do not roll the assets back. The browser sends the
+nonce from the served `index.html` meta tag; the CLI uses `SIGUSR1` and polls
+`<data-dir>/pixip.reload.json`. A successful reload broadcasts an ephemeral
+`notice` frame (never JSONL), forces a page reload so every client picks up the
+new assets/nonce, and restores the row once from `sessionStorage`.
 
 A hard restart is explicit: `pixip restart` refuses while a session is busy
 unless `--force`, or waits for every session to be idle with `--when-idle`

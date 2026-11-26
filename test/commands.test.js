@@ -18,6 +18,16 @@ import {
 	visibleCommands,
 } from "../src/client/commands.js";
 
+describe("reload command", () => {
+	it("is a real builtin, not a TUI-only notice", () => {
+		const command = findCommand("reload");
+		assert.equal(command?.source, "builtin");
+		assert.ok(BUILTIN_COMMANDS.some((entry) => entry.name === "reload"));
+		assert.ok(!TUI_ONLY_COMMANDS.some((entry) => entry.name === "reload"));
+		assert.equal(classifyInput("/reload").kind, "builtin");
+	});
+});
+
 describe("classifyInput", () => {
 	it("treats blank input as empty", () => {
 		assert.equal(classifyInput("").kind, "empty");
@@ -119,6 +129,7 @@ describe("catalog", () => {
 				"clone",
 				"import",
 				"export",
+				"reload",
 			],
 		);
 		assert.ok(TUI_ONLY_COMMANDS.length >= 10);

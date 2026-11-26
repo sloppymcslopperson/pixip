@@ -28,6 +28,7 @@ export const BUILTIN_COMMANDS = [
 	{ name: "clone", args: "", source: "builtin", summary: "duplicate the current branch" },
 	{ name: "import", args: "<path>", source: "builtin", summary: "import a JSONL session file" },
 	{ name: "export", args: "", source: "builtin", summary: "download this session as HTML or JSONL" },
+	{ name: "reload", args: "", source: "builtin", summary: "reload assets and every live session" },
 ];
 
 /**
@@ -44,7 +45,6 @@ export const TUI_ONLY_COMMANDS = [
 	{ name: "share", args: "", source: "tui", summary: "upload and share a viewer link" },
 	{ name: "trust", args: "", source: "tui", summary: "save a project trust decision" },
 	{ name: "mcp", args: "", source: "tui", summary: "MCP server management" },
-	{ name: "reload", args: "", source: "tui", summary: "reload Pi resources" },
 	{ name: "hotkeys", args: "", source: "tui", summary: "keybinding help" },
 	{ name: "changelog", args: "", source: "tui", summary: "changelog viewer" },
 	{ name: "debug", args: "", source: "tui", summary: "debug view" },

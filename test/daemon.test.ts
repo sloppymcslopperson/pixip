@@ -321,6 +321,54 @@ describe("backend selection", () => {
 	});
 });
 
+describe("pixip reload", () => {
+	it("reloads assets and live children, then prints the report", async () => {
+		const dir = await tempRoot("pixip-reload-");
+		const { url, pid } = await daemon(
+			dir,
+			{ PIXIP_PI_HOST: HOST_FIXTURE, FAKE_HOST_LOG: join(dir, "host.jsonl") },
+			{ system: false },
+		);
+		await createSession(url, dir);
+		const result = await cli(["reload", "--data-dir", dir]);
+		assert.equal(result.code, 0, result.stderr);
+		assert.match(result.stdout, /reloaded assets/);
+		const health = await fetchHealth(url);
+		assert.equal(health.reloads, 1);
+		assert.ok(pidAlive(pid));
+		const report = JSON.parse(await readFile(join(dir, "pixip.reload.json"), "utf8")) as Record<string, unknown>;
+		assert.equal(report["ok"], true);
+		assert.equal(report["status"], "ok");
+		await cli(["stop", "--data-dir", dir]);
+	});
+
+	it("exits 1 and reports blockers while a session is busy", async () => {
+		const dir = await tempRoot("pixip-reload-");
+		const { url } = await daemon(dir, { FAKE_PI_IS_STREAMING: "1" });
+		await createSession(url, dir);
+		const result = await cli(["reload", "--data-dir", dir]);
+		assert.equal(result.code, 1);
+		assert.match(result.stderr, /reload refused:/);
+		const health = await fetchHealth(url);
+		assert.equal(health.reloads, 0);
+		await cli(["stop", "--data-dir", dir]);
+	});
+
+	it("is user-only from inside an agent", async () => {
+		const dir = await tempRoot("pixip-reload-");
+		const result = await cli(["reload", "--data-dir", dir], { PIXIP_INSIDE: "1" });
+		assert.equal(result.code, 2);
+		assert.equal(result.stderr.trim(), "reload is user-only, please ask your user to run the /reload command");
+	});
+
+	it("exits 1 when no daemon is running", async () => {
+		const dir = await tempRoot("pixip-reload-");
+		const result = await cli(["reload", "--data-dir", dir]);
+		assert.equal(result.code, 1);
+		assert.match(result.stderr, /not running/);
+	});
+});
+
 describe("hard restart", () => {
 	it("refuses while busy, times out with --when-idle and replaces with --force", async () => {
 		const dir = await tempRoot("pixip-daemon-");

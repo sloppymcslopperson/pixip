@@ -14,6 +14,7 @@ import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
 import { renderMenu, restoreClearedQueue } from "./menu.js";
 import { applyInboxFrame } from "./inbox.js";
+import { handleNotice } from "./reload.js";
 import { openExportSheet, openModelSheet, openThinkingSheet, openTreeSheet } from "./sheets.js";
 import { dropSurface, handleNeedTime, handleReasks } from "./surface.js";
 import { applyFullEntry, applyLiveThinking, handleEvent, prependHistory, renderTranscript } from "./transcript.js";
@@ -52,6 +53,11 @@ function handleBackgroundFrame(sessionId, frame) {
 			break;
 		case "commands":
 			cached.commands = Array.isArray(frame.commands) ? [...frame.commands] : [];
+			break;
+		case "notice":
+			// A parked tab still reloads for the new assets/nonce, but the row belongs
+			// to the session that is actually on screen.
+			handleNotice(frame, { row: false });
 			break;
 		case "queue":
 			cached.queue = {
@@ -109,6 +115,9 @@ export function handleFrame(fromSessionId, frame) {
 			break;
 		case "restarting":
 			handleRestarting();
+			break;
+		case "notice":
+			handleNotice(frame);
 			break;
 		case "history":
 			prependHistory(frame.entries ?? [], frame.more === true);

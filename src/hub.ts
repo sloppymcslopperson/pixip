@@ -30,6 +30,7 @@ import type {
 	SessionTarget,
 } from "./sessionIndex.ts";
 import type { BashResult, CommandPolicy, DynamicCommand, FooterData, ModelSummary, SessionInfo } from "./wire.ts";
+import type { ReloadBlocker, ReloadChildResult } from "./reload.ts";
 
 /**
  * The supervisor. One `pi --mode rpc` child per live session, nothing else.
@@ -509,6 +510,20 @@ export class Hub {
 	 */
 	async respawnSession(id: string): Promise<SessionInfo> {
 		return await hubLive.respawnSession.apply(this, arguments as any);
+	}
+
+	/** Every live session that makes `/reload` unsafe, with the reason. */
+	reloadBlockers(): ReloadBlocker[] {
+		return hubControl.reloadBlockers.apply(this, arguments as any);
+	}
+
+	/**
+	 * Reload every live child after the asset/policy swap. System-pi children are
+	 * respawned with the daemon's current configuration; failures are reported
+	 * per child and do not stop the rest.
+	 */
+	async reloadChildren(): Promise<ReloadChildResult[]> {
+		return await hubControl.reloadChildren.apply(this, arguments as any);
 	}
 
 	async models(id: string): Promise<{ models: ModelSummary[]; current: string | null }> {

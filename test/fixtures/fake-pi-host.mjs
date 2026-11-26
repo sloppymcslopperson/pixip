@@ -56,7 +56,7 @@ send({
 	type: "hello",
 	protocol: 1,
 	piVersion: "fake-host",
-	capabilities: ["panel"],
+	capabilities: ["panel", "reload"],
 });
 
 function handle(line) {
@@ -68,6 +68,11 @@ function handle(line) {
 		return;
 	}
 	switch (command.type) {
+		case "reload":
+			log({ type: "reload", pid: process.pid });
+			return env.FAKE_HOST_RELOAD_FAIL === "1"
+				? send({ id: command.id, type: "response", command: "reload", success: false, error: "reload failed" })
+				: ok(command.id, "reload");
 		case "get_state":
 			return ok(command.id, "get_state", {
 				sessionId,

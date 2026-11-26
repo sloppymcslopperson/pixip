@@ -38,19 +38,20 @@ exits non-zero without writing a partial protocol line.
 Framing is strict JSONL: one JSON object per LF, one optional trailing CR
 stripped. Split only on LF — U+2028/U+2029 are legal inside JSON strings.
 
-The host is Pi RPC v1 plus two additions:
+The host is Pi RPC v1 plus these additions:
 
 ### `hello`
 
 The first stdout record is:
 
 ```json
-{ "type": "hello", "protocol": 1, "piVersion": "1.5.2", "capabilities": ["panel"] }
+{ "type": "hello", "protocol": 1, "piVersion": "1.5.2", "capabilities": ["panel", "reload"] }
 ```
 
 `protocol` is an integer, `piVersion` is the SDK version in use, and
-`capabilities` lists protocol features beyond Pi RPC v1. `panel` is currently
-the only entry.
+`capabilities` lists protocol features beyond Pi RPC v1. `panel` adds the
+blocking inline surface; `reload` adds the `{"type":"reload"}` command that calls
+`session.reload()` for `/reload`.
 
 ### `panel`
 
