@@ -1,5 +1,5 @@
 ---
-grilled: false
+grilled: true
 project: pixip
 series: chipwitch
 ---
@@ -56,3 +56,12 @@ When a ref tag is typed or pasted into the composer, show a neat chip above the 
   ```
 
 - `npm run check` silently skips `check:browser` when `PIXIP_CHROME` is unset. Say explicitly which of the two you ran.
+
+### Decisions (grilled)
+
+- Chip body is inert in this ticket. Removing a chip is only through the × that appears on tap; a second gesture for navigation is deliberately deferred to the optional `open/chipwitch/60-reftag-chip-navigation.md`.
+- Resolution goes through a new cluster-neutral module (`src/client/reftagResolve.js`) that imports no feature cluster. `app.js` wires the providers with `configureRefTagResolve({ sessions, cache, inbox })`; composer and inbox stay unimported from each other.
+- Inbox refs fetch `GET /api/inbox?all=1&filter=all` on the first inbox tag in the composer, then reuse that list for the daemon connection; an `inbox` frame refreshes it. No fetch per keystroke and none at send.
+- Chip labels: history → session name (fallback short logical id) · role · HH:MM · first 8 words; inbox → sender/name · purpose · subject truncated. Duplicates collapse; unknown/stale refs get a muted `unresolved` chip and the send still goes through.
+- The first ~8 words / subject limits are named constants now, with a comment pointing the future config.toml ticket at them.
+- Session-cache entries are keyed by Pi id; resolution maps the ref's logical session id through `state.sessions` before reading `state.sessionCache`. A logical id that cannot be mapped falls through to tier 3.
