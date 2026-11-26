@@ -62,7 +62,22 @@ export async function inboxSummary(this: any): Promise<InboxSummary> {
 		total: messages.length,
 		limit: this.inboxStore.limit,
 		...(newest ? { newest: view(newest, map) } : {}),
+		...(this.inboxExtensionSeen ? { extension: true } : {}),
 	};
+}
+
+/**
+ * The optional `pixip-inbox` extension reports on load, so the dashboard can
+ * tell a channel that is merely empty from one that no agent can use yet.
+ * In-memory on purpose: no marker file to go stale after an uninstall, and any
+ * message still shows the bar on its own. Returns true only the first time, so
+ * the caller rebroadcasts once per daemon run.
+ */
+export async function inboxAnnounce(this: any): Promise<boolean> {
+	if (this.inboxExtensionSeen) return false;
+	this.inboxExtensionSeen = true;
+	await broadcastInbox.call(this);
+	return true;
 }
 
 export async function inboxList(this: any, filter: InboxFilter = {}): Promise<InboxList> {

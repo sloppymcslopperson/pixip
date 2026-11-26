@@ -9,7 +9,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { INBOX_PURPOSES, INBOX_TOOL, type InboxPurpose, runInboxTool } from "./inbox.ts";
+import { announceInbox, INBOX_PURPOSES, INBOX_TOOL, type InboxPurpose, runInboxTool } from "./inbox.ts";
 
 const PurposeSchema = Type.String({
 	enum: [...INBOX_PURPOSES],
@@ -25,6 +25,10 @@ const InboxSendParams = Type.Object({
 });
 
 export default function pixipInbox(pi: ExtensionAPI) {
+	// Tell the hub this agent can reach the inbox, so the dashboard shows the bar
+	// even before the first message. Fire-and-forget: load must never fail here.
+	void announceInbox();
+
 	pi.registerTool({
 		name: INBOX_TOOL,
 		label: "Send to inbox",

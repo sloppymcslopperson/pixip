@@ -20,7 +20,17 @@ export function purposeLabel(purpose) {
 }
 
 export function emptyInbox() {
-	return { unread: 0, total: 0, limit: 200, newest: null };
+	return { unread: 0, total: 0, limit: 200, newest: null, extension: false };
+}
+
+/**
+ * Dashboard bar visibility. An empty inbox is dead chrome unless the optional
+ * `pixip-inbox` extension announced itself, in which case the bar is the only
+ * sign that agents can leave messages. Any non-archived message shows it too.
+ */
+export function inboxVisible(inbox) {
+	const summary = inbox && typeof inbox === "object" ? inbox : {};
+	return Boolean(summary.newest) || summary.extension === true;
 }
 
 /** Defensive normalization for a frame or an HTTP response. */
@@ -32,6 +42,7 @@ export function normalizeInbox(value) {
 		total: Number.isFinite(raw.total) ? Math.max(0, raw.total) : 0,
 		limit,
 		newest: raw.newest && typeof raw.newest === "object" ? raw.newest : null,
+		extension: raw.extension === true,
 	};
 }
 

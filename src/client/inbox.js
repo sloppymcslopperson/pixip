@@ -12,6 +12,7 @@ import {
 	emptyInbox,
 	filterMessages,
 	INBOX_PURPOSES,
+	inboxVisible,
 	mergeWarnings,
 	newCapWarnings,
 	newestPreview,
@@ -70,6 +71,9 @@ export function renderInboxBar() {
 	if (ui.inboxBarSubject) ui.inboxBarSubject.textContent = subject;
 	if (ui.inboxBarPreview) ui.inboxBarPreview.textContent = preview;
 	if (ui.inboxBar) {
+		// The bar belongs to the dashboard list. The session view and the inbox
+		// page hide the list, and a late frame must not re-show it there.
+		ui.inboxBar.hidden = ui.list.hidden || !inboxVisible(state.inbox);
 		const title =
 			state.inbox.unread > 0 ? `Inbox · ${state.inbox.unread} unread` : `Inbox · ${state.inbox.total} message(s)`;
 		ui.inboxBar.title = title;

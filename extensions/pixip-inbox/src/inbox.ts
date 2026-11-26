@@ -120,6 +120,33 @@ export async function sendToInbox(input: InboxSendInput, deps: InboxDeps = {}): 
 	};
 }
 
+/**
+ * Best-effort "I am loaded" report, so the dashboard shows an empty inbox bar
+ * only when some agent actually has `inbox_send`. Never throws: a daemon that
+ * is down, restarting or token-mismatched must not turn an extension load into
+ * an error; the bar then stays hidden until a message arrives or the next load.
+ */
+export async function announceInbox(deps: InboxDeps = {}): Promise<boolean> {
+	const env = deps.env ?? process.env;
+	const fetchImpl = deps.fetch ?? fetch;
+	const base = env["PIXIP_DAEMON_URL"]?.trim();
+	if (!base) return false;
+	const headers: Record<string, string> = {};
+	const token = env["PIXIP_INBOX_TOKEN"]?.trim();
+	if (token) headers["authorization"] = `Bearer ${token}`;
+	try {
+		const url = new URL("api/inbox/extension", base.endsWith("/") ? base : `${base}/`);
+		const response = await fetchImpl(url, {
+			method: "POST",
+			headers,
+			signal: AbortSignal.timeout(deps.timeoutMs ?? 5_000),
+		});
+		return response.ok;
+	} catch {
+		return false;
+	}
+}
+
 /** Pi tool result: success is informational, failure is an actionable tool error. */
 export async function runInboxTool(input: InboxSendInput, deps: InboxDeps = {}) {
 	try {

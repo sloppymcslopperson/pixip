@@ -18,6 +18,7 @@ export function configureDashboard(next) {
 		"cacheCurrentSession",
 		"clearPendingAttachment",
 		"parkCurrentSession",
+		"renderInboxBar",
 		"resetSurface",
 	]);
 }
@@ -59,7 +60,8 @@ export async function showList() {
 	ui.settings.hidden = false;
 	ui.list.hidden = false;
 	ui.inboxPage.hidden = true;
-	ui.inboxBar.hidden = false;
+	// Visibility is content-driven: hidden while empty and no inbox extension.
+	deps.renderInboxBar();
 	ui.title.textContent = "sessions";
 	ui.sub.textContent = "";
 	ui.dot.className = "dot idle";

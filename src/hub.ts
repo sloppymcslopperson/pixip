@@ -182,6 +182,8 @@ export class Hub {
 	private readonly branchCache = new Map<string, { branch?: string; at: number }>();
 	/** Durable inbox shared by every session and the dashboard. */
 	readonly inboxStore: InboxStore;
+	/** Set when the optional `pixip-inbox` extension announced itself in this daemon run. */
+	inboxExtensionSeen = false;
 	/** Daemon URL injected into every Pi child, set once the server is listening. */
 	private daemonUrl?: string;
 
@@ -260,6 +262,14 @@ export class Hub {
 
 	async inboxDelete(id: string): Promise<void> {
 		return await hubInbox.inboxDelete.apply(this, arguments as any);
+	}
+
+	/**
+	 * The `pixip-inbox` extension is loaded: show the (otherwise hidden) empty
+	 * inbox bar. In-memory, so a daemon restart re-learns it from the next child.
+	 */
+	async inboxAnnounce(): Promise<boolean> {
+		return await hubInbox.inboxAnnounce.apply(this, arguments as any);
 	}
 
 	/** Recompute live peer lists after a create, stop, archive or child exit. */

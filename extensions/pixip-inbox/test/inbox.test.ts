@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { after, describe, it } from "node:test";
 
-import { runInboxTool, sendToInbox } from "../src/inbox.ts";
+import { announceInbox, runInboxTool, sendToInbox } from "../src/inbox.ts";
 
 interface Captured {
 	method: string;
@@ -140,6 +140,24 @@ describe("inbox_send", () => {
 				),
 			/could not reach the pixip daemon/,
 		);
+	});
+
+	it("announces itself so an empty inbox bar can appear, and never throws", async () => {
+		const hub = await boot();
+		assert.equal(await announceInbox({ env: { PIXIP_DAEMON_URL: hub.url } }), true);
+		const call = hub.captured[0];
+		assert.ok(call);
+		assert.equal(call.method, "POST");
+		assert.equal(call.url, "/api/inbox/extension");
+		assert.equal("authorization" in call.headers, false);
+
+		const token = await boot();
+		await announceInbox({ env: { PIXIP_DAEMON_URL: token.url, PIXIP_INBOX_TOKEN: "secret" } });
+		assert.equal(token.captured[0]?.headers["authorization"], "Bearer secret");
+
+		// No daemon URL, or a daemon that is not listening: silently no report.
+		assert.equal(await announceInbox({ env: {} }), false);
+		assert.equal(await announceInbox({ env: { PIXIP_DAEMON_URL: "http://127.0.0.1:1/" }, timeoutMs: 500 }), false);
 	});
 
 	it("returns a tool result, and a tool error instead of throwing", async () => {

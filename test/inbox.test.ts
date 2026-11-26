@@ -201,6 +201,35 @@ describe("hub inbox", () => {
 		assert.equal(list.messages[0]?.senderStatus, "deleted");
 		await restarted.shutdown();
 	});
+
+	it("hides an empty inbox until the extension announces itself, once", async () => {
+		const paths = await fixtureRoot("pixip-inbox-announce-");
+		const hub = hubFor(paths);
+		const frames: string[] = [];
+		hub.watch((frame) => frames.push(frame));
+		try {
+			const empty = await hub.inboxSummary();
+			assert.equal(empty.newest, undefined);
+			assert.equal(empty.extension, undefined);
+
+			assert.equal(await hub.inboxAnnounce(), true);
+			assert.equal((await hub.inboxSummary()).extension, true);
+			assert.equal(frames.filter((frame) => frame.includes('"extension":true')).length, 1);
+
+			assert.equal(await hub.inboxAnnounce(), false);
+			assert.equal(frames.filter((frame) => frame.includes('"t":"inbox"')).length, 1);
+		} finally {
+			await hub.shutdown();
+		}
+
+		// In memory only: a new daemon run waits for the next child to announce.
+		const restarted = hubFor(paths);
+		try {
+			assert.equal(await restarted.inboxSummary().then((summary) => summary.extension), undefined);
+		} finally {
+			await restarted.shutdown();
+		}
+	});
 });
 
 describe("inbox routes", () => {
@@ -272,6 +301,28 @@ describe("inbox routes", () => {
 				body: JSON.stringify({ subject: "x", body: "y", purpose: "no-rush" }),
 			});
 			assert.equal(postRefused.status, 401);
+		} finally {
+			await server.close();
+			await hub.shutdown();
+		}
+	});
+
+	it("accepts the extension announce behind the same token seam", async () => {
+		const paths = await fixtureRoot("pixip-inbox-extension-");
+		const { hub, server } = await boot(paths, "secret");
+		const announce = (headers: Record<string, string> = {}) =>
+			fetch(new URL("api/inbox/extension", server.url), { method: "POST", headers });
+		try {
+			assert.equal((await announce()).status, 401);
+			const allowed = await announce({ authorization: "Bearer secret" });
+			assert.equal(allowed.status, 200);
+			assert.deepEqual(await allowed.json(), { ok: true, announced: true });
+			const again = await announce({ authorization: "Bearer secret" });
+			assert.deepEqual(await again.json(), { ok: true, announced: false });
+
+			const summary = await hub.inboxSummary();
+			assert.equal(summary.extension, true);
+			assert.equal(summary.newest, undefined);
 		} finally {
 			await server.close();
 			await hub.shutdown();

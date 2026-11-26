@@ -6,7 +6,9 @@ import {
 	badgeLabel,
 	capLevel,
 	capThresholds,
+	emptyInbox,
 	filterMessages,
+	inboxVisible,
 	mergeWarnings,
 	newCapWarnings,
 	newestPreview,
@@ -39,6 +41,7 @@ describe("inbox model", () => {
 			total: 7,
 			limit: 20,
 			newest: { id: "x" },
+			extension: false,
 		});
 		assert.equal(normalizeInbox(undefined).limit, 200);
 		assert.equal(badgeLabel(0), "");
@@ -51,6 +54,15 @@ describe("inbox model", () => {
 			subject: "Subject",
 			preview: "line one line two",
 		});
+	});
+
+	it("shows the bar only for a message or an announced extension", () => {
+		assert.equal(inboxVisible(emptyInbox()), false);
+		assert.equal(inboxVisible(undefined), false);
+		assert.equal(inboxVisible({ unread: 0, total: 0, limit: 200, newest: null, extension: true }), true);
+		assert.equal(inboxVisible({ unread: 1, total: 1, limit: 200, newest: message(1) }), true);
+		// Archived-only inboxes (total > 0, no visible newest) stay hidden.
+		assert.equal(inboxVisible({ unread: 0, total: 3, limit: 200, newest: null }), false);
 	});
 
 	it("grades the cap and only warns once per threshold", () => {

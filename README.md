@@ -149,7 +149,8 @@ do in the TUI.
   device-local (`localStorage`), scaling only the transcript so the composer and
   the rest of the chrome stay fixed (long-press resets, `Ctrl/Cmd` `-`/`+`/`0`);
 - a dashboard bottom bar with the newest inbox message preview and a live
-  unread badge, opening a dedicated `#inbox` page with
+  unread badge (hidden while the inbox is empty and no agent has the
+  `pixip-inbox` extension loaded), opening a dedicated `#inbox` page with
   all/unread/purpose/archived filters, read/archive/restore/delete actions and
   a tap-to-session reply that prefills the composer;
 - dashboard settings sheet from the header gear, with a device-local toggle for
@@ -233,13 +234,19 @@ set, otherwise to the daemon running for `--data-dir`. Purposes are
 The REST surface is `POST/GET /api/inbox`, `POST /api/inbox/read-all`,
 `POST /api/inbox/:id/read|archive|restore`, and `DELETE /api/inbox/:id`; the
 dashboard socket receives an `inbox` frame with the unread count and newest
-message on every change. `--inbox-token` (or `PIXIP_INBOX_TOKEN`) turns on the
+message on every change. `POST /api/inbox/extension` is the addon's one-shot
+"I am loaded" report: while it has not been seen and the inbox is empty, the
+dashboard bar stays hidden instead of showing dead chrome. The flag lives in
+daemon memory, so a restart re-learns it from the next Pi child that loads the
+extension. `--inbox-token` (or `PIXIP_INBOX_TOKEN`) turns on the
 `Authorization: Bearer` seam for the API and passes the same token to Pi
 children; it is off by default. Every child gets `PIXIP_DAEMON_URL` regardless.
 
 `extensions/pixip-inbox` is the opt-in agent face: `inbox_send({subject, body,
   purpose})` posts to the same endpoint, sends `PIXIP_INBOX_TOKEN` only when it
 is set, and returns a tool error (daemon down, wrong token) instead of crashing.
+On load it announces itself (best-effort, failures ignored), which is what makes
+the empty inbox bar appear.
 
 ```bash
 pi install /path/to/pixip/extensions/pixip-inbox

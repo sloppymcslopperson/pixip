@@ -280,6 +280,12 @@ async function handleHttp(
 				send(200, JSON.stringify({ ok: true, message }));
 				return;
 			}
+			if (req.method === "POST" && url.pathname === "/api/inbox/extension") {
+				// The optional `pixip-inbox` extension reports on load so the dashboard can
+				// hide an empty inbox that no agent can reach yet.
+				send(200, JSON.stringify({ ok: true, announced: await hub.inboxAnnounce() }));
+				return;
+			}
 			if (req.method === "POST" && url.pathname === "/api/inbox/read-all") {
 				send(200, JSON.stringify({ ok: true, read: await hub.inboxRead("all") }));
 				return;

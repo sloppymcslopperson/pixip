@@ -51,6 +51,8 @@ export interface InboxSummary {
 	total: number;
 	limit: number;
 	newest?: InboxView;
+	/** True once the optional `pixip-inbox` extension has announced itself to this daemon. */
+	extension?: boolean;
 }
 
 export interface InboxList {

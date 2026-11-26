@@ -6,7 +6,7 @@ import { bindScaleButton, readScale, setBarMenu, setScale, softRefresh } from ".
 import { configureDashboard, showList } from "./dashboard.js";
 import { configureDashboardList, refreshDashboard } from "./dashboardList.js";
 import { configureDashboardWorktree } from "./dashboardWorktree.js";
-import { initialInbox, showInboxPage } from "./inbox.js";
+import { initialInbox, renderInboxBar, showInboxPage } from "./inbox.js";
 import {
 	archiveInactive,
 	configureDashboardSettings,
@@ -371,7 +371,7 @@ ui.log.addEventListener("click", (event) => {
  *  notices get a dismissible sheet instead. */
 
 configureComposer({ surfaceOpen });
-configureDashboard({ cacheCurrentSession, clearPendingAttachment, parkCurrentSession, resetSurface });
+configureDashboard({ cacheCurrentSession, clearPendingAttachment, parkCurrentSession, renderInboxBar, resetSurface });
 configureDashboardList({ archiveInactive, openSessionActions });
 configureDashboardWorktree({ refresh: refreshDashboard, openSessionActions });
 configureDashboardSettings({ sheet });
