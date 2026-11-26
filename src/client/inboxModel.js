@@ -33,6 +33,17 @@ export function inboxVisible(inbox) {
 	return Boolean(summary.newest) || summary.extension === true;
 }
 
+/**
+ * Update the bar's counts from a list snapshot without losing what the list
+ * response does not carry: the newest message and the addon flag. Replacing the
+ * whole summary here hid the bar as soon as the page was opened.
+ */
+export function mergeInboxSummary(inbox, list) {
+	const base = normalizeInbox(inbox);
+	const next = normalizeInbox(list);
+	return { unread: next.unread, total: next.total, limit: next.limit, newest: base.newest, extension: base.extension };
+}
+
 /** Defensive normalization for a frame or an HTTP response. */
 export function normalizeInbox(value) {
 	const raw = value && typeof value === "object" ? value : {};

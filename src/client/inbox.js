@@ -17,6 +17,7 @@ import {
 	newCapWarnings,
 	newestPreview,
 	normalizeInbox,
+	mergeInboxSummary,
 	purposeLabel,
 	replyPrefix,
 	replySession,
@@ -129,9 +130,9 @@ async function loadInbox() {
 	viewState.unread = normalized.unread;
 	viewState.total = normalized.total;
 	viewState.limit = normalized.limit;
-	// The list response is the authoritative snapshot; update the bar too, so
-	// opening the page does not leave a stale count until the next frame.
-	state.inbox = normalized;
+	// The list response is the authoritative snapshot for counts; keep the newest
+	// message and the addon flag, which only the summary/frame carries.
+	state.inbox = mergeInboxSummary(state.inbox, data);
 	renderInboxBar();
 }
 

@@ -10,6 +10,7 @@ import {
 	filterMessages,
 	inboxVisible,
 	mergeWarnings,
+	mergeInboxSummary,
 	newCapWarnings,
 	newestPreview,
 	normalizeInbox,
@@ -61,8 +62,27 @@ describe("inbox model", () => {
 		assert.equal(inboxVisible(undefined), false);
 		assert.equal(inboxVisible({ unread: 0, total: 0, limit: 200, newest: null, extension: true }), true);
 		assert.equal(inboxVisible({ unread: 1, total: 1, limit: 200, newest: message(1) }), true);
+		assert.equal(inboxVisible({ unread: 0, total: 1, limit: 200, newest: message(1) }), true);
 		// Archived-only inboxes (total > 0, no visible newest) stay hidden.
 		assert.equal(inboxVisible({ unread: 0, total: 3, limit: 200, newest: null }), false);
+	});
+
+	it("keeps the visible summary when a list snapshot updates the counts", () => {
+		// The list response carries no newest message and no addon flag; replacing
+		// the summary with it hid the bar as soon as the inbox page was opened.
+		const bar = { unread: 1, total: 2, limit: 200, newest: message(1), extension: true };
+		const merged = mergeInboxSummary(bar, { unread: 0, total: 2, limit: 200, messages: [] });
+		assert.deepEqual(merged, { unread: 0, total: 2, limit: 200, newest: message(1), extension: true });
+		assert.equal(inboxVisible(merged), true);
+
+		// Without a previous summary it still yields a usable shape.
+		assert.deepEqual(mergeInboxSummary(undefined, { unread: 3, total: 3, limit: 20 }), {
+			unread: 3,
+			total: 3,
+			limit: 20,
+			newest: null,
+			extension: false,
+		});
 	});
 
 	it("grades the cap and only warns once per threshold", () => {
