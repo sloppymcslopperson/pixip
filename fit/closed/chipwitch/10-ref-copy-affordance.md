@@ -1,5 +1,5 @@
 ---
-grilled: false
+grilled: true
 project: pixip
 series: chipwitch
 ---
@@ -59,3 +59,19 @@ Give every history message and every inbox message an action that puts its ref t
 
 - `npm run check` silently skips `check:browser` when `PIXIP_CHROME` is unset, so a green `check` is not browser evidence. Say explicitly which of the two you ran.
 - The denied-clipboard sheet fallback cannot be reached on loopback; cover it by loading the UI over a non-loopback `--host`/http bind, or assert it in the scripted check with clipboard permission denied.
+
+### Decisions (grilled)
+
+- Two corner buttons on every visible history block: `#` copies the bare tag in one tap, `…` opens a small menu.
+- The `…` menu contains `fork` on user blocks (moved out of the inline header), the copy-tag-plus-text action on every block, and later the insert-into-composer default from ticket 50. This decision supersedes the earlier "do not replace the fork action" boundary.
+- The tag-plus-text payload is the tag, a blank line, then the excerpt as a Markdown blockquote (`> ` on each line).
+- The excerpt is the first line of the block's rendered/visible text, whitespace collapsed, capped at 50 characters with an ellipsis (`EXCERPT_CHARS = 50`), with a comment pointing the future config.toml ticket at it.
+- A live block gets its ref identity stamped at paint time, so `#` works immediately after the message ends; a reload uses the painted `data-entry` path.
+- Inbox cards get the same `#` action in their actions row, including archived cards; copying does not mark read.
+- Everything still goes through `src/client/clipboard.js`.
+
+### Resolved open questions
+
+- Excerpt cap: first line, 50 characters, later configurable through config.toml.
+- Second action location: a second item in the `…` menu.
+- Excerpt source text for assistant/tool/bash blocks: the block's rendered/visible text.
