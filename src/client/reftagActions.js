@@ -1,6 +1,7 @@
 // Reftag actions for transcript blocks and inbox cards. Neutral module: it
 // imports the clipboard, toast and kernel state, never a feature cluster.
 import { copyText } from "./clipboard.js";
+import { resolveRefTags } from "./reftagResolve.js";
 import { formatRefTag, refForEntry } from "./reftags.js";
 import { send } from "./transport.js";
 import { state } from "./kernel/state.js";
@@ -132,6 +133,7 @@ export function stampRef(block, tag) {
 
 /** Decorate every painted snapshot block under `root` that has an entry id. */
 export function decorateRefBlocks(root = ui.log) {
+	void decorateUserRefs(root);
 	if (!root || typeof root.querySelectorAll !== "function") return;
 	for (const block of root.querySelectorAll("section[data-entry], details[data-entry]")) {
 		const entryId = block.dataset.entry;
@@ -149,11 +151,46 @@ export function decorateRefBlocks(root = ui.log) {
 	}
 }
 
+/**
+ * Turn inert user-message ref placeholders into chips in place. Unresolved tags
+ * become their literal `[pixip-ref=…]` text. Injectable elements are ignored,
+ * so overlapping paint passes are harmless.
+ */
+export async function decorateUserRefs(root = ui.log) {
+	if (!root || typeof root.querySelectorAll !== "function") return;
+	const tokens = [...root.querySelectorAll(".reftag-token[data-reftag]")];
+	if (tokens.length === 0) return;
+	const chips = await resolveRefTags(tokens.map((token) => token.dataset.reftag ?? "").join(" "));
+	const byTag = new Map(chips.map((chip) => [chip.tag, chip]));
+	for (const token of tokens) {
+		const tag = token.dataset.reftag ?? "";
+		const chip = byTag.get(tag);
+		if (!chip || chip.unresolved) {
+			token.replaceWith(document.createTextNode(tag));
+			continue;
+		}
+		const chipNode = document.createElement("span");
+		chipNode.className = `reftag-inline ${chip.kind}`;
+		chipNode.dataset.reftag = tag;
+		chipNode.title = tag;
+		const label = document.createElement("span");
+		label.className = "reftag-inline-label";
+		label.textContent = chip.label;
+		chipNode.append(label);
+		token.replaceWith(chipNode);
+	}
+}
+
 /** The block's rendered text without the action bar or the speaker label. */
 export function blockText(block) {
 	if (!block) return "";
 	const clone = block.cloneNode(true);
 	clone.querySelectorAll(".reftag-actions, .who, .load-full").forEach((node) => node.remove());
+	// A chipped ref is display-only; the excerpt is about what was sent, so put
+	// the raw tag back before reading the text.
+	for (const chip of clone.querySelectorAll(".reftag-inline[data-reftag]")) {
+		chip.replaceWith(clone.ownerDocument.createTextNode(chip.dataset.reftag ?? ""));
+	}
 	return excerptText(clone.textContent ?? "");
 }
 

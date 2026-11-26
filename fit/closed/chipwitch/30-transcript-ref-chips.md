@@ -1,5 +1,5 @@
 ---
-grilled: false
+grilled: true
 project: pixip
 series: chipwitch
 ---
@@ -50,3 +50,13 @@ Render ref tags inside sent user messages as the same chips, so a message carryi
   ```
 
 - `npm run check` silently skips `check:browser` when `PIXIP_CHROME` is unset. Say explicitly which of the two you ran.
+
+### Decisions (grilled)
+
+- Chips render inline in the prose at the tag's exact position; surrounding text does not move.
+- `renderUserBody` emits escaped text plus inert chip placeholders carrying the raw tag in `data-tag`; a post-paint decoration pass (same pattern as `decorateRefBlocks`) resolves labels through the existing `reftagResolve.js` tiers. `render.js` stays pure and synchronous so `test/` can cover it.
+- Transcript chips are inert in this ticket. Navigation stays in `open/chipwitch/60-reftag-chip-navigation.md`.
+- Label rules are the composer rules: history → session name (fallback short logical id) · role · HH:MM · first 8 words; inbox → sender · purpose · subject clipped at 60 characters. Reuse the `reftagText.js` constants instead of copying them.
+- The existing `#` copy button and `…` menu (`copy with text`) are the raw-tag path; no new long-press gesture. Tests assert the raw tag is copyable from a chipped user block.
+- An unresolved or stale tag renders as the escaped literal `[pixip-ref=…]` text, not a muted chip (deliberately different from the composer).
+- Optimistic echo and Pi's own echo share the same `renderUserBody` + decorate path, so they must produce identical markup.

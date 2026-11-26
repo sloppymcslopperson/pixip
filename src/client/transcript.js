@@ -4,7 +4,7 @@ import { endCompaction, startCompaction } from "./compaction.js";
 import { applyLiveThinkingFrame, applyThinkingEvent, createLiveThought } from "./thinkingStream.js";
 import { installDeps } from "./configure.js";
 import { renderQueue } from "./queueView.js";
-import { decorateRefBlocks, stampRef, tagForLiveMessage } from "./reftagActions.js";
+import { decorateRefBlocks, decorateUserRefs, stampRef, tagForLiveMessage } from "./reftagActions.js";
 import { scheduleScroll, scrollToEnd } from "./scroll.js";
 import { applyInfo, renderPeerNotice, setBusy } from "./sessionView.js";
 import { queueCount, queueFromEvent } from "./queue.js";
@@ -326,6 +326,7 @@ export function handleEvent(event) {
 				state.pendingUser = null;
 				const section = appendBlock("user", `<div class="who">you</div>${renderUserBody(message)}`, true);
 				stampRef(section, tagForLiveMessage(message));
+				void decorateUserRefs(section);
 				if (state.info?.state === "busy") showThinkingIndicator();
 			} else if (message.role === "assistant") {
 				if (typeof message.timestamp === "number") liveAssistantTs = message.timestamp;

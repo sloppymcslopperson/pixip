@@ -9,6 +9,7 @@ import { failPendingSession } from "./session.js";
 import { renderFooter } from "./sessionView.js";
 import { closeSession, connectionState } from "./transport.js";
 import { listSessions } from "./dashboardApi.js";
+import { decorateUserRefs } from "./reftagActions.js";
 import { renderList } from "./dashboardList.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
@@ -76,6 +77,12 @@ export function handleFrame(fromSessionId, frame) {
 			applyInboxFrame(frame.inbox);
 			break;
 		case "hello":
+			if (Array.isArray(frame.sessions)) {
+				state.sessions = frame.sessions;
+				// A deep link has no dashboard `sessions` frame; hello already
+				// carries the list, so cross-session refs can resolve here.
+				void decorateUserRefs();
+			}
 			if (!state.sessionId) {
 				if (typeof frame.defaultCwd === "string") state.defaultCwd = frame.defaultCwd;
 				if (typeof frame.home === "string") state.home = frame.home;
@@ -85,6 +92,9 @@ export function handleFrame(fromSessionId, frame) {
 		case "sessions": {
 			const sessions = Array.isArray(frame.sessions) ? frame.sessions : [];
 			state.sessions = sessions;
+			// A deep link paints the transcript before this frame; refs to other
+			// sessions only resolve once their names and locations are here.
+			void decorateUserRefs();
 			evictStoppedParked(sessions);
 			if (!state.sessionId) {
 				renderList(sessions, state.defaultCwd, state.home);

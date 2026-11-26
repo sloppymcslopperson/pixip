@@ -8,6 +8,7 @@ import { clearInput } from "./composerInput.js";
 import { scrollToEnd } from "./scroll.js";
 import { appendBlock } from "./transcriptView.js";
 import { renderUserBody } from "./render.js";
+import { decorateUserRefs } from "./reftagActions.js";
 import { formatSession } from "./sessionInfo.js";
 import { notice, textSheet, toast } from "./toast.js";
 import { send } from "./transport.js";
@@ -204,6 +205,7 @@ export function submitText(text, attachment) {
 		`<div class="who">you</div>${renderUserBody({ content: optimisticContent(text, attachment) })}`,
 		true,
 	);
+	void decorateUserRefs(state.pendingUser);
 	clearInput();
 	clearPendingAttachment();
 	scrollToEnd(true);

@@ -50,6 +50,24 @@ function message(index, text = `history entry ${index}`) {
 }
 
 const entries = Array.from({ length: HISTORY_ENTRIES }, (_, index) => message(index));
+// A persisted user message carrying two ref tags. The tokens are filled once
+// the hub knows the logical session id and the inbox id, so a reload exercises
+// the snapshot path instead of the live one.
+entries.push({
+	type: "message",
+	id: "h320",
+	parentId: "h319",
+	timestamp: "2026-11-21T00:00:02.000Z",
+	message: {
+		role: "user",
+		content: [
+			{
+				type: "text",
+				text: "persisted refs [pixip-ref=history/__LOGICAL__/h319] and [pixip-ref=history/__LOGICAL__/h318]",
+			},
+		],
+	},
+});
 
 async function bootFixture() {
 	const paths = await fixtureRoot("pixip-browser-", { flat: true });
@@ -90,6 +108,13 @@ async function bootFixture() {
 		purpose: "attention-needed",
 		sessionId: main.logicalId,
 	});
+	// The tag names the Pi session id, which the sessions frame carries, so a
+	// deep link resolves it as a name-only chip once that frame arrives.
+	await sessionFile(
+		paths,
+		entries.map((entry) => JSON.stringify(entry).replaceAll("__LOGICAL__", id).replaceAll("__INBOX__", inbox.id)),
+		{ cwd: paths.dir },
+	);
 	return {
 		paths,
 		hub,
@@ -204,7 +229,7 @@ async function runRefCopyFlow(page, base, sessionId, hub) {
 
 	// The menu carries fork on a user block and tag-plus-text on every block.
 	const menu = await page.evaluate(() => {
-		document.querySelector("#log .reftag-actions [data-reftag-more]")?.click();
+		document.querySelector("#log .block.user[data-entry] .reftag-actions [data-reftag-more]")?.click();
 		const labels = [...document.querySelectorAll("body > .reftag-menu button")].map((button) =>
 			(button.textContent ?? "").trim(),
 		);
@@ -374,7 +399,11 @@ async function runRefTagChipsFlow(page, base, sessionId, fixture) {
 	await setComposer(page, historyTag);
 	await page.click("#send");
 	await page.waitForFunction(
-		(tag) => [...document.querySelectorAll("#log .block.user")].some((node) => (node.textContent ?? "").includes(tag)),
+		(tag) =>
+			[...document.querySelectorAll("#log .block.user")].some(
+				(node) =>
+					(node.textContent ?? "").includes(tag) || node.querySelector(`.reftag-inline[data-reftag="${tag}"]`) !== null,
+			),
 		{ timeout: FLOW_TIMEOUT },
 		historyTag,
 	);
@@ -385,6 +414,150 @@ async function runRefTagChipsFlow(page, base, sessionId, fixture) {
 		`browser-check reftag chips ${await viewportOf(page)}: inbox fetches ${afterInbox - beforeInbox}, history fetches 0, sent ${historyTag}`,
 	);
 	await checkNoOverflow(page, "composer reftag chips");
+}
+
+async function inlineChips(page, selector = ".block.user") {
+	return await page.evaluate((selector) => {
+		return [...document.querySelectorAll(`${selector} .reftag-inline`)].map((chip) => ({
+			label: chip.querySelector(".reftag-inline-label")?.textContent ?? "",
+			tag: chip.dataset.reftag ?? "",
+		}));
+	}, selector);
+}
+
+async function runTranscriptRefChipsFlow(page, base, sessionId, hub) {
+	const historyTag = `[pixip-ref=history/${sessionId}/h319]`;
+	const secondHistoryTag = `[pixip-ref=history/${sessionId}/h318]`;
+	await page.goto(`${base}?flow=transcript-refs#s=${sessionId}`, {
+		waitUntil: "domcontentloaded",
+		timeout: FLOW_TIMEOUT,
+	});
+	await waitForSession(page);
+	await page.waitForFunction(
+		(tag) => document.querySelector(`#log .block.user .reftag-inline[data-reftag="${tag}"]`) !== null,
+		{ timeout: FLOW_TIMEOUT },
+		historyTag,
+	);
+
+	// Snapshot/reload path: both persisted refs become inline chips in place.
+	const persisted = await inlineChips(page);
+	assert.equal(persisted.length, 2, "the persisted message renders two inline chips");
+	assert.ok(
+		persisted.some((chip) => chip.tag === historyTag && /history entry 319/.test(chip.label)),
+		`history chip label: ${JSON.stringify(persisted)}`,
+	);
+	assert.ok(
+		persisted.some((chip) => chip.tag === secondHistoryTag && /history entry 318/.test(chip.label)),
+		`second history chip label: ${JSON.stringify(persisted)}`,
+	);
+	const rawGone = await page.evaluate(
+		(tags) => {
+			const [tag, second] = tags;
+			const block = [...document.querySelectorAll("#log .block.user")].find(
+				(node) => node.querySelector(`.reftag-inline[data-reftag="${tag}"]`) !== null,
+			);
+			return {
+				hasRawHistory: (block?.textContent ?? "").includes(tag),
+				hasRawSecond: (block?.textContent ?? "").includes(second),
+			};
+		},
+		[historyTag, secondHistoryTag],
+	);
+	assert.deepEqual(rawGone, { hasRawHistory: false, hasRawSecond: false }, "the raw brackets are not prose");
+
+	// The message keeps its own copyable tag through the existing `#` action.
+	await page.evaluate((tag) => {
+		const block = [...document.querySelectorAll("#log .block.user")].find(
+			(node) => node.querySelector(`.reftag-inline[data-reftag="${tag}"]`) !== null,
+		);
+		block?.querySelector("[data-reftag-copy]")?.click();
+	}, historyTag);
+	assert.match(await lastCopied(page), /^\[pixip-ref=history\/[A-Za-z0-9._-]+\/h320\]$/);
+
+	// An unresolved tag is escaped literal text, never a chip.
+	await inject(hub, sessionId, {
+		type: "message_start",
+		message: {
+			role: "user",
+			timestamp: 1735689600999,
+			content: [{ type: "text", text: "unknown [pixip-ref=inbox/does-not-exist]" }],
+		},
+	});
+	await page.waitForFunction(
+		() =>
+			[...document.querySelectorAll("#log .block.user")].some((node) => (node.textContent ?? "").includes("unknown ")),
+		{ timeout: FLOW_TIMEOUT },
+	);
+	await page.waitForFunction(
+		() => {
+			const block = [...document.querySelectorAll("#log .block.user")].at(-1);
+			return (block?.querySelectorAll(".reftag-token").length ?? 0) === 0;
+		},
+		{ timeout: FLOW_TIMEOUT },
+	);
+	const unresolved = await page.evaluate(() => {
+		const block = [...document.querySelectorAll("#log .block.user")].at(-1);
+		return {
+			text: block?.textContent ?? "",
+			chips: block?.querySelectorAll(".reftag-inline").length ?? -1,
+		};
+	});
+	assert.match(unresolved.text, /unknown \[pixip-ref=inbox\/does-not-exist\]/);
+	assert.equal(unresolved.chips, 0, "an unresolved tag does not become a chip");
+
+	// Optimistic echo and Pi's own echo render the same chip label.
+	await setComposer(page, historyTag);
+	await page.click("#send");
+	await page.waitForFunction(
+		(tag) => {
+			const block = [...document.querySelectorAll("#log .block.user")].at(-1);
+			return block?.querySelector(`.reftag-inline[data-reftag="${tag}"]`) !== null;
+		},
+		{ timeout: FLOW_TIMEOUT },
+		historyTag,
+	);
+	const optimistic = await page.evaluate(() => {
+		const block = [...document.querySelectorAll("#log .block.user")].at(-1);
+		const chip = block?.querySelector(".reftag-inline");
+		return chip
+			? { label: chip.querySelector(".reftag-inline-label")?.textContent ?? "", tag: chip.dataset.reftag ?? "" }
+			: null;
+	});
+	await inject(hub, sessionId, {
+		type: "message_start",
+		message: {
+			role: "user",
+			timestamp: 1735689601777,
+			content: [{ type: "text", text: historyTag }],
+		},
+	});
+	await page.waitForFunction(
+		(tag) => {
+			const block = [...document.querySelectorAll("#log .block.user")].at(-1);
+			return block?.dataset?.reftag !== undefined && block.querySelector(`.reftag-inline[data-reftag="${tag}"]`);
+		},
+		{ timeout: FLOW_TIMEOUT },
+		historyTag,
+	);
+	const echoed = await page.evaluate(() => {
+		const block = [...document.querySelectorAll("#log .block.user")].at(-1);
+		const chip = block?.querySelector(".reftag-inline");
+		return chip
+			? { label: chip.querySelector(".reftag-inline-label")?.textContent ?? "", tag: chip.dataset.reftag ?? "" }
+			: null;
+	});
+	assert.deepEqual(echoed, optimistic, "optimistic and Pi echoes render identically");
+
+	// Reload repaints the persisted chips from the snapshot, not from the DOM.
+	await page.reload({ waitUntil: "domcontentloaded", timeout: FLOW_TIMEOUT });
+	await waitForSession(page);
+	await page.waitForFunction(
+		(tag) => document.querySelector(`#log .block.user .reftag-inline[data-reftag="${tag}"]`) !== null,
+		{ timeout: FLOW_TIMEOUT },
+		historyTag,
+	);
+	assert.equal((await inlineChips(page)).length, 2, "a reload keeps both chips");
+	await checkNoOverflow(page, "transcript ref chips");
 }
 
 async function runDashboardFlow(page, base, sessionId) {
@@ -891,6 +1064,7 @@ async function runViewport(browser, base, fixture, viewport) {
 		await runComposerFlow(page, base, fixture.sessionId, fixture.paths, viewport);
 		await runRefTagChipsFlow(page, base, fixture.sessionId, fixture);
 		await runRefCopyFlow(page, base, fixture.sessionId, fixture.hub);
+		await runTranscriptRefChipsFlow(page, base, fixture.sessionId, fixture.hub);
 		await runSelectFlow(page, base, fixture.sessionId, fixture.hub, fixture.paths);
 		await runPanelFlow(page, base, fixture.sessionId);
 		await runHistoryFlow(page, base, fixture.sessionId);

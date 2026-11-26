@@ -15,6 +15,8 @@ import {
 	renderAssistantBody,
 	renderEntry,
 	renderMessage,
+	renderUserBody,
+	renderUserText,
 	summarizeArgs,
 	textOf,
 	toolBlock,
@@ -171,6 +173,54 @@ describe("rendering", () => {
 
 	it("escapes tool names and summaries", () => {
 		assert.equal(escapeHtml('<a href="x">'), "&lt;a href=&quot;x&quot;&gt;");
+	});
+
+	describe("renderUserText ref placeholders", () => {
+		it("splices one tag with escaping intact around and inside the prose", () => {
+			const html = renderUserText('<b>see</b> "[pixip-ref=history/s/e1]" & more');
+			assert.match(html, /^&lt;b&gt;see&lt;\/b&gt; &quot;/);
+			assert.match(
+				html,
+				/<span class="reftag-token" data-reftag="\[pixip-ref=history\/s\/e1\]">\[pixip-ref=history\/s\/e1\]<\/span>/,
+			);
+			assert.match(html, /&quot; &amp; more$/);
+		});
+
+		it("splices several tags in one line, keeping the prose between them", () => {
+			const html = renderUserText(
+				"a [pixip-ref=history/s/e1] b [pixip-ref=inbox/m1] c [pixip-ref=history/s/msg:user:1735689600000] d",
+			);
+			assert.equal(html.match(/class="reftag-token"/g)?.length, 3);
+			assert.match(html, /<\/span> b <span/);
+			assert.match(html, /a <span/);
+			assert.match(html, / d$/);
+		});
+
+		it("leaves malformed and non-pixip fragments as escaped text", () => {
+			for (const text of [
+				"[pixip-ref=history/only-two]",
+				"[pixip-ref=history/a/b/c]",
+				"[ref=history/a/b]",
+				"[pixip-ref=inbox/a b]",
+			]) {
+				const html = renderUserText(text);
+				assert.equal(html.includes("reftag-token"), false, text);
+				assert.equal(html, escapeHtml(text), text);
+			}
+		});
+
+		it("keeps the raw tag as the placeholder text so an unresolved ref is literal", () => {
+			const tag = "[pixip-ref=inbox/unknown]";
+			assert.ok(renderUserText(tag).includes(`>${tag}<`));
+		});
+	});
+
+	it("renders user ref placeholders through renderUserBody", () => {
+		const html = renderUserBody({
+			content: [{ type: "text", text: "before [pixip-ref=history/s/e1] after" }],
+		});
+		assert.match(html, /class="reftag-token"/);
+		assert.match(html, /^<div class="text">before /);
 	});
 
 	it("renders a bash card with the excluded badge and terminal state", () => {

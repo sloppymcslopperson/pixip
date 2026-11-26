@@ -4,6 +4,7 @@
 
 import { formatTokens } from "./footer.js";
 import { escapeHtml, markdownToHtml } from "./markdown.js";
+import { scanRefTags } from "./reftags.js";
 
 export { escapeHtml };
 
@@ -316,10 +317,32 @@ export function toolResultParts(message, sessionId) {
 	return { output, image };
 }
 
+/**
+ * Escaped user text with each ref tag replaced by an inert inline placeholder.
+ * The tag stays the element's text until `decorateUserRefs` resolves it, so an
+ * unresolved tag is literal text even if decoration never runs. Matching on the
+ * escaped string is safe: escaping only produces `&...;`, which the strict tag
+ * grammar cannot contain.
+ */
+export function renderUserText(text) {
+	const escaped = escapeHtml(text);
+	const found = scanRefTags(escaped);
+	if (found.length === 0) return escaped;
+	let html = "";
+	let at = 0;
+	for (const match of found) {
+		html += escaped.slice(at, match.start);
+		const tag = escapeHtml(match.tag);
+		html += `<span class="reftag-token" data-reftag="${tag}">${tag}</span>`;
+		at = match.end;
+	}
+	return html + escaped.slice(at);
+}
+
 /** Inside a user block: text plus any recorded image thumbnails. */
 export function renderUserBody(message) {
 	const content = message?.content;
-	const text = escapeHtml(textOf(content));
+	const text = renderUserText(textOf(content));
 	const images = Array.isArray(content)
 		? content.filter(
 				(block) =>
