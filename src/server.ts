@@ -69,6 +69,13 @@ interface ServerState {
 }
 
 const LOOPBACK = /^(127\.|::1$|::ffff:127\.)/;
+const WILDCARD_HOSTS = new Set(["0.0.0.0", "::", "[::]"]);
+
+/** Compare IPv4-mapped IPv6 forms with their plain IPv4 spelling. */
+function normalizeAddress(address: string): string {
+	const value = address.trim().toLowerCase();
+	return value.startsWith("::ffff:") ? value.slice("::ffff:".length) : value;
+}
 
 /** Inbox auth seam: off when no token is configured, exact bearer match otherwise. */
 function inboxAuthorized(req: IncomingMessage, token: string | undefined): boolean {
@@ -81,8 +88,14 @@ function inboxAuthorized(req: IncomingMessage, token: string | undefined): boole
 }
 
 /** The refresh endpoint changes server state, so only local peers may call it. */
-export function isLoopback(req: IncomingMessage): boolean {
-	return LOOPBACK.test(req.socket.remoteAddress ?? "");
+export function isLoopback(req: IncomingMessage, host: string): boolean {
+	const address = req.socket.remoteAddress ?? "";
+	if (LOOPBACK.test(address)) return true;
+	// A client reaching a concrete bind address presents that address locally;
+	// the wildcard is not an address any peer can present.
+	const bind = normalizeAddress(host);
+	if (!bind || WILDCARD_HOSTS.has(bind)) return false;
+	return normalizeAddress(address) === bind;
 }
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -237,7 +250,7 @@ async function handleHttp(
 			return;
 		}
 		if (req.method === "POST" && url.pathname === "/api/refresh") {
-			if (!isLoopback(req)) {
+			if (!isLoopback(req, options.host)) {
 				log(`refresh refused from non-loopback peer ${req.socket.remoteAddress ?? "?"}`);
 				send(403, JSON.stringify({ error: "refresh is loopback-only" }));
 				return;

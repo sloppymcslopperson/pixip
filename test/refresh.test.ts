@@ -157,12 +157,24 @@ describe("soft refresh", () => {
 describe("refresh guard", () => {
 	const request = (address: string) => ({ socket: { remoteAddress: address } }) as unknown as IncomingMessage;
 
-	it("accepts loopback peers only", () => {
+	it("accepts loopback peers and the exact bind host", () => {
 		for (const address of ["127.0.0.1", "127.0.1.1", "::1", "::ffff:127.0.0.1"]) {
-			assert.equal(isLoopback(request(address)), true, address);
+			assert.equal(isLoopback(request(address), "100.42.42.1"), true, address);
 		}
-		for (const address of ["192.168.1.5", "::2", "10.0.0.1", ""]) {
-			assert.equal(isLoopback(request(address)), false, address);
+		assert.equal(isLoopback(request("100.42.42.1"), "100.42.42.1"), true);
+		assert.equal(isLoopback(request("::ffff:100.42.42.1"), "100.42.42.1"), true);
+		assert.equal(isLoopback(request("100.42.42.1"), "::ffff:100.42.42.1"), true);
+		for (const address of ["192.168.1.5", "::2", "10.0.0.1", "100.42.42.2", ""]) {
+			assert.equal(isLoopback(request(address), "100.42.42.1"), false, address);
+		}
+	});
+
+	it("keeps wildcard and empty binds loopback-only", () => {
+		for (const host of ["0.0.0.0", "::", ""]) {
+			assert.equal(isLoopback(request("127.0.0.1"), host), true, host);
+			assert.equal(isLoopback(request("::1"), host), true, host);
+			assert.equal(isLoopback(request("192.168.1.5"), host), false, host);
+			assert.equal(isLoopback(request("100.42.42.1"), host), false, host);
 		}
 	});
 });

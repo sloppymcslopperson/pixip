@@ -1,5 +1,6 @@
 ---
 project: pixip
+grilled: true
 ---
 
 Rename the two ambiguous daemon subcommands to `run` (foreground) and `daemon` (detached), and make the dogfood values the defaults: `--dev` on, the `XDG_RUNTIME_DIR` fallback in the daemon, and no code-level bind address. One CLI-surface ticket so `bin/pixip.ts` is touched once before the pi-host default lands.
@@ -45,3 +46,25 @@ Rename the two ambiguous daemon subcommands to `run` (foreground) and `daemon` (
 
 - Do not commit `dev.sh`; it is gitignored by policy.
 - `03-pi-host-by-default` builds on this ticket's `parseArgs`/help changes.
+
+### Grilling answers (recorded 2026-11-21, incomplete)
+
+Answers so far, recorded for the batch. This ticket was pulled forward by mistake; it was reverted to open and is **not** grilled yet.
+
+- `dev.sh` is not in this worktree; the live copy is `/home/sloppy/dev/sin/pixip/dev.sh` in master. Edit that copy (untracked) rather than creating one here.
+- Runtime dir: if `~/.run` exists with the wrong owner, throw a clear error; if we own it but the mode is wrong, repair it to 0700. Never silently use a foreign dir.
+- `spawnEnv()` is return-only: the repaired `XDG_RUNTIME_DIR` goes into the returned env, not into `process.env`.
+- Dev opt-out flag: `--serious-mode` (not `--prod`). Intent is "hosting pixip as a service, keep it stable", not a security lockdown; more behaviours can attach to it later. `--dev` stays accepted.
+- Unknown top-level tokens error as `unknown command <name>`; unknown flags keep `unknown argument <flag>`.
+- Foreground `run` test: in `test/daemon.test.ts`, spawn the CLI, wait for the listening line/health, assert the state file, then SIGTERM.
+- Scope also includes the stale `--dev` notes in `AGENTS.md` and `README.md`.
+
+Still open: `--dev`/`--serious-mode` precedence (last flag wins vs serious always wins), whether saved daemon state args record the explicit flag, and the level of the fixture-off test (integration vs server unit). Do not implement until the batch grilling round finishes.
+
+### Grilling answers (closed 2026-11-25)
+
+- `--dev` is removed from parseArgs and help; dev mode is the default and `pixip run --dev` now errors as `unknown argument --dev`. `--serious-mode` is the only mode flag.
+- Saved daemon state records the explicit `--serious-mode` when the user passed it, so `restart` reproduces the requested mode; no flag means rely on the default.
+- `--serious-mode` coverage is a server unit test: construct the server in serious mode, assert no per-request asset re-read and the fixture endpoint disabled. No daemon integration test for this.
+- The live `dev.sh` at `/home/sloppy/dev/sin/pixip/dev.sh` is edited there and not committed here; README/AGENTS prose is updated in this worktree.
+- The earlier `--dev`/`--serious-mode` precedence question is moot now that `--dev` is gone.
