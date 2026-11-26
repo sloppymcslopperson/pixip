@@ -30,6 +30,7 @@ export const ui = {
 	queue: $("#queue"),
 	composer: $("#composer"),
 	attachment: $("#attachment"),
+	reftagChips: $("#reftag-chips"),
 	attach: $("#attach"),
 	attachMenu: $("#attach-menu"),
 	imageInput: $("#image-input"),

@@ -2,6 +2,7 @@
 // and resize the same field, so neither imports the other's feature module.
 import { closeMenu } from "./menuView.js";
 import { refreshSendState } from "./sendState.js";
+import { updateComposerRefTags } from "./reftagResolve.js";
 import { ui } from "./kernel/ui.js";
 
 export function clearInput() {
@@ -9,6 +10,7 @@ export function clearInput() {
 	closeMenu();
 	resize();
 	refreshSendState();
+	void updateComposerRefTags();
 }
 
 export function resize() {

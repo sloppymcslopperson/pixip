@@ -12,6 +12,7 @@ import { readingDistance, restoreSession, snapshotSession } from "./sessionCache
 import { restoreSurface, surfaceStatus } from "./surface.js";
 import { closeSession, connect, park, resume, send } from "./transport.js";
 import { lastEntryId } from "./transcriptWindow.js";
+import { updateComposerRefTags } from "./reftagResolve.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
 
@@ -157,6 +158,7 @@ export function openSession(id) {
 		// instead of paying for the full window again.
 		cursor = cached.lastEntryId ?? lastEntryId(state.entries);
 	} else ui.input.value = "";
+	void updateComposerRefTags();
 	// A warm parked socket needs only `resume`; anything else reconnects (or
 	// attaches a stopped/cold session) through the normal path.
 	if (!resume(id, cursor)) connect(id, cursor);

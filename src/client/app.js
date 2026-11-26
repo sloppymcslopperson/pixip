@@ -36,6 +36,7 @@ import { configureSheets, handleUiRequest, openSessionSheet, sheet } from "./she
 import { cancelSurface, openFixturePanel, openSurfaceRequest, resetSurface, surfaceOpen } from "./surface.js";
 import { openImageSheet } from "./toast.js";
 import { handleRefTagAction } from "./reftagActions.js";
+import { updateComposerRefTags } from "./reftagResolve.js";
 import { DEFAULT_PERCENT, nextPercent, previousPercent } from "./transcriptScale.js";
 import {
 	appendRestartNotice,
@@ -156,9 +157,14 @@ ui.fileInput.addEventListener("change", () => {
 });
 ui.composer.addEventListener("paste", (event) => {
 	const file = event.clipboardData?.files?.[0];
-	if (!file) return;
-	event.preventDefault();
-	void chooseAttachment(file, looksLikeImage(file));
+	if (file) {
+		event.preventDefault();
+		void chooseAttachment(file, looksLikeImage(file));
+		return;
+	}
+	// The browser inserts the text after this event; the input handler sees it,
+	// but a paste can also arrive without an input event in tests.
+	setTimeout(() => void updateComposerRefTags(), 0);
 });
 
 /** Replacement snapshot: a compaction or a `/new` invalidates loaded windows. */
@@ -205,6 +211,7 @@ ui.input.addEventListener("input", () => {
 	resize();
 	renderMenu();
 	refreshSendState();
+	void updateComposerRefTags();
 });
 ui.input.addEventListener("focus", renderMenu);
 ui.input.addEventListener("blur", () => closeMenu());

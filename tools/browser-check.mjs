@@ -84,7 +84,7 @@ async function bootFixture() {
 	const main = await hub.create(repo, "repo main");
 	const peer = await hub.create(repo, "repo peer");
 	const worktree = await hub.create(repo, "worktree agent", { branch: "ui-check" });
-	await hub.inboxSend({
+	const inbox = await hub.inboxSend({
 		subject: "browser inbox",
 		body: "This message checks the inbox sheet, filters and sender row.",
 		purpose: "attention-needed",
@@ -97,7 +97,10 @@ async function bootFixture() {
 		sessionId: id,
 		repo,
 		mainId: main.id,
+		mainLogicalId: main.logicalId,
 		peerId: peer.id,
+		peerLogicalId: peer.logicalId,
+		inboxId: inbox.id,
 		worktreeId: worktree.id,
 		worktreeBranch: "ui-check",
 	};
@@ -257,6 +260,131 @@ async function runRefCopyFlow(page, base, sessionId, hub) {
 	await page.click("#sheet .sheet-actions button:last-child");
 	await page.waitForFunction(() => document.querySelector("#sheet")?.hidden === true, { timeout: FLOW_TIMEOUT });
 	await checkNoOverflow(page, "reftag copy");
+}
+
+async function viewportOf(page) {
+	return (await page.evaluate(() => innerWidth)) + "px";
+}
+
+async function setComposer(page, text) {
+	await page.evaluate((text) => {
+		const input = document.querySelector("#input");
+		input.value = text;
+		input.dispatchEvent(new Event("input", { bubbles: true }));
+	}, text);
+}
+
+async function chipLabels(page) {
+	return await page.evaluate(() =>
+		[...document.querySelectorAll("#reftag-chips .reftag-chip")].map((chip) => ({
+			label: chip.querySelector(".reftag-chip-label")?.textContent ?? "",
+			unresolved: chip.classList.contains("unresolved"),
+			tag: chip.dataset.tag ?? "",
+		})),
+	);
+}
+
+async function runRefTagChipsFlow(page, base, sessionId, fixture) {
+	// Arrive through the dashboard so the sessions frame (tier 3) is in memory,
+	// the same path a phone user takes before opening a session.
+	await page.goto(base, { waitUntil: "domcontentloaded", timeout: FLOW_TIMEOUT });
+	await page.waitForSelector(`.row[data-id="${sessionId}"]`, { timeout: FLOW_TIMEOUT });
+	await page.evaluate((id) => document.querySelector(`.row[data-id="${id}"] .row-open`)?.click(), sessionId);
+	await waitForSession(page);
+	const logical = await page.evaluate(async (id) => {
+		const data = await (await fetch("/api/sessions")).json();
+		const list = Array.isArray(data) ? data : (data.sessions ?? []);
+		return list.find((session) => session.id === id || session.logicalId === id)?.logicalId ?? id;
+	}, sessionId);
+	const historyTag = `[pixip-ref=history/${logical}/h319]`;
+
+	const beforeHistory = await page.evaluate(() => window.__inboxFetches);
+	await setComposer(page, historyTag);
+	await page.waitForFunction(
+		() => (document.querySelector("#reftag-chips .reftag-chip-label")?.textContent ?? "").includes("assistant"),
+		{ timeout: FLOW_TIMEOUT },
+	);
+	const history = await chipLabels(page);
+	assert.equal(history.length, 1, "one history tag yields one chip");
+	assert.match(history[0].label, /assistant/);
+	assert.match(history[0].label, /history entry 319/);
+	assert.equal(await page.evaluate(() => window.__inboxFetches), beforeHistory, "history chips fetch nothing");
+
+	// Duplicates collapse; malformed fragments add no chip and stay text.
+	await setComposer(page, `${historyTag} ${historyTag} [pixip-ref=history/only-two]`);
+	assert.equal((await chipLabels(page)).length, 1, "duplicate tags collapse");
+	assert.equal(
+		await page.evaluate(() => document.querySelector("#input").value.includes("[pixip-ref=history/only-two]")),
+		true,
+		"a malformed tag stays in the textarea",
+	);
+
+	// Inbox tag: one fetch for the connection, no matter how many keystrokes.
+	const beforeInbox = await page.evaluate(() => window.__inboxFetches);
+	await setComposer(page, "");
+	await page.type("#input", `[pixip-ref=inbox/${fixture.inboxId}]`);
+	await page.waitForFunction(() => document.querySelector("#reftag-chips .reftag-chip") !== null, {
+		timeout: FLOW_TIMEOUT,
+	});
+	const inbox = await chipLabels(page);
+	assert.equal(inbox.length, 1);
+	assert.match(inbox[0].label, /browser inbox/);
+	assert.match(inbox[0].label, /attention needed/);
+	const afterInbox = await page.evaluate(() => window.__inboxFetches);
+	assert.equal(afterInbox - beforeInbox, 1, "the inbox list is fetched once for the connection");
+	assert.equal(await page.evaluate(() => window.__inboxFetches), afterInbox, "keystrokes do not refetch");
+
+	// A never-opened session is a name-only chip; an unknown inbox id is muted.
+	const peerTag = `[pixip-ref=history/${fixture.peerLogicalId}/x]`;
+	await setComposer(page, `${peerTag} [pixip-ref=inbox/does-not-exist]`);
+	await page.waitForFunction(() => document.querySelectorAll("#reftag-chips .reftag-chip").length === 2, {
+		timeout: FLOW_TIMEOUT,
+	});
+	const mixed = await chipLabels(page);
+	assert.equal(mixed[0].label, "repo peer", "a known but unopened session is name-only");
+	assert.equal(mixed[0].unresolved, false);
+	assert.equal(mixed[1].unresolved, true, "an unknown inbox id is unresolved");
+
+	// Tap reveals ×; × removes only the token.
+	await page.evaluate(() => document.querySelector("#reftag-chips .reftag-chip")?.click());
+	await page.waitForFunction(
+		() => document.querySelector("#reftag-chips .reftag-chip.open .reftag-chip-remove") !== null,
+		{ timeout: FLOW_TIMEOUT },
+	);
+	await page.evaluate(() => document.querySelector("#reftag-chips .reftag-chip-remove")?.click());
+	await page
+		.waitForFunction((tag) => !document.querySelector("#input").value.includes(tag), { timeout: FLOW_TIMEOUT }, peerTag)
+		.catch(() => {});
+
+	// Synthetic paste (typing never fires a paste event).
+	await setComposer(page, "");
+	await page.evaluate((tag) => {
+		const input = document.querySelector("#input");
+		input.value = tag;
+		const data = new DataTransfer();
+		data.setData("text/plain", tag);
+		input.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+	}, historyTag);
+	await page.waitForFunction(() => document.querySelector("#reftag-chips .reftag-chip") !== null, {
+		timeout: FLOW_TIMEOUT,
+	});
+	assert.equal((await chipLabels(page)).length, 1, "a pasted tag produces a chip");
+
+	// A ref-only send keeps the raw tag in the textarea payload.
+	await setComposer(page, historyTag);
+	await page.click("#send");
+	await page.waitForFunction(
+		(tag) => [...document.querySelectorAll("#log .block.user")].some((node) => (node.textContent ?? "").includes(tag)),
+		{ timeout: FLOW_TIMEOUT },
+		historyTag,
+	);
+	assert.equal(await page.evaluate(() => document.querySelector("#reftag-chips").hidden), true, "sending clears chips");
+	await logHas(fixture.paths, (record) => record.type === "prompt" && record.text === historyTag, "ref-only prompt");
+	assert.equal(afterInbox - beforeInbox, 1, "no fetch at send");
+	console.log(
+		`browser-check reftag chips ${await viewportOf(page)}: inbox fetches ${afterInbox - beforeInbox}, history fetches 0, sent ${historyTag}`,
+	);
+	await checkNoOverflow(page, "composer reftag chips");
 }
 
 async function runDashboardFlow(page, base, sessionId) {
@@ -731,6 +859,13 @@ async function runViewport(browser, base, fixture, viewport) {
 	await page.evaluateOnNewDocument(() => {
 		window.__copied = [];
 		window.__clipboardDenied = false;
+		const nativeFetch = window.fetch.bind(window);
+		window.__inboxFetches = 0;
+		window.fetch = (...args) => {
+			const url = typeof args[0] === "string" ? args[0] : args[0]?.url;
+			if (String(url).includes("/api/inbox")) window.__inboxFetches += 1;
+			return nativeFetch(...args);
+		};
 		Object.defineProperty(navigator, "clipboard", {
 			configurable: true,
 			value: {
@@ -754,6 +889,7 @@ async function runViewport(browser, base, fixture, viewport) {
 		await runInboxFlow(page, base);
 		await runWorktreeFlow(page, base, fixture);
 		await runComposerFlow(page, base, fixture.sessionId, fixture.paths, viewport);
+		await runRefTagChipsFlow(page, base, fixture.sessionId, fixture);
 		await runRefCopyFlow(page, base, fixture.sessionId, fixture.hub);
 		await runSelectFlow(page, base, fixture.sessionId, fixture.hub, fixture.paths);
 		await runPanelFlow(page, base, fixture.sessionId);

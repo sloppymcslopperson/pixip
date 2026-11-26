@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { coverageKeys } from "../src/jsonl.ts";
+import { clipText, firstWords, purposeLabel, removeRefTag } from "../src/client/reftagText.js";
 import { formatRefTag, messageKey, parseRefTag, refForEntry, scanRefTags } from "../src/reftags.ts";
 
 describe("formatRefTag / parseRefTag", () => {
@@ -146,5 +147,33 @@ describe("refForEntry", () => {
 		});
 		assert.equal(refForEntry("logical", { message: { role: "toolResult", timestamp: 2 } }), null);
 		assert.equal(refForEntry("bad id", { id: "entry" }), null);
+	});
+});
+
+describe("reftag chip text", () => {
+	it("takes the first eight words with an ellipsis", () => {
+		assert.equal(
+			firstWords("one two three four five six seven eight nine"),
+			"one two three four five six seven eight…",
+		);
+		assert.equal(firstWords("  one\n\ttwo  "), "one two");
+		assert.equal(firstWords("", 3), "");
+	});
+
+	it("clips subjects to the configured character budget", () => {
+		assert.equal(clipText("a  b\nc", 20), "a b c");
+		assert.equal(clipText("abcdefghij", 5), "abcd…");
+	});
+
+	it("removes only the exact token", () => {
+		const tag = "[pixip-ref=inbox/a]";
+		assert.equal(removeRefTag(`look ${tag} here`, tag), "look  here");
+		assert.equal(removeRefTag("keep me", tag), "keep me");
+		assert.equal(removeRefTag(`a ${tag} b ${tag}`, tag), `a  b ${tag}`);
+	});
+
+	it("labels purposes for chips", () => {
+		assert.equal(purposeLabel("attention-needed"), "attention needed");
+		assert.equal(purposeLabel("custom"), "custom");
 	});
 });

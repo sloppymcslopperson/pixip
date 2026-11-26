@@ -38,6 +38,65 @@
 	gap: 6px;
 	padding: 8px var(--pad);
 }
+.reftag-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	width: 100%;
+}
+.reftag-chips[hidden] {
+	display: none;
+}
+.reftag-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	max-width: 100%;
+	padding: 2px 8px;
+	border: 1px solid var(--line);
+	border-radius: 999px;
+	background: var(--bg-soft);
+	color: var(--fg-dim);
+	font-size: 12px;
+	line-height: 1.6;
+	cursor: pointer;
+}
+.reftag-chip:hover {
+	border-color: var(--accent);
+	color: var(--accent);
+}
+.reftag-chip.unresolved {
+	border-style: dashed;
+	color: var(--fg-faint);
+}
+.reftag-chip-label {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.reftag-chip-remove {
+	display: none;
+	flex: none;
+	width: 18px;
+	height: 18px;
+	padding: 0;
+	border: 0;
+	border-radius: 50%;
+	background: var(--bg-raised);
+	color: var(--fg-faint);
+	font: inherit;
+	line-height: 1;
+	cursor: pointer;
+}
+.reftag-chip.open .reftag-chip-remove {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+.reftag-chip-remove:hover {
+	color: var(--err);
+}
 #compose-row {
 	width: 100%;
 	display: flex;

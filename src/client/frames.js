@@ -84,6 +84,7 @@ export function handleFrame(fromSessionId, frame) {
 			break;
 		case "sessions": {
 			const sessions = Array.isArray(frame.sessions) ? frame.sessions : [];
+			state.sessions = sessions;
 			evictStoppedParked(sessions);
 			if (!state.sessionId) {
 				renderList(sessions, state.defaultCwd, state.home);
