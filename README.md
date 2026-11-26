@@ -189,6 +189,7 @@ detached process:
 
 ```bash
 pixip daemon --data-dir ./tmp/dev         # prints the URL, writes pid/state/log
+pixip daemon --watch                      # reload src/ + extensions/ after edits
 pixip status [--json]                     # non-zero when not running
 pixip logs [-f] [--lines 200]             # tails <data-dir>/pixip.log
 pixip refresh                             # soft: assets, policy, session index
@@ -208,7 +209,12 @@ accepts loopback peers and the exact bind address because the UI has no auth.
 any session is busy, re-reads assets/policy/index, reloads every live host child
 (auto-respawning system-pi children to the current host), keeps a local
 transcript notice, and refreshes every connected page for the new nonce. It is
-user-only; a `pixip reload` run from inside an agent exits 2. Hard restart
+user-only; a `pixip reload` run from inside an agent exits 2. `--watch` is an
+off-by-default developer convenience: a 200 ms debounce over `src/` and
+`extensions/` runs the same reload. A busy session defers the reload (the
+daemon keeps polling and shows a "reload deferred" card after a minute) rather
+than interrupting; a failed reload, including a half-written file, is logged and
+shown as a notice while the daemon keeps serving. Hard restart
 refuses while a session is busy unless `--force`;
 `--when-idle` waits up to `--timeout` seconds (default 300, exit 2) for the other
 sessions and is the safe way to pick up hub changes from inside pixip: the

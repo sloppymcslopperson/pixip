@@ -37,7 +37,16 @@ import {
 	WIRE_VERSION,
 } from "./wire.ts";
 import type { SessionInfo } from "./wire.ts";
-import type { ReloadChildResult, ReloadCode, ReloadReport } from "./reload.ts";
+import type { ReloadBlocker, ReloadChildResult, ReloadCode, ReloadReport } from "./reload.ts";
+import {
+	formatPauseReport,
+	pauseTargets,
+	resumePaused,
+	steerPause,
+	PAUSE_WAIT_MS,
+	type PauseResumeReport,
+	type PauseTarget,
+} from "./reload/pause.ts";
 import { normalizeWorktreeRequest } from "./worktree.ts";
 
 export interface ServerOptions {
@@ -48,10 +57,14 @@ export interface ServerOptions {
 	log: (message: string) => void;
 	/** Re-read client assets per request, so CSS/JS edits need no restart. */
 	dev?: boolean;
-	/** Replace the daemon through the detached restart helper. */
-	restart?: () => Promise<void>;
+	/** Replace the daemon through the detached restart helper; receives the pause plan. */
+	restart?: (pause?: PauseTarget[]) => Promise<void>;
 	/** In-place daemon-code reload, supplied by the CLI entry. */
 	reloadCode?: ReloadCode;
+	/** How long a pause request waits for its targets (tests shorten this). */
+	pauseWaitMs?: number;
+	/** Optional `--watch`: cancel a deferred reload from the browser card. */
+	watchCancel?: () => void;
 }
 
 /** The swappable half of the server: a new generation replaces this object. */
@@ -59,7 +72,7 @@ export interface ServerImpl {
 	handleHttp: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;
 	handleSocket: (ws: WebSocket, url: URL) => Promise<void>;
 	refresh: () => Promise<RefreshReport>;
-	reload: () => Promise<ReloadReport>;
+	reload: (pause?: PauseTarget[]) => Promise<ReloadReport>;
 }
 
 export interface RunningServer {
@@ -67,7 +80,11 @@ export interface RunningServer {
 	/** Soft refresh: re-read assets and the hub's caches; never touches children. */
 	refresh: () => Promise<RefreshReport>;
 	/** Daemon-wide `/reload`: gate, assets/policy swap, then every live child. */
-	reload: () => Promise<ReloadReport>;
+	reload: (pause?: PauseTarget[]) => Promise<ReloadReport>;
+	/** Publish the pause/resume outcome for the client that reconnects after a restart. */
+	setPauseResult: (report: PauseResumeReport) => void;
+	/** Send one ephemeral frame to every connected socket (`--watch` notices). */
+	broadcast: (frame: string) => void;
 	/** Swap a prepared module generation; the old one stays available for rollback. */
 	applyGeneration: (next: { hub: any; server: any }) => void;
 	/** Put a previous generation back after a failed swap. */
@@ -94,8 +111,12 @@ interface ServerState {
 	/** Broadcast to every connected socket, used by the reload notice. */
 	broadcast: (frame: string) => void;
 	/** Browser-only `/pixup-restart`: one replacement at a time. */
-	restart?: () => Promise<void>;
+	restart?: (pause?: PauseTarget[]) => Promise<void>;
 	restarting: boolean;
+	/** A paused reload that timed out; a later cancel can still resume its targets. */
+	pausePlan?: PauseTarget[];
+	/** Survives the browser reconnect so the client can paint one ephemeral row. */
+	pauseResult?: PauseResumeReport;
 }
 
 const LOOPBACK = /^(127\.|::1$|::ffff:127\.)/;
@@ -190,7 +211,7 @@ export function createImpl(
 ): ServerImpl {
 	return {
 		handleHttp: (req, res) => handleHttp(req, res, hub, state, options.log, options),
-		handleSocket: (ws, url) => handleSocket(ws, url, hub, options.log, state),
+		handleSocket: (ws, url) => handleSocket(ws, url, hub, options.log, state, options),
 		refresh: async () => {
 			// Hub caches first (policy is re-resolved for live sessions); only then
 			// swap assets, so a bad config leaves the running daemon as it was.
@@ -202,8 +223,8 @@ export function createImpl(
 			);
 			return { reloaded: ["assets", "config", "index", "commands"], reloads: state.reloads };
 		},
-		reload: () =>
-			(state.reloading ??= runReload(hub, state, options, broadcast).finally(() => {
+		reload: (pause?: PauseTarget[]) =>
+			(state.reloading ??= runReload(hub, state, options, broadcast, pause).finally(() => {
 				state.reloading = undefined;
 			})),
 	};
@@ -260,7 +281,11 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
 	return {
 		url: `http://${options.host}:${port}/`,
 		refresh: () => state.impl.refresh(),
-		reload: () => state.impl.reload(),
+		reload: (pause?: PauseTarget[]) => state.impl.reload(pause),
+		setPauseResult: (report: PauseResumeReport) => {
+			state.pauseResult = report;
+		},
+		broadcast,
 		applyGeneration,
 		rollbackGeneration: applyGeneration,
 		close: async () => {
@@ -317,6 +342,7 @@ async function handleHttp(
 					startedAt: state.startedAt,
 					reloads: state.reloads,
 					generation: options.reloadCode?.generation ?? 0,
+					...(state.pauseResult ? { pauseResult: state.pauseResult } : {}),
 				}),
 			);
 			return;
@@ -674,6 +700,7 @@ async function handleSocket(
 	hub: Hub,
 	log: (message: string) => void,
 	state: ServerState,
+	options: ServerOptions,
 ): Promise<void> {
 	const sessionId = url.searchParams.get("session");
 	const send = (frame: string) => {
@@ -686,7 +713,7 @@ async function handleSocket(
 		const unwatch = hub.watch((frame) => send(frame));
 		ws.on("close", unwatch);
 		ws.on("message", (data) => {
-			void handleCommand(String(data), { id: null }, hub, send, log, state);
+			void handleCommand(String(data), { id: null }, hub, send, log, state, options);
 		});
 		return;
 	}
@@ -862,7 +889,7 @@ async function handleSocket(
 		try {
 			message = JSON.parse(raw) as Record<string, unknown>;
 		} catch {
-			void handleCommand(raw, active, hub, send, log, state);
+			void handleCommand(raw, active, hub, send, log, state, options);
 			return;
 		}
 		if (message["t"] === "park") {
@@ -882,7 +909,7 @@ async function handleSocket(
 			send(frameError("socket is parked"));
 			return;
 		}
-		void handleCommand(raw, active, hub, send, log, state);
+		void handleCommand(raw, active, hub, send, log, state, options);
 	});
 
 	const cursor = url.searchParams.get("since") ?? undefined;
@@ -896,6 +923,7 @@ async function handleCommand(
 	send: (frame: string) => void,
 	log: (message: string) => void,
 	state: ServerState,
+	options: ServerOptions,
 ): Promise<void> {
 	let message: Record<string, unknown>;
 	try {
@@ -929,8 +957,69 @@ async function handleCommand(
 					send(frameNotice("reload refused: this page has a stale nonce; reload the page and try again"));
 					return;
 				}
-				const report = await state.impl.reload();
-				if (!report.ok) send(frameNotice(report.message));
+				const pause = message["pause"] === true;
+				let plan: PauseTarget[] = [];
+				if (pause) {
+					const blockers = hub.reloadBlockers();
+					if (blockers.length > 0) {
+						plan = pauseTargets(blockers, await hub.list());
+						const failed = await steerPause(hub, plan);
+						if (failed.length > 0)
+							log(`reload pause: could not steer ${failed.map((entry) => entry.name ?? entry.id).join(", ")}`);
+						const remaining = await waitForPause(hub, plan, "reload", pauseWait(options));
+						if (remaining.length > 0) {
+							state.pausePlan = plan;
+							const names = remaining.map((blocker) => `${blocker.name ?? blocker.id} (${blocker.reason})`).join(", ");
+							const text = `reload paused: still busy after ${Math.round(pauseWait(options) / 1000)}s: ${names}`;
+							log(text);
+							send(
+								frameNotice(text, {
+									pause: true,
+									status: "pause-timeout",
+									pauseKind: "reload",
+									blockers: remaining,
+									paused: true,
+								}),
+							);
+							return;
+						}
+					}
+				}
+				const report = await state.impl.reload(plan.length > 0 ? plan : undefined);
+				if (!report.ok) {
+					if (report.status === "refused" && report.blockers.length > 0) {
+						send(
+							frameNotice(report.message, {
+								pause: true,
+								status: "refused",
+								pauseKind: "reload",
+								blockers: report.blockers,
+							}),
+						);
+					} else {
+						send(frameNotice(report.message));
+					}
+				}
+				return;
+			}
+			case "watch_cancel": {
+				options.watchCancel?.();
+				return;
+			}
+			case "pause_cancel": {
+				const nonce = typeof message["nonce"] === "string" ? message["nonce"] : "";
+				if (nonce.length === 0 || nonce !== state.nonce) {
+					send(frameNotice("pause cancel refused: this page has a stale nonce; reload the page and try again"));
+					return;
+				}
+				const mode = message["mode"] === "resume" ? "resume" : "keep";
+				const plan = state.pausePlan ?? [];
+				state.pausePlan = undefined;
+				if (mode === "resume" && plan.length > 0) {
+					const report = await resumePaused(hub, plan);
+					log(formatPauseReport(report));
+					state.broadcast(frameNotice(formatPauseReport(report), { pauseResult: true, ...report }));
+				}
 				return;
 			}
 			case "restart": {
@@ -945,6 +1034,8 @@ async function handleCommand(
 					return;
 				}
 				const force = message["force"] === true;
+				const pause = message["pause"] === true;
+				const now = message["now"] === true;
 				const blockers = hub.restartBlockers();
 				if (blockers.length > 0 && !force) {
 					const names = blockers.map((blocker) => `${blocker.name ?? blocker.id} (${blocker.reason})`).join(", ");
@@ -957,12 +1048,29 @@ async function handleCommand(
 					send(frameNotice("restart is unavailable in this daemon", { restart: true, status: "refused" }));
 					return;
 				}
+				let plan: PauseTarget[] = [];
+				if (pause && blockers.length > 0) {
+					plan = pauseTargets(blockers, await hub.list());
+					const failed = await steerPause(hub, plan);
+					if (failed.length > 0)
+						log(`restart pause: could not steer ${failed.map((entry) => entry.name ?? entry.id).join(", ")}`);
+					if (!now) {
+						const remaining = await waitForPause(hub, plan, "restart", pauseWait(options));
+						if (remaining.length > 0) {
+							const names = remaining.map((blocker) => `${blocker.name ?? blocker.id} (${blocker.reason})`).join(", ");
+							const text = `restart paused: still busy after ${Math.round(pauseWait(options) / 1000)}s: ${names}`;
+							log(text);
+							send(frameNotice(text, { restart: true, status: "pause-timeout", blockers: remaining, pause: true }));
+							return;
+						}
+					}
+				}
 				state.restarting = true;
 				const names = blockers.map((blocker) => blocker.name ?? blocker.id).join(", ");
 				const text = force && blockers.length > 0 ? `restarting — interrupting ${names}` : "restarting…";
 				log(text);
 				send(frameNotice(text, { restart: true, status: "ok" }));
-				await state.restart();
+				await state.restart(plan.length > 0 ? plan : undefined);
 				return;
 			}
 			default:
@@ -1149,6 +1257,7 @@ async function runReload(
 	state: ServerState,
 	options: ServerOptions,
 	broadcast: (frame: string) => void,
+	pause?: PauseTarget[],
 ): Promise<ReloadReport> {
 	const blockers = hub.reloadBlockers();
 	const requiresRestart = options.reloadCode?.requiresRestart();
@@ -1243,6 +1352,8 @@ async function runReload(
 		parts.push(`error sessions not reloaded: ${errored.map((session) => session.name ?? session.id).join(", ")}`);
 	}
 	if (requiresRestart) parts.push(`restart required: ${requiresRestart}`);
+	const pauseReport = pause && pause.length > 0 ? await resumePaused(hub, pause) : undefined;
+	if (pauseReport) parts.push(formatPauseReport(pauseReport));
 	const message = parts.join("; ");
 	options.log(`reload: ${message}`);
 	broadcast(frameNotice(message, { reload: true, status: failed.length > 0 ? "partial" : "ok" }));
@@ -1256,7 +1367,36 @@ async function runReload(
 		reloads: state.reloads,
 		...(committedGeneration !== undefined ? { generation: committedGeneration } : {}),
 		...(requiresRestart ? { requiresRestart } : {}),
+		...(pauseReport ? { pause: pauseReport } : {}),
 	};
+}
+
+/** The pause wait budget; tests shorten it through `ServerOptions.pauseWaitMs`. */
+function pauseWait(options: ServerOptions): number {
+	return options.pauseWaitMs ?? PAUSE_WAIT_MS;
+}
+
+/** Gate blockers that still belong to the pause plan (matched by child or logical id). */
+function remainingPauseBlockers(hub: Hub, targets: PauseTarget[], mode: "reload" | "restart"): ReloadBlocker[] {
+	const blockers = mode === "restart" ? hub.restartBlockers() : hub.reloadBlockers();
+	const ids = new Set(targets.flatMap((target) => [target.id, target.logicalId]));
+	return blockers.filter((blocker) => ids.has(blocker.id));
+}
+
+/** Poll the same gate the operation will use, bounded, then return what still blocks. */
+async function waitForPause(
+	hub: Hub,
+	targets: PauseTarget[],
+	mode: "reload" | "restart",
+	timeoutMs: number,
+): Promise<ReloadBlocker[]> {
+	const deadline = Date.now() + timeoutMs;
+	let remaining = remainingPauseBlockers(hub, targets, mode);
+	while (remaining.length > 0 && Date.now() < deadline) {
+		await new Promise((resolve) => setTimeout(resolve, 100));
+		remaining = remainingPauseBlockers(hub, targets, mode);
+	}
+	return remaining;
 }
 
 async function readAsset(clientDir: string, relative: string): Promise<Buffer | undefined> {

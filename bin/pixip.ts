@@ -10,6 +10,8 @@ import { Hub } from "../src/hub.ts";
 import type { RemoveWorktreeResult, WorktreeListing } from "../src/hub.ts";
 import type { RunningServer } from "../src/server.ts";
 import { GenerationManager } from "../src/reload/manager.ts";
+import { startWatch, type WatchHandle } from "../src/reload/watch.ts";
+import { formatPauseReport, resumePaused, takePauseSet, writePauseSet, type PauseTarget } from "../src/reload/pause.ts";
 import type { ReloadReport } from "../src/reload.ts";
 import {
 	busySessions,
@@ -36,7 +38,7 @@ import {
 } from "../src/daemon.ts";
 import { detectRepo, pruneWorktrees, realCwd } from "../src/worktree.ts";
 import type { WorktreeEntry } from "../src/worktree.ts";
-import type { SessionInfo } from "../src/wire.ts";
+import { frameNotice, type SessionInfo } from "../src/wire.ts";
 import { INBOX_PURPOSES, type InboxList, type InboxView } from "../src/inbox.ts";
 import { spawnEnv } from "../src/spawnEnv.ts";
 
@@ -91,6 +93,8 @@ interface Options {
 	pendingUiMoreTimeMs: number;
 	titleModel: string;
 	dev: boolean;
+	/** `--watch`: reload after a debounced change in src/ or extensions/. */
+	watch: boolean;
 	allowCommands: string[];
 	denyCommands: string[];
 	noBash: boolean;
@@ -160,6 +164,7 @@ function parseArgs(argv: string[]): Options {
 		pendingUiMoreTimeMs: 2 * 60_000,
 		titleModel: process.env["PIXIP_TITLE_MODEL"] ?? "",
 		dev: true,
+		watch: false,
 		allowCommands: [],
 		denyCommands: [],
 		noBash: false,
@@ -222,6 +227,9 @@ function parseArgs(argv: string[]): Options {
 				break;
 			case "--serious-mode":
 				options.dev = false;
+				break;
+			case "--watch":
+				options.watch = true;
 				break;
 			case "--allow-command":
 				options.allowCommands.push(next());
@@ -364,6 +372,9 @@ function printHelp(): void {
   --serious-mode      host pixip as a stable service: serve client assets from
                       the startup snapshot and disable the dev panel fixture.
                       Dev mode (per-request asset reads) is the default
+  --watch             after a 200 ms debounce, reload when src/ or extensions/
+                      changes; busy sessions defer instead of interrupting.
+                      Off by default (an explicit /reload is the default trigger)
   --inbox-limit <n>   maximum retained inbox messages (default 200; archived
                       then read messages are evicted first)
   --inbox-token <t>   require Authorization: Bearer <t> on the inbox API and
@@ -497,6 +508,7 @@ function serveArgs(options: Options): string[] {
 	if (options.inboxToken) args.push("--inbox-token", options.inboxToken);
 	if (options.useSystemPi) args.push("--use-system-pi", "--pi", options.piBin);
 	if (!options.dev) args.push("--serious-mode");
+	if (options.watch) args.push("--watch");
 	for (const name of options.allowCommands) args.push("--allow-command", name);
 	for (const name of options.denyCommands) args.push("--deny-command", name);
 	if (options.noBash) args.push("--no-bash");
@@ -630,6 +642,7 @@ async function serve(options: Options): Promise<void> {
 	});
 
 	const running: { server?: RunningServer } = {};
+	let watchHandle: WatchHandle | undefined;
 	const manager = new GenerationManager({
 		initial,
 		load: loadGeneration,
@@ -651,13 +664,26 @@ async function serve(options: Options): Promise<void> {
 		log,
 		dev: options.dev,
 		reloadCode: manager,
-		restart: async () => {
+		watchCancel: () => watchHandle?.cancel(),
+		restart: async (pause?: PauseTarget[]) => {
+			await writePauseSet(options.dataDir, pause ?? []);
 			await writeResumeSet(options.dataDir, liveSessionIds(await hub.list()));
 			spawnRestartHelper(options);
 		},
 	});
 	running.server = server;
 	hub.setDaemonUrl(server.url);
+	if (options.watch) {
+		const rootDir = fileURLToPath(new URL("..", import.meta.url));
+		watchHandle = startWatch({
+			roots: [join(rootDir, "src"), join(rootDir, "extensions")],
+			reload: () => server.reload(),
+			blockers: () => hub.reloadBlockers(),
+			log,
+			notice: (text, extra) => server.broadcast(frameNotice(text, extra)),
+		});
+		log(`watch mode: ${options.dev ? "dev" : "serious"} assets, src/ and extensions/`);
+	}
 
 	// The state file is what `status`, `stop`, `refresh` and `restart` read; it
 	// records the actual port (so `--port 0` works) and the serve flags.
@@ -688,7 +714,7 @@ async function serve(options: Options): Promise<void> {
 
 	// A restart persists the sessions that were live so the new daemon can put
 	// the dashboard's hot/warm set back before the browser even reconnects.
-	void resumeRestartedSessions(hub, options.dataDir);
+	void resumeRestartedSessions(hub, options.dataDir, server);
 
 	const softRefresh = async (label: string) => {
 		try {
@@ -722,6 +748,7 @@ async function serve(options: Options): Promise<void> {
 	const shutdown = async (signal: string, restart = false) => {
 		if (closing) return;
 		closing = true;
+		watchHandle?.close();
 		log(`${signal}: shutting down`);
 		if (restart) {
 			// SIGUSR2 means the helper is replacing this daemon: give live sockets
@@ -927,17 +954,24 @@ async function recordLiveSessions(url: string, dataDir: string): Promise<void> {
 	await writeResumeSet(dataDir, liveSessionIds(sessions));
 }
 
-/** New daemon side: put back the live children the old daemon had. */
-async function resumeRestartedSessions(hub: Hub, dataDir: string): Promise<void> {
+/** New daemon side: put back the live children and resume the opted-in pause set. */
+async function resumeRestartedSessions(hub: Hub, dataDir: string, server?: RunningServer): Promise<void> {
+	const pause = await takePauseSet(dataDir);
 	const ids = await takeResumeSet(dataDir);
-	if (ids.length === 0) return;
-	log(`[restart] resuming ${ids.length} session(s)`);
-	for (const id of ids) {
-		try {
-			await hub.attach(id);
-		} catch (error) {
-			log(`[restart] could not resume ${id}: ${(error as Error).message}`);
+	if (ids.length > 0) {
+		log(`[restart] resuming ${ids.length} session(s)`);
+		for (const id of ids) {
+			try {
+				await hub.attach(id);
+			} catch (error) {
+				log(`[restart] could not resume ${id}: ${(error as Error).message}`);
+			}
 		}
+	}
+	if (pause.length > 0) {
+		const report = await resumePaused(hub, pause);
+		log(`[restart] ${formatPauseReport(report)}`);
+		server?.setPauseResult(report);
 	}
 }
 

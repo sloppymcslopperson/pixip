@@ -34,6 +34,7 @@ import {
 	unseenEntries,
 } from "./transcriptWindow.js";
 import { send } from "./transport.js";
+import { PAUSE_LABEL } from "./pauseModel.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
 
@@ -298,24 +299,57 @@ export function appendReloadNotice(text) {
 	scrollToEnd();
 }
 
-/** `/pixup-restart` refusal: the blocker list plus the one Force action. */
-export function appendRestartCard(text, onForce) {
+/** `/pixup-restart`/`/reload` refusal: the blocker list, optional pause opt-in, one action. */
+export function appendRestartCard(text, options = {}) {
 	const note = document.createElement("div");
 	note.className = "block meta reload restart-confirm";
 	const message = document.createElement("div");
-	message.textContent = text;
+	message.textContent = options.targets ? `${text}\nPause and resume: ${options.targets}` : text;
 	note.append(message);
+	let box = null;
+	if (options.pause === true) {
+		const label = document.createElement("label");
+		label.className = "restart-pause";
+		box = document.createElement("input");
+		box.type = "checkbox";
+		label.append(box, ` ${PAUSE_LABEL}`);
+		note.append(label);
+	}
 	const button = document.createElement("button");
 	button.type = "button";
 	button.className = "restart-force";
-	button.textContent = "Force restart";
+	button.textContent = options.label ?? "Force restart";
 	button.addEventListener("click", () => {
 		note.remove();
-		onForce();
+		options.onAction?.(Boolean(box?.checked));
 	});
 	note.append(button);
 	ui.log.append(note);
 	scrollToEnd();
+}
+
+/** A pause request timed out: reload offers wait/cancel, restart offers force. */
+export function appendPauseTimeoutCard(text, actions) {
+	const note = document.createElement("div");
+	note.className = "block meta reload restart-confirm restart-actions";
+	const message = document.createElement("div");
+	message.textContent = text;
+	note.append(message);
+	for (const action of actions) {
+		const button = document.createElement("button");
+		button.type = "button";
+		button.className = "restart-force";
+		button.dataset.pauseAction = action.id;
+		button.textContent = action.label;
+		button.addEventListener("click", () => {
+			note.remove();
+			action.onClick?.();
+		});
+		note.append(button);
+	}
+	ui.log.append(note);
+	scrollToEnd();
+	return note;
 }
 
 export function prependHistory(entries, more) {

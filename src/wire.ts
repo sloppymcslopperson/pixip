@@ -218,7 +218,23 @@ export function frameRestarting(): string {
  */
 export function frameNotice(
 	text: string,
-	options: { reload?: boolean; restart?: boolean; status?: string; blockers?: ReloadBlocker[] } = {},
+	options: {
+		reload?: boolean;
+		restart?: boolean;
+		status?: string;
+		blockers?: ReloadBlocker[];
+		/** Opt-in pause/resume card or result frame. */
+		pause?: boolean;
+		pauseKind?: string;
+		paused?: boolean;
+		pauseResult?: boolean;
+		/** `--watch`: a deferred reload card (true) or its dismissal (false). */
+		watchDeferred?: boolean;
+		watchError?: boolean;
+		at?: string;
+		resumed?: string[];
+		skipped?: Array<{ id: string; name?: string; reason: string }>;
+	} = {},
 ): string {
 	return JSON.stringify({ t: "notice", text, ...options });
 }

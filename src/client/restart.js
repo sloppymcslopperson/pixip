@@ -1,8 +1,16 @@
-// `/pixup-restart` browser side: nonce-gated request, inline force card, and the
-// post-reconnect daemon notice. The row is local UI only; it is never sent to Pi
-// or written to JSONL.
-import { appendReloadNotice, appendRestartCard } from "./transcript.js";
-import { reloadNonce } from "./reload.js";
+// `/pixup-restart` browser side: nonce-gated request, inline force/pause card, and
+// the post-reconnect daemon notice. The row is local UI only; it is never sent to
+// Pi or written to JSONL.
+import { appendPauseTimeoutCard, appendReloadNotice, appendRestartCard } from "./transcript.js";
+import { reloadNonce, sendPauseCancel, sendReload } from "./reload.js";
+import {
+	claimPauseResult,
+	pauseConfirmAction,
+	pauseResultKey,
+	pauseResultText,
+	pauseTargetsText,
+	pauseTimeoutActions,
+} from "./pauseModel.js";
 import { send } from "./transport.js";
 import { state } from "./kernel/state.js";
 import { toast } from "./toast.js";
@@ -19,15 +27,21 @@ function formatUptime(ms) {
 	return `${seconds}s`;
 }
 
-/** Ask the daemon to replace itself; force is the inline card's second step. */
-export function sendRestart(force = false) {
+/** Ask the daemon to replace itself; force and pause are the card's second step. */
+export function sendRestart(force = false, options = {}) {
 	if (!state.sessionId) return;
 	const value = reloadNonce();
 	if (!value) {
 		toast("restart is unavailable on this page; refresh it first");
 		return;
 	}
-	send({ t: "restart", nonce: value, ...(force ? { force: true } : {}) });
+	send({
+		t: "restart",
+		nonce: value,
+		...(force ? { force: true } : {}),
+		...(options.pause ? { pause: true } : {}),
+		...(options.now ? { now: true } : {}),
+	});
 }
 
 /** Mark that the next reconnect is a planned daemon replacement. */
@@ -49,22 +63,55 @@ function takeRestartPending() {
 	}
 }
 
+/** A pause timeout with reload actions: wait another round or cancel. */
+function handleReloadPauseTimeout(text) {
+	const actions = pauseTimeoutActions("reload").map((action) => ({
+		...action,
+		onClick: () => {
+			if (action.id === "wait") sendReload({ pause: true });
+			else sendPauseCancel(action.id === "cancel-remove" ? "resume" : "keep");
+		},
+	}));
+	appendPauseTimeoutCard(text, actions);
+}
+
 /**
- * A `notice` frame with `restart: true`. A refusal paints the inline card; a
- * success paints nothing here because the SIGUSR2 `restarting` frame follows.
+ * A `notice` frame with `restart: true` or the opt-in `pause: true`. A refusal
+ * paints the inline confirm card; a pause timeout paints the follow-up actions;
+ * a success paints nothing here because the SIGUSR2 `restarting` frame follows.
  */
 export function handleRestartNotice(frame) {
-	if (frame.restart !== true) return false;
+	if (frame.restart !== true && frame.pause !== true) return false;
 	const text = typeof frame.text === "string" ? frame.text : "";
+	const kind = frame.pauseKind === "reload" ? "reload" : "restart";
+	const blockers = Array.isArray(frame.blockers) ? frame.blockers : [];
+	if (frame.status === "pause-timeout") {
+		if (kind === "reload") handleReloadPauseTimeout(text);
+		else
+			appendRestartCard(text, {
+				pause: false,
+				label: pauseTimeoutActions("restart")[0].label,
+				targets: pauseTargetsText(blockers),
+				onAction: () => sendRestart(true, { pause: true, now: true }),
+			});
+		return true;
+	}
 	if (frame.status === "refused") {
-		const blockers = Array.isArray(frame.blockers) ? frame.blockers : [];
-		if (blockers.length > 0) appendRestartCard(text, () => sendRestart(true));
-		else if (text) appendReloadNotice(text);
+		if (blockers.length > 0) {
+			appendRestartCard(text, {
+				pause: true,
+				label: pauseConfirmAction(kind),
+				targets: pauseTargetsText(blockers),
+				onAction: (pause) => (kind === "reload" ? sendReload({ pause }) : sendRestart(true, { pause })),
+			});
+		} else if (text) {
+			appendReloadNotice(text);
+		}
 	}
 	return true;
 }
 
-/** After reconnect, name the replacement and how long the new daemon has run. */
+/** After reconnect, name the replacement and paint the one-shot pause report. */
 export async function appendRestartResult(interrupted) {
 	const pending = takeRestartPending();
 	let text = pending ? "daemon restarted" : "pixip restarted";
@@ -74,6 +121,14 @@ export async function appendRestartResult(interrupted) {
 			const health = await response.json();
 			if (Number.isInteger(health.pid) && Number.isFinite(health.startedAt)) {
 				text = `daemon restarted (pid ${health.pid}, uptime ${formatUptime(Date.now() - health.startedAt)})`;
+			}
+			const report = health.pauseResult;
+			if (report) {
+				const key = pauseResultKey(health.pid, report.at);
+				if (claimPauseResult(sessionStorage, key)) {
+					const row = pauseResultText(report);
+					if (row) text += `; ${row}`;
+				}
 			}
 		}
 	} catch {

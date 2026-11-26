@@ -16,6 +16,7 @@ import { renderMenu, restoreClearedQueue } from "./menu.js";
 import { applyInboxFrame } from "./inbox.js";
 import { handleNotice } from "./reload.js";
 import { handleRestartNotice, markRestartPending } from "./restart.js";
+import { handleWatchNotice } from "./watch.js";
 import { openExportSheet, openModelSheet, openThinkingSheet, openTreeSheet } from "./sheets.js";
 import { dropSurface, handleNeedTime, handleReasks } from "./surface.js";
 import { applyFullEntry, applyLiveThinking, handleEvent, prependHistory, renderTranscript } from "./transcript.js";
@@ -119,7 +120,7 @@ export function handleFrame(fromSessionId, frame) {
 			handleRestarting();
 			break;
 		case "notice":
-			if (!handleRestartNotice(frame)) handleNotice(frame);
+			if (!handleRestartNotice(frame) && !handleWatchNotice(frame)) handleNotice(frame);
 			break;
 		case "history":
 			prependHistory(frame.entries ?? [], frame.more === true);

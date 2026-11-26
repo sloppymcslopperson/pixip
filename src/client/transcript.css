@@ -137,6 +137,14 @@
 	align-items: center;
 	gap: 8px;
 }
+.restart-confirm .restart-pause {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font: inherit;
+	color: var(--fg-dim);
+	cursor: pointer;
+}
 .restart-confirm .restart-force {
 	margin-left: auto;
 	padding: 4px 10px;
@@ -146,6 +154,18 @@
 	color: var(--accent);
 	font: inherit;
 	cursor: pointer;
+}
+.restart-confirm .restart-force + .restart-force {
+	margin-left: 0;
+}
+/* Several follow-up actions (wait/cancel) stack as full-width rows. */
+.restart-confirm.restart-actions {
+	flex-direction: column;
+	align-items: stretch;
+}
+.restart-confirm.restart-actions .restart-force {
+	margin-left: 0;
+	text-align: left;
 }
 .restart-confirm .restart-force:active {
 	background: var(--accent);

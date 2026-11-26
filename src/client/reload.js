@@ -15,15 +15,22 @@ export function reloadNonce() {
 	return nonce();
 }
 
-/** Ask the daemon to reload assets and every live child. */
-export function sendReload() {
+/** Ask the daemon to reload assets and every live child (optionally pausing first). */
+export function sendReload(options = {}) {
 	if (!state.sessionId) return;
 	const value = nonce();
 	if (!value) {
 		toast("reload is unavailable on this page; refresh it first");
 		return;
 	}
-	send({ t: "reload", nonce: value });
+	send({ t: "reload", nonce: value, ...(options.pause ? { pause: true } : {}) });
+}
+
+/** Keep or resume the pause requests left over from a timed-out paused reload. */
+export function sendPauseCancel(mode) {
+	const value = nonce();
+	if (!value) return;
+	send({ t: "pause_cancel", nonce: value, mode });
 }
 
 /**

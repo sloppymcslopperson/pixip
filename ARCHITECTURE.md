@@ -501,6 +501,34 @@ every client picks up the new assets/nonce, and restores the row once from
 `bin/pixip.ts`, serve flags, `HubOptions` or the environment are not reloadable
 and add `requiresRestart` rather than pretending the swap covered them.
 
+A `/reload` refusal paints an inline card naming the blockers with an unchecked
+`Pause and resume sessions` opt-in. Checking it re-sends the reload with
+`pause: true`: the daemon steers each blocker with a pause prompt, waits up to
+30 s for the gate to clear, then runs the normal reload and steers each paused
+session back with `Reload is finished, please resume.`. If the gate does not
+clear, the card offers `Wait longer` or a cancel that either keeps the pause
+requests or sends the resume prompt immediately. The reload report names the
+resumed and skipped sessions.
+
+### `--watch`: debounced reload for development
+
+`--watch` is off by default and accepted on `run` and `daemon` (the detached
+start records it in the serve args). `src/reload/watch.ts` watches `src/` and
+`extensions/` recursively from the package root, ignores `node_modules`, `.git`,
+`fit/` and `tmp/`, and debounces bursts for 200 ms. It holds one reload in
+flight and coalesces edits that arrive during it into one pending rerun.
+
+It reads the same reload gate. When a session is busy it does not interrupt:
+it polls roughly once a second, logs the deferral once, and after 60 s broadcasts
+an ephemeral `watchDeferred` notice that paints a local card. Polling continues
+while the card is up, `Keep waiting` dismisses it until the next 60 s prompt, and
+`I'll reissue later` sends `watch_cancel` to drop the pending reload. A
+successful reload broadcasts the normal reload notice, so the card disappears
+with the page refresh. A failed reload keeps the daemon alive, logs the error
+and broadcasts a notice; the next file change retries, which is what makes a
+half-written TypeScript save harmless. The CLI owns the watcher and closes it on
+shutdown, so the test suite never starts one.
+
 ### `/pixup-restart`: replace the process
 
 `/pixup-restart` is deliberately different: it replaces the daemon process
@@ -520,6 +548,19 @@ grouping does not visibly change; it then answers `/health` with the new `pid`
 and `startedAt`, and the client paints an ephemeral
 `daemon restarted (pid, uptime)` row. Nothing is lost that the JSONL does not
 already hold.
+
+A forced restart can opt into the same pause/resume flow through the card's
+`Pause and resume sessions` checkbox. The daemon steers the restart blockers,
+waits up to 30 s for them to settle, and only then spawns the restart helper; a
+timeout repaints the card with `Force restart anyway`, which records the pause
+plan and restarts immediately. The plan (child id, logical id, name, pre-op
+state) is persisted in `<data-dir>/pixip.pause.json` before the helper runs. The
+replacing daemon consumes it after reattaching the live set: a target that is
+missing, changed logical id, errored, or still busy is skipped and named, and
+only live `idle`/`stopped` sessions receive `Reload is finished, please
+resume.` as a steering prompt. The outcome rides on `/health` once so the
+reconnected client paints a single ephemeral row even though the broadcast
+happened before the socket came back.
 
 A hard restart from the CLI is still explicit: `pixip restart` refuses while a
 session is busy unless `--force`, or waits for every session to be idle with

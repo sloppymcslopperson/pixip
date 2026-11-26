@@ -1,3 +1,5 @@
+import type { PauseResumeReport } from "./reload/pause.ts";
+
 /** One reason `/reload` refused to touch the daemon. */
 export interface ReloadBlocker {
 	id: string;
@@ -53,4 +55,6 @@ export interface ReloadReport {
 	generation?: number;
 	/** A non-reloadable change (entry/flags/options) that still needs a restart. */
 	requiresRestart?: string;
+	/** Opt-in pause/resume outcome for a paused reload. */
+	pause?: PauseResumeReport;
 }
