@@ -38,3 +38,5 @@ Add `/pixup-restart`, deliberately distinct from `/reload`: a full daemon replac
 - `pixip stop` from inside a session exits 2 with the user-only message; `pixip restart` from inside still works.
 - Browser check at 390 and 1280 for the inline confirm card and the post-reconnect notice.
 - `npm run check` green. Browser screenshots were unavailable on this box because `PIXIP_CHROME` is unset; the scripted browser check skipped.
+
+\n### Browser check (correction)\n\nCompleted with the available `agent-browser` tool at 390×844 and 1280×900. The inline force card renders with its blocker text and `Force restart` button, no horizontal overflow at either width, and the button is right-aligned on desktop. The earlier note about `PIXIP_CHROME` being unset only applies to the repo's puppeteer `tools/shot.mjs` path, not to browser verification in general.\n
