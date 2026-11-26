@@ -30,3 +30,7 @@ Running `env -u PIXIP_INSIDE -u PIXIP_SESSION_ID npm run check` is green, which 
 ### Notes
 
 - Related, but separate: `06-archive-session-identity`; the spawn-seam env fix already landed in `05-stale-pi-session-env` and does not cover the hub's own CLI test processes.
+
+### Order
+
+First ticket in the `open/hotreload` journey. Do this before any other ticket, otherwise every `/fit work` check is red for an unrelated reason and the journey starts on a false failure.
