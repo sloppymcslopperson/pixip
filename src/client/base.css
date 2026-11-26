@@ -12,6 +12,7 @@
 	--ok: #9ece6a;
 	--warn: #e0af68;
 	--err: #f7768e;
+	--waiting: #ff9ecb;
 	--mono: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 	--pad: 12px;
 	--safe-b: env(safe-area-inset-bottom, 0px);
@@ -262,6 +263,10 @@ textarea {
 .dot.error {
 	background: var(--err);
 }
+.dot.waiting {
+	background: var(--waiting);
+	animation: waiting-breathe 2s ease-in-out infinite;
+}
 /* The purple pin next to a row's state dot: excluded from bulk archive. */
 .row-protected {
 	color: var(--protected);
@@ -272,6 +277,16 @@ textarea {
 @keyframes pulse {
 	50% {
 		opacity: 0.35;
+	}
+}
+@keyframes waiting-breathe {
+	50% {
+		opacity: 0.4;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.dot.waiting {
+		animation: none;
 	}
 }
 

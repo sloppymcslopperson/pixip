@@ -203,6 +203,92 @@ describe("pending extension UI", () => {
 		}
 	});
 
+	it("marks the session waiting until the last live request is answered", async () => {
+		const paths = await fixtureRoot("pixip-pending-ui-", { logName: "rpc.jsonl" });
+		const two = [
+			...REQUEST,
+			{ type: "extension_ui_request", id: "ui-2", method: "select", title: "Second", options: ["Go", "Stop"] },
+		];
+		const { hub, server, id, url } = await boot(paths, 1000, {
+			FAKE_PI_ON_PROMPT: JSON.stringify(two),
+		});
+		const inbox = await connect(url, id);
+		const waiting = async () => (await hub.list()).find((info) => info.id === id)?.awaitingUser === true;
+		try {
+			await waitFor(() => inbox.frames.some((frame) => frame["t"] === "snapshot"));
+			inbox.send({ t: "prompt", text: "go" });
+			await waitFor(() => uiRequests(inbox).length === 2);
+			await waitFor(waiting);
+			await waitFor(() =>
+				inbox.frames.some(
+					(frame) =>
+						frame["t"] === "status" &&
+						(frame["session"] as Record<string, unknown> | undefined)?.["id"] === id &&
+						(frame["session"] as Record<string, unknown> | undefined)?.["awaitingUser"] === true,
+				),
+			);
+
+			inbox.send({ t: "ui", id: "ui-1", value: "Alpha" });
+			await waitFor(async () => (await loggedResponses(paths)).some((entry) => entry["id"] === "ui-1"));
+			assert.equal(await waiting(), true, "one request is still queued");
+
+			inbox.send({ t: "ui", id: "ui-2", value: "Go" });
+			await waitFor(async () => (await loggedResponses(paths)).some((entry) => entry["id"] === "ui-2"));
+			await waitFor(async () => !(await waiting()));
+		} finally {
+			inbox.close();
+			await server.close();
+			await hub.shutdown();
+		}
+	});
+
+	it("keeps a recorded re-ask waiting for a stopped session until it is dismissed", async () => {
+		const paths = await fixtureRoot("pixip-pending-ui-", { logName: "rpc.jsonl" });
+		const yes = [
+			{
+				type: "message_end",
+				message: { role: "assistant", content: [{ type: "text", text: "YES" }] },
+			},
+		];
+		const { hub, server, id, logicalId, url } = await boot(paths, 80, {
+			FAKE_PI_ON_TIMEOUT_PROMPT: JSON.stringify(yes),
+		});
+		const recordFile = join(paths.dataDir, "pending-ui", `${logicalId}.json`);
+		const first = await connect(url, id);
+		const waiting = async () =>
+			(await hub.list()).filter((info) => info.logicalId === logicalId).some((info) => info.awaitingUser === true);
+		try {
+			await waitFor(() => first.frames.some((frame) => frame["t"] === "snapshot"));
+			first.send({ t: "prompt", text: "go" });
+			await waitFor(() => uiRequests(first).length === 1);
+			first.close();
+
+			await waitFor(async () =>
+				(await spawns(paths)).some(
+					(record) =>
+						record["type"] === "prompt" && String(record["text"] ?? "").includes("Should it be offered again"),
+				),
+			);
+			await waitFor(() => exists(recordFile));
+			await waitFor(waiting);
+
+			await hub.stop(id);
+			await waitFor(async () => {
+				const info = (await hub.list()).find((entry) => entry.logicalId === logicalId);
+				return info?.state === "stopped" && info.awaitingUser === true;
+			});
+
+			const attached = await hub.attach(id);
+			assert.equal(attached.awaitingUser, true, "reattaching keeps the recorded re-ask visible");
+			await hub.reask(attached.id, "ui-1", "dismiss");
+			await waitFor(async () => !(await waiting()));
+		} finally {
+			first.close();
+			await server.close();
+			await hub.shutdown();
+		}
+	});
+
 	it("offers more time before cancelling a visible dialog", async () => {
 		const paths = await fixtureRoot("pixip-pending-ui-", { logName: "rpc.jsonl" });
 		const { hub, server, id, url } = await boot(

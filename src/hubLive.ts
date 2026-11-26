@@ -242,6 +242,7 @@ export async function stop(this: any, id: string): Promise<SessionInfo> {
 	// actually carries a session_info name.
 	await this.persistName(live);
 	await live.proc.close();
+	await this.refreshAwaitingUser(live);
 	this.emitStatus(live);
 	this.broadcast(live, frameStatus(live.info));
 	await this.refreshPeers();
@@ -318,6 +319,7 @@ export async function spawn(
 				live.info.state = "error";
 				this.broadcast(live, frameError(`pi exited (${code ?? signal})`));
 				this.emitStatus(live);
+				void this.refreshAwaitingUser(live);
 				void this.refreshPeers().catch(() => {});
 			}
 			rejectState(new Error(`pi exited during startup (${code ?? signal})`));
@@ -391,6 +393,8 @@ export async function spawn(
 
 	this.options.log(`attached ${info.id} (${info.cwd}) in ${Date.now() - started}ms`);
 	await this.refreshPeers();
+	// A recorded re-ask belongs to this logical session even after a reattach.
+	await this.refreshAwaitingUser(live);
 	this.emitStatus(live);
 	if (info.state === "idle") this.scheduleIdle(live);
 	resolveState(info);
@@ -590,6 +594,7 @@ export function cacheBlockingUi(
 	};
 	live.pendingUi.set(id, pending);
 	this.armPendingUiTimer(live, pending);
+	void this.refreshAwaitingUser(live);
 }
 
 export function armPendingUiTimers(this: any, live: LiveSession): void {
@@ -718,12 +723,14 @@ export async function finishReaskAsk(this: any, live: LiveSession, ask: ReaskAsk
 	this.clearReaskAsk(live);
 	if (!accepted) {
 		this.options.log(`ui request ${ask.record.id} will not be re-offered on resume`);
+		void this.refreshAwaitingUser(live);
 		return;
 	}
 	const dataDir = this.options.dataDir ?? dirname(this.options.sessionsDir);
 	try {
 		await addPendingReask(dataDir, pendingUiKey(live.info), ask.record);
 		this.broadcast(live, frameReask(publicReask(ask.record)));
+		void this.refreshAwaitingUser(live);
 		this.options.log(`ui request ${ask.record.id} recorded for re-ask on resume`);
 	} catch (error) {
 		this.options.log(`ui request ${ask.record.id} could not be recorded: ${(error as Error).message}`);
@@ -760,11 +767,33 @@ export async function reask(this: any, id: string, requestId: string, action: st
 	if (!record) throw new Error(`unknown timed-out request ${requestId}`);
 	if (action === "dismiss") {
 		await removePendingReask(dataDir, key, requestId);
+		void this.refreshAwaitingUser(live);
 		return;
 	}
 	if (action !== "ask") throw new Error(`unknown re-ask action ${action}`);
 	await this.prompt(id, reaskPrompt(record), "followUp");
 	await removePendingReask(dataDir, key, requestId);
+	void this.refreshAwaitingUser(live);
+}
+
+/**
+ * Keep `awaitingUser` in sync with the live pending-UI cache and the on-disk
+ * re-ask records. A change refreshes the session header (status) and the
+ * dashboard rows (sessions), so neither needs a reload to notice.
+ */
+export async function refreshAwaitingUser(this: any, live: LiveSession): Promise<void> {
+	const dataDir = this.options.dataDir ?? dirname(this.options.sessionsDir);
+	const key = pendingUiKey(live.info);
+	let waiting = (live.pendingUi?.size ?? 0) > 0;
+	if (!waiting) waiting = (await readPendingReasks(dataDir, key)).length > 0;
+	// A request may have arrived while the record read was in flight.
+	if ((live.pendingUi?.size ?? 0) > 0) waiting = true;
+	const changed = waiting !== (live.info.awaitingUser === true);
+	if (waiting) live.info.awaitingUser = true;
+	else delete live.info.awaitingUser;
+	if (!changed) return;
+	this.emitStatus(live);
+	if (this.watchers.size > 0) this.broadcastList(await this.list());
 }
 
 export function clearPendingUi(this: any, live: LiveSession, id?: string): void {
