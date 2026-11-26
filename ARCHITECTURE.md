@@ -286,7 +286,8 @@ REST is only for discovery, process verbs and downloads: `GET /api/sessions`,
 (JSON `{cwd, worktree: {branch}, force?}`),
 `GET /api/sessions/:id/export.html` and `GET /api/sessions/:id/export.jsonl`
 (both `Content-Disposition: attachment`), `GET /api/info`, `GET /health`
-(`pid`, `startedAt`, `reloads`) and `POST /api/refresh`. Refresh is loopback-only;
+(`pid`, `startedAt`, `reloads`) and `POST /api/refresh`. Refresh accepts loopback
+peers and the exact bind address;
 the worktree routes follow the server bind like the rest of the dashboard, because
 managing a tree is a normal session action rather than a host-local admin verb.
 Streaming never uses HTTP requests.
@@ -426,8 +427,9 @@ in sync when the change happens elsewhere.
 
 ## Daemon lifecycle and refresh
 
-`bin/pixip.ts` serves in the foreground by default; `start` spawns that same
-entry detached with stdio to `<data-dir>/pixip.log` and polls `/health` until it
+`bin/pixip.ts run` serves in the foreground (the bare command defaults to it);
+`daemon` spawns that same entry with `run` detached, stdio to
+`<data-dir>/pixip.log`, and polls `/health` until it
 answers. One daemon per data dir: `pixip.pid` holds the pid, `pixip.state.json`
 holds `{pid, host, port, url, startedAt, dataDir, args}` (args so `restart`
 reproduces the configuration). `status`, `stop` and `refresh` read those files; a
@@ -458,7 +460,7 @@ to `<data-dir>/pixip.log`), not in the CLI process. This is what makes a restart
 issued from inside a pixip session work: a bash tool is a child of the Pi child
 the old daemon is about to stop, so the foreground CLI dies with its session.
 The helper is in its own session (`setsid` + `unref`), survives that shutdown,
-waits for the old pid to exit, and starts the same serve args. `PIXIP_INSIDE=1`
+waits for the old pid to exit, and starts a new `run` with the same serve args. `PIXIP_INSIDE=1`
 and `PIXIP_SESSION_ID` are exported to every Pi child, so the CLI knows it is
 inside a session: `--when-idle` ignores the calling session (it is the one being
 replaced) and `pixip stop` from inside is turned into a forced restart instead of

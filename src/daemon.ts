@@ -245,7 +245,7 @@ export async function startDaemon(input: {
 	await mkdir(join(dataDir, "sessions"), { recursive: true });
 	const log = await open(paths.log, "a");
 	try {
-		const child = spawn(process.execPath, [daemonEntry(), ...args], {
+		const child = spawn(process.execPath, [daemonEntry(), "run", ...args], {
 			detached: true,
 			stdio: ["ignore", log.fd, log.fd],
 			cwd: process.cwd(),

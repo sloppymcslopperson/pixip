@@ -68,3 +68,14 @@ Still open: `--dev`/`--serious-mode` precedence (last flag wins vs serious alway
 - `--serious-mode` coverage is a server unit test: construct the server in serious mode, assert no per-request asset re-read and the fixture endpoint disabled. No daemon integration test for this.
 - The live `dev.sh` at `/home/sloppy/dev/sin/pixip/dev.sh` is edited there and not committed here; README/AGENTS prose is updated in this worktree.
 - The earlier `--dev`/`--serious-mode` precedence question is moot now that `--dev` is gone.
+
+### Implementation (2026-11-25)
+
+- Commands are now `run` (foreground; also the bare default) and `daemon` (detached). `start`/`serve` fail with `unknown command <name>`; `--dev` fails with `unknown argument --dev`.
+- `src/daemon.ts` spawns `[daemonEntry(), "run", ...args]`.
+- Dev mode is the default; `--serious-mode` opts out, is recorded in the daemon state args, and logs `serious mode: client assets served from the startup snapshot`. The default logs `dev mode: client assets re-read per request`.
+- `spawnEnv()` repairs `XDG_RUNTIME_DIR` in its returned env (never `process.env`): an owned value is kept, otherwise `~/.run` is created/kept at 0700; a wrong-owner `~/.run` throws and a non-directory path is refused. A mode repair is applied when we own it.
+- `/home/sloppy/dev/sin/pixip/dev.sh` now just execs `daemon --host 100.42.42.1 --port 8137 --data-dir ./tmp/trial` (no XDG block, no `--dev`); not committed here.
+- Tests: `cli()` helper in both CLI test files, `daemon` command, explicit foreground `run` + SIGTERM, retired-command/`--dev` errors, serious-mode state/log, server serious-mode asset/fixture unit test, and `spawnEnv` runtime-dir cases. README/ARCHITECTURE/AGENTS prose updated.
+- Verified: `npm run check` green (432 tests); daemon and restart both inherit `XDG_RUNTIME_DIR=/home/sloppy/.run` when launched with it unset.
+- Operational note: a daemon already running from before this change has `--dev` in its saved state args; stop/start it once rather than `restart`, which would now reject that flag.

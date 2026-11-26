@@ -42,15 +42,15 @@ import { spawnEnv } from "../src/spawnEnv.ts";
  * `~/.agent/sessions`. The daemon's pid, state and log also live there, so two
  * instances on different `--port`/`--data-dir` never collide.
  *
- * Bare `pixip` serves in the foreground (as before). `start` detaches the same
- * serve path; `stop`/`status`/`logs`/`refresh`/`restart` manage it.
+ * Bare `pixip` and `pixip run` serve in the foreground. `daemon` detaches the
+ * same serve path; `stop`/`status`/`logs`/`refresh`/`restart` manage it.
  */
 
-type Command =
-	"serve" | "start" | "stop" | "status" | "logs" | "refresh" | "restart" | "worktree" | "protect" | "inbox";
+type Command = "run" | "daemon" | "stop" | "status" | "logs" | "refresh" | "restart" | "worktree" | "protect" | "inbox";
 
 const SUBCOMMANDS = new Set<string>([
-	"start",
+	"run",
+	"daemon",
 	"stop",
 	"status",
 	"logs",
@@ -144,7 +144,7 @@ function parseArgs(argv: string[]): Options {
 		pendingUiOpenTimeoutMs: 10 * 60 * 60_000,
 		pendingUiMoreTimeMs: 2 * 60_000,
 		titleModel: process.env["PIXIP_TITLE_MODEL"] ?? "",
-		dev: false,
+		dev: true,
 		allowCommands: [],
 		denyCommands: [],
 		noBash: false,
@@ -215,8 +215,8 @@ function parseArgs(argv: string[]): Options {
 			case "--title-model":
 				options.titleModel = next();
 				break;
-			case "--dev":
-				options.dev = true;
+			case "--serious-mode":
+				options.dev = false;
 				break;
 			case "--allow-command":
 				options.allowCommands.push(next());
@@ -333,7 +333,9 @@ function printHelp(): void {
                       (default 120000 = 2m; 0 disables)
   --title-model <p/id> model for the automatic 3-5 word session label
                       (default: the session's current model; env: PIXIP_TITLE_MODEL)
-  --dev               re-read client assets per request (no restart on CSS/JS edits)
+  --serious-mode      host pixip as a stable service: serve client assets from
+                      the startup snapshot and disable the dev panel fixture.
+                      Dev mode (per-request asset reads) is the default
   --inbox-limit <n>   maximum retained inbox messages (default 200; archived
                       then read messages are evicted first)
   --inbox-token <t>   require Authorization: Bearer <t> on the inbox API and
@@ -349,8 +351,8 @@ function printHelp(): void {
 	const usage = `Usage: pixip [command] [options]
 
 Commands:
-  (none)|serve        serve in the foreground (default)
-  start               detach a daemon, write the pid/state, print the URL
+  (none)|run          serve in the foreground (default)
+  daemon              detach a daemon, write the pid/state, print the URL
   stop                SIGTERM the daemon and clean its pid file. From inside a
                       pixip session this restarts instead, so an agent cannot
                       take the service down; use a shell outside pixip to stop it
@@ -465,7 +467,7 @@ function serveArgs(options: Options): string[] {
 		args.push("--pi-host");
 		if (options.piHost) args.push(options.piHost);
 	}
-	if (options.dev) args.push("--dev");
+	if (!options.dev) args.push("--serious-mode");
 	for (const name of options.allowCommands) args.push("--allow-command", name);
 	for (const name of options.denyCommands) args.push("--deny-command", name);
 	if (options.noBash) args.push("--no-bash");
@@ -474,7 +476,12 @@ function serveArgs(options: Options): string[] {
 
 async function main(): Promise<void> {
 	const argv = process.argv.slice(2);
-	const command: Command = SUBCOMMANDS.has(argv[0] ?? "") ? (argv.shift() as Command) : "serve";
+	const first = argv[0];
+	let command: Command = "run";
+	if (first !== undefined && !first.startsWith("-")) {
+		if (!SUBCOMMANDS.has(first)) throw new Error(`unknown command ${first}`);
+		command = argv.shift() as Command;
+	}
 	if (command === "worktree") {
 		const action = argv.shift();
 		if (!action || action === "--help" || action === "-h" || action === "help") {
@@ -498,8 +505,8 @@ async function main(): Promise<void> {
 		throw new Error(`unknown argument ${options.positionals[0]}`);
 	}
 	switch (command) {
-		case "start":
-			return await cmdStart(options);
+		case "daemon":
+			return await cmdDaemon(options);
 		case "stop":
 			return await cmdStop(options);
 		case "status":
@@ -600,6 +607,11 @@ async function serve(options: Options): Promise<void> {
 
 	log(`pixip listening on ${server.url}`);
 	log(`pid ${process.pid}, data dir ${options.dataDir}, log ${paths.log}`);
+	log(
+		options.dev
+			? "dev mode: client assets re-read per request"
+			: "serious mode: client assets served from the startup snapshot",
+	);
 	if (options.host !== "127.0.0.1" && options.host !== "::1") {
 		log(`warning: bound to ${options.host}; this UI has no authentication`);
 	}
@@ -637,7 +649,7 @@ async function serve(options: Options): Promise<void> {
 
 // --------------------------------------------------------------- lifecycle
 
-async function cmdStart(options: Options): Promise<void> {
+async function cmdDaemon(options: Options): Promise<void> {
 	await mkdir(join(options.dataDir, "sessions"), { recursive: true });
 	const running = await runningDaemon(options.dataDir);
 	if (running) throw new Error(`pixip is already running for ${options.dataDir} (pid ${running.pid})`);
@@ -870,7 +882,7 @@ async function cmdRestart(options: Options): Promise<void> {
 	const running = await runningDaemon(options.dataDir);
 	if (!running) {
 		// Idempotent: restarting a stopped data dir is just a start.
-		await cmdStart(options);
+		await cmdDaemon(options);
 		return;
 	}
 
@@ -940,7 +952,7 @@ async function inboxTarget(options: Options): Promise<InboxTarget> {
 		};
 	const state = await runningDaemon(options.dataDir);
 	if (!state) {
-		throw new Error(`pixip is not running for ${options.dataDir}; start it with \`pixip start\``);
+		throw new Error(`pixip is not running for ${options.dataDir}; start it with \`pixip daemon\``);
 	}
 	return { url: state.url, token: process.env["PIXIP_INBOX_TOKEN"] || undefined };
 }

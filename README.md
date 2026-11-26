@@ -164,7 +164,8 @@ do in the TUI.
 - reconnect with backoff, durable entry-cursor resume and a stable pixip logical
   session id per session, so a dropped phone misses no entries;
 - sessions that were never prompted still list after detach (session index);
-- daemon lifecycle: `pixip start|stop|status|logs|refresh|restart` with pid,
+- daemon lifecycle: `pixip daemon|stop|status|logs|refresh|restart` (`pixip
+run` serves in the foreground) with pid,
   state and log under `--data-dir`; soft refresh re-reads assets, command policy
   and the session index without touching live children, and a `reload` action in
   the header does the same from the phone;
@@ -178,10 +179,11 @@ tickets that own each gap.
 
 ## Running as a daemon
 
-Bare `pixip` still serves in the foreground; the CLI manages a detached process:
+Bare `pixip` and `pixip run` serve in the foreground; `pixip daemon` manages a
+detached process:
 
 ```bash
-pixip start --data-dir ./tmp/dev          # prints the URL, writes pid/state/log
+pixip daemon --data-dir ./tmp/dev         # prints the URL, writes pid/state/log
 pixip status [--json]                     # non-zero when not running
 pixip logs [-f] [--lines 200]             # tails <data-dir>/pixip.log
 pixip refresh                             # soft: assets, policy, session index
@@ -194,7 +196,8 @@ pixip stop
 `sessions/`, `inbox.json`), so parallel instances on another `--port`/`--data-dir` never
 collide. One process owns a data dir at a time: the bare foreground command
 refuses to start when a daemon already owns it. Soft refresh (`pixip refresh`, `SIGHUP`, or the header's `reload`) keeps
-children and sockets, and its endpoint is loopback-only because the UI has no
+children and sockets, and its endpoint accepts loopback peers and the exact
+bind address because the UI has no
 auth. Hard restart refuses while a session is busy unless `--force`;
 `--when-idle` waits up to `--timeout` seconds (default 300, exit 2) for the other
 sessions and is the safe way to pick up hub changes from inside pixip: the
@@ -307,7 +310,8 @@ PIXIP_CHROME=/path/to/chrome node tools/shot.mjs http://127.0.0.1:8137/ 1280 900
 
 It prints the box model of the header/list/log/composer (so a resize is asserted,
 not eyeballed), flags horizontal overflow, console errors and page errors, and
-writes the screenshot. Use `--dev` on the daemon so CSS/JS edits need no restart.
+writes the screenshot. Dev mode is the default, so CSS/JS edits need no restart;
+pass `--serious-mode` to serve the startup asset snapshot instead.
 
 `tools/browser-check.mjs` covers the main client flows (dashboard open,
 composer submit, inline `select`, A2UI fixture panel, transcript windows) with an

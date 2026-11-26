@@ -10,7 +10,7 @@ import type { Hub } from "../src/hub.ts";
 import { isLoopback, startServer, type RunningServer } from "../src/server.ts";
 import { cleanupRoots, fixtureRoot, hubFor, spawns, waitFor, type TestPaths } from "./helpers/harness.ts";
 
-async function boot(paths: TestPaths): Promise<{ hub: Hub; server: RunningServer }> {
+async function boot(paths: TestPaths, dev = false): Promise<{ hub: Hub; server: RunningServer }> {
 	const hub = hubFor(paths, { log: (message) => paths.logs.push(message) });
 	const server = await startServer({
 		host: "127.0.0.1",
@@ -18,6 +18,7 @@ async function boot(paths: TestPaths): Promise<{ hub: Hub; server: RunningServer
 		hub,
 		clientDir: paths.clientDir,
 		log: (message) => paths.logs.push(message),
+		dev,
 	});
 	return { hub, server };
 }
@@ -149,6 +150,22 @@ describe("soft refresh", () => {
 		assert.equal(await spawnCount(paths), 1);
 
 		inbox.close();
+		await server.close();
+		await hub.shutdown();
+	});
+});
+
+describe("serious mode", () => {
+	it("serves the startup asset snapshot and hides the dev fixture", async () => {
+		const paths = await fixtureRoot("pixip-serious-");
+		await writeFile(join(paths.clientDir, "index.html"), "v1");
+		const { hub, server } = await boot(paths);
+		await writeFile(join(paths.clientDir, "index.html"), "v2");
+
+		assert.equal(await (await fetch(server.url)).text(), "v1");
+		const fixture = await fetch(new URL("api/dev/panel-fixture", server.url));
+		assert.equal(fixture.status, 404);
+
 		await server.close();
 		await hub.shutdown();
 	});

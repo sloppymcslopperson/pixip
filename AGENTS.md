@@ -102,9 +102,10 @@ ticket, so `autocommit` without `review` is the expected mode. Do not pass
 `### Decisions` only need the remaining gaps grilled, not everything again.
 
 Definition of done for every ticket: `npm run check` green, plus `tools/shot.mjs`
-at 390 and 1280 for anything that touches the client. `--dev` only reloads client
+at 390 and 1280 for anything that touches the client. Dev mode (the default) only reloads client
 assets; hub or server changes need the daemon restarted (kill the pid on 8137 and
-relaunch, or start a second instance on another `--port`/`--data-dir`). If a change moves the
+relaunch, or start a second instance on another `--port`/`--data-dir`). Use
+`--serious-mode` to serve the startup asset snapshot instead. If a change moves the
 numbers in ARCHITECTURE.md, update them there (that file is the source of truth
 for the latency budget).
 
