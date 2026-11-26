@@ -1,5 +1,6 @@
 ---
 project: pixip
+grilled: true
 ---
 
 Running `npm run check` from inside a pixip-managed Pi session leaks `PIXIP_INSIDE` and `PIXIP_SESSION_ID` into the test processes, so `test/daemon.test.ts` treats its own `stop` calls as inside-session restarts and two lifecycle tests fail. Scrub those markers in the test harness so the suite is green regardless of where it is launched from.
@@ -34,3 +35,16 @@ Running `env -u PIXIP_INSIDE -u PIXIP_SESSION_ID npm run check` is green, which 
 ### Order
 
 First ticket in the `open/hotreload` journey. Do this before any other ticket, otherwise every `/fit work` check is red for an unrelated reason and the journey starts on a false failure.
+
+### Grilling answers (recorded 2026-11-25)
+
+- Scrubbing happens once at process level: a new `test/setup.ts` deletes `PIXIP_INSIDE` and `PIXIP_SESSION_ID` from `process.env`, loaded via `node --import ./test/setup.ts` in the `npm test` script.
+- Spawn helpers still apply explicitly passed env after the scrub, so tests that deliberately set `PIXIP_SESSION_ID`/`PIXIP_INSIDE` keep exercising the inside-session path.
+- No new assertion for marker absence; the existing daemon lifecycle tests are the regression.
+- Scope stays test-harness only; `insidePixip()` semantics are unchanged.
+
+### Implementation (2026-11-25)
+
+- `test/setup.ts` is loaded with `node --import ./test/setup.ts` in `npm test`; it clears the inherited pixip child env.
+- Beyond the two session markers, the scrub also clears `PIXIP_PI_HOST`, `PIXIP_DATA_DIR`, `PIXIP_DAEMON_URL` and `PIXIP_INBOX_TOKEN`: this shell's pixip session exported `PIXIP_PI_HOST`, which made the daemon ignore the fake-Pi fixture and failed three hard-restart tests even without the markers. Explicit test env still wins.
+- Verified: `npm run check` green with the pixip session env inherited; `env -u … npm test` green (423/423).
