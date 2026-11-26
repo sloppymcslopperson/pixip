@@ -79,6 +79,8 @@ Rules:
   Widening must add information (session cards, rail, context), never stretch one
   column; anything the desktop view shows must come from frames the hub already
   streams.
+- Refs look like `[pixip-ref=…]`; resolve with `pixip ref` or `sessions.json`
+  plus the JSONL. The grammar lives in `src/client/reftags.js` and nowhere else.
 - Commits use the repo-local identity already configured here
   (`Sloppy McSlopperson <thesloppyslopperson@gmail.com>`).
 
