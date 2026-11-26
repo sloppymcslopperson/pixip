@@ -139,15 +139,16 @@ The CLI restart helper and `startDaemon` use the same helper, so a daemon starte
 from inside a Pi session is clean as well.
 
 Measured on this box (2026-11-21, Node 22.23.5, real Pi 1.5.2 vs workspace host,
-three cold/warm attaches per backend):
+three cold/warm attaches per backend). The default host path is first; the
+`--use-system-pi` column is the explicit legacy opt-in:
 
-| metric                         | legacy `pi --mode rpc` | `pixip-pi-host` | delta  |
-| ------------------------------ | ---------------------- | --------------- | ------ |
-| cold attach (create)           | 1239 ms                | 3745 ms         | +202%  |
-| warm attach (reattach)         | 1240-1331 ms           | 3487-3657 ms    | ~+180% |
-| child RSS                      | 108-110 MB             | 149-152 MB      | ~+37%  |
-| command round-trip (get_state) | 1.55 ms                | 1.59 ms         | ~equal |
-| event -> frame, median / p95   | 0.30 / 1.71 ms         | 0.30 / 1.30 ms  | ~equal |
+| metric                         | `pixip-pi-host` (default) | legacy `pi --mode rpc` (`--use-system-pi`) | delta  |
+| ------------------------------ | ------------------------- | ------------------------------------------ | ------ |
+| cold attach (create)           | 3745 ms                   | 1239 ms                                    | -67%   |
+| warm attach (reattach)         | 3487-3657 ms              | 1240-1331 ms                               | ~-64%  |
+| child RSS                      | 149-152 MB                | 108-110 MB                                 | ~-27%  |
+| command round-trip (get_state) | 1.59 ms                   | 1.55 ms                                    | ~equal |
+| event -> frame, median / p95   | 0.30 / 1.30 ms            | 0.30 / 1.71 ms                             | ~equal |
 
 The host is slower to boot because it loads the SDK and the user's extension set
 in-process; once attached, command and event latency match the legacy child.
@@ -426,7 +427,7 @@ Model and thinking are plain RPC passthroughs (`get_available_models`,
 the one place that shows and changes them. `thinking_level_changed` events keep it
 in sync when the change happens elsewhere.
 
-## Daemon lifecycle and refresh
+## Reload and restart
 
 `bin/pixip.ts run` serves in the foreground (the bare command defaults to it);
 `daemon` spawns that same entry with `run` detached, stdio to
@@ -435,6 +436,8 @@ answers. One daemon per data dir: `pixip.pid` holds the pid, `pixip.state.json`
 holds `{pid, host, port, url, startedAt, dataDir, args, env}` (args and the
 extra environment, so `restart` reproduces the configuration). `status`, `stop` and `refresh` read those files; a
 dead pid is stale and gets cleaned rather than reported.
+
+### Soft refresh
 
 Soft refresh (`pixip refresh`, `SIGHUP`, `POST /api/refresh`) must never disturb
 a turn:
@@ -447,53 +450,102 @@ a turn:
    sockets.
 
 Children and websockets are untouched by a soft refresh; `/health` exposes
-`startedAt` and a `reloads` counter so the CLI or the agent can verify it
-happened. The endpoint is loopback-only (the UI has no auth) and answers
+`startedAt`, a `reloads` counter and the current daemon `generation`, so the CLI
+or the agent can verify it happened. The endpoint is loopback-only (the UI has no
+auth) and answers
 `{reloaded: ["assets", "config", "index", "commands"], reloads}`; the catalog is a
 client asset, so `commands` rides on the asset re-read.
 
-Daemon-wide `/reload` is the in-place step above soft refresh. It first rejects
-the request if any live session is not `idle`/`stopped`, has a pending UI
-request, is running bash, or has an unsettled turn; a refusal lists every
-blocker and changes nothing. Otherwise it pre-reads the client asset map,
-re-applies policy/index (the same two-phase soft-refresh path), commits the
-assets and rotates the browser nonce, then sends `reload` to every host child
-and respawns system-pi children through `respawnSession`. Child failures are
-reported per session and do not roll the assets back. The browser sends the
-nonce from the served `index.html` meta tag; the CLI uses `SIGUSR1` and polls
-`<data-dir>/pixip.reload.json`. A successful reload broadcasts an ephemeral
-`notice` frame (never JSONL), forces a page reload so every client picks up the
-new assets/nonce, and restores the row once from `sessionStorage`.
+### `/reload`: assets, policy and daemon code in place
 
-A hard restart is explicit: `pixip restart` refuses while a session is busy
-unless `--force`, or waits for every session to be idle with `--when-idle`
-(bounded by `--timeout`, default 300 s, exit 2 on timeout).
+Daemon-wide `/reload` is the in-place step above soft refresh. It is daemon-wide:
+one request swaps assets/policy for every socket and reloads every live child.
+The gate refuses when any live session is not `idle`/`stopped`, has a pending UI
+request, is running bash, or has an unsettled turn; a refusal lists every blocker
+and changes nothing. `/reload` never forces.
 
-The stop/start itself runs in a **detached helper** (`restart --detached`, stdio
-to `<data-dir>/pixip.log`), not in the CLI process. This is what makes a restart
-issued from inside a pixip session work: a bash tool is a child of the Pi child
-the old daemon is about to stop, so the foreground CLI dies with its session.
-The helper is in its own session (`setsid` + `unref`), survives that shutdown,
-waits for the old pid to exit, and starts a new `run` with the same serve args. `PIXIP_INSIDE=1`
-and `PIXIP_SESSION_ID` are exported to every Pi child, so the CLI knows it is
-inside a session: `--when-idle` ignores the calling session (it is the one being
-replaced) and `pixip stop` from inside is turned into a forced restart instead of
-taking the service down. A shell outside pixip still stops for real.
+The transaction imports the next daemon code generation first and fails closed.
+`bin/pixip.ts` registers `src/reload/register.ts` as a Node resolve hook; it
+propagates `?gen=<N>` from the importing parent to every project `src/`
+specifier, so one import creates a fresh hub/server/hubControl graph while `bin/`
+and `node_modules/` stay shared. `src/reload/manager.ts` keeps the serving
+generation and a separate attempt counter. A failed import burns its attempt
+number, because Node caches a rejected dynamic import by URL; the next attempt
+after a fix uses a fresh URL. Nothing live changes before the import succeeds.
 
-Nothing is lost that the JSONL does not already hold, and the client reconnects
-with backoff and its durable cursor.
+The commit point then does `Object.setPrototypeOf(existingHub, NewHub.prototype)`
+and installs the new `state.impl = {handleHttp, handleSocket, refresh, reload}`.
+The listener, every open socket and every live child stay up: socket callbacks and
+HTTP requests read `state.impl` at call time, and hub methods stay `this`-state
+only (the former module-level `pendingReask` write map now lives on the hub). A
+new generation's hub methods therefore apply to an already-open socket, while
+wiring created once per connection (the socket handler chain) needs a reconnect
+to pick up a changed frame shape. Retired generations are retained only by the
+sockets/handlers that still reference them; the manager keeps the current
+generation plus report metadata, so old graphs are collectable once their
+sockets close.
 
-A restart is announced before it happens. The helper stops the old daemon with
-`SIGUSR2` instead of `SIGTERM`; the daemon's handler broadcasts a
-`{"t":"restarting"}` frame to every live session socket, gives it ~50 ms to
-flush, and then closes. The browser shows `restarting…`, disables the composer,
-and keeps its durable entry cursor. If a turn was streaming when the frame
-arrived, the first reconnect snapshot appends a local (non-transcript) notice
-saying the turn was interrupted; it is never sent to Pi or persisted. The new
-daemon reattaches the same logical session on reconnect (spawning it from the
-JSONL or the index record), so the URL and transcript anchor stay stable.
-Unexpected daemon crashes have no frame; the same socket-close reconnect path
-still applies, without claiming a planned restart.
+After the code swap it re-reads the client assets, re-applies policy/index (the
+same two-phase soft-refresh path), commits assets and rotates the browser nonce,
+then sends `reload` to every host child and respawns system-pi children through
+`respawnSession`. Child failures are reported per session and do not roll the
+code or assets back. A pre-import failure and a post-import/pre-commit failure
+both restore the previous prototype/impl; the report has `status: "error"` and
+the old generation keeps serving.
+
+The browser sends the nonce from the served `index.html` meta tag; the CLI uses
+`SIGUSR1` and polls `<data-dir>/pixip.reload.json`. A successful reload
+broadcasts an ephemeral `notice` frame (never JSONL), forces a page reload so
+every client picks up the new assets/nonce, and restores the row once from
+`sessionStorage`. The report includes the committed `generation`; changes to
+`bin/pixip.ts`, serve flags, `HubOptions` or the environment are not reloadable
+and add `requiresRestart` rather than pretending the swap covered them.
+
+### `/pixup-restart`: replace the process
+
+`/pixup-restart` is deliberately different: it replaces the daemon process
+through the detached restart helper. The browser control is user-only; it is an
+affordance, not an authentication boundary, consistent with the unauthenticated
+UI posture. A default request refuses and paints an inline card naming every
+blocking session (non-idle/`stopped`/`error`, pending UI, running bash); an
+unsettled thinking turn alone does not block. The card's Force action re-sends
+the request with `force` and interrupts those turns.
+
+The request travels as a `restart` WebSocket frame carrying the same reload
+nonce. The daemon persists the logical ids of sessions that were live, spawns
+`restart --detached`, and the old daemon announces `{"t":"restarting"}` before
+it closes. The browser reconnects with its durable cursor. The new daemon
+reattaches the persisted live set on startup, so the dashboard's hot/warm
+grouping does not visibly change; it then answers `/health` with the new `pid`
+and `startedAt`, and the client paints an ephemeral
+`daemon restarted (pid, uptime)` row. Nothing is lost that the JSONL does not
+already hold.
+
+A hard restart from the CLI is still explicit: `pixip restart` refuses while a
+session is busy unless `--force`, or waits for every session to be idle with
+`--when-idle` (bounded by `--timeout`, default 300 s, exit 2 on timeout). It also
+works from inside a pixip session: the stop/start runs in a **detached helper**
+(`restart --detached`, stdio to `<data-dir>/pixip.log`), not in the CLI process,
+so it survives the shutdown of the Pi child that ran the bash tool. `PIXIP_INSIDE=1`
+and `PIXIP_SESSION_ID` are exported to every Pi child: `--when-idle` ignores the
+calling session (it is the one being replaced). `pixip stop` from inside a
+session now refuses with exit 2 and a user-only message instead of turning into
+a forced restart; a shell outside pixip still stops for real. Unexpected daemon
+crashes have no frame; the same socket-close reconnect path applies, without
+claiming a planned restart.
+
+### Backend and port boundary
+
+The default child is `pixip-pi-host`; `--use-system-pi` selects the legacy
+`pi --mode rpc` child and requires an explicit `--pi`/`PIXIP_PI`. `/reload` and
+`/pixup-restart` keep that choice: host children answer the `reload` command,
+system-pi children are respawned through the daemon's current host configuration,
+and `PIXIP_PI_HOST` is recorded in the state file so a restart reproduces it.
+There is no silent fallback to a global `pi`.
+
+Reload is a Node affordance, not a protocol requirement. A Rust port may
+implement the same user-visible contract as a supervised restart; the wire
+frames, JSONL truth and durable reconnect cursor stay the same.
 
 ## Built-in slash commands
 
@@ -533,6 +585,12 @@ The classifier in `src/client/commands.js` marks the RPC-drivable TUI built-ins;
 - `/export` → `export_html` writes under `<data-dir>/exports/`; the `export`
   frame carries download URLs for the HTML and the session's own JSONL, both
   served as attachments;
+- `/reload` → daemon-wide in-place reload of assets, policy and daemon code; the
+  browser sends the served nonce, refuses while blocked, then reloads the page
+  for the new assets/nonce;
+- `/pixup-restart [force]` → replace the daemon process. Without `force` it
+  refuses with an inline blocker card; the card's Force action sends `force`.
+  The reconnect paints the new pid/uptime row;
 - `/resume` → the session list; `/quit` → `stop` (detach) then the list.
 
 Every handler is only reachable through the `00` classifier, so the per-session
@@ -661,6 +719,8 @@ label is never applied over a name that appeared while the one-shot call ran.
 | switch green/yellow → window + resume delta                     | **7–43 ms**                       |
 | reconnect with durable cursor → delta                           | **5–24 ms**                       |
 | park/resume on one warm socket → delta (loopback)               | **~3 ms**                         |
+| soft refresh (`POST /api/refresh`, idle daemon)                 | **15.8 ms** median / 20.1 p95     |
+| `/reload` including daemon code generation swap                 | **152 ms** median / 152.6 p95     |
 | create → composer ready, alone                                  | **0.94–1.05 s**                   |
 | create → composer ready, another agent busy streaming           | **1.28 s**                        |
 | "load earlier" (200 entries from the JSONL, 17 MB session)      | 54–77 ms                          |
@@ -674,7 +734,12 @@ window.
 
 The reconnect/create rows are from `tools/reconnect-bench.mjs` on an 11 MB
 synthetic session, median of five socket runs against a local daemon with a real
-`pi` child. The bench also measures `park`/`resume` on one socket and a browser
+`pi` child. The reload rows are from `tools/reload-bench.mjs` on an idle daemon
+with no live children, five runs: the soft refresh baseline is 15.8 ms median
+(20.1 ms p95) and the full `/reload` with a fresh daemon generation is 152 ms
+median (152.6 ms p95), so the rough import/swap cost is ~136 ms. Reload is an
+explicit operator action, not on the prompt or event path. The bench also
+measures `park`/`resume` on one socket and a browser
 switch-away/back when Chromium is available. Before the bounded window, the authoritative `get_entries` call took
 4.6 s warm / 7.2 s cold and produced an 8.4 MB frame. The browser paint rows are
 older measurements from a synthetic 17 MB session; the bench measures paint too
@@ -847,7 +912,8 @@ The split exists so this is mechanical:
 | `src/rpc.ts`    | `tokio::process::Child` + `tokio_util::codec::LinesCodec` (LF only, strip `\r`), `HashMap<Id, oneshot::Sender<Response>>`; do **not** use a Unicode-aware line reader |
 | `src/hub.ts`    | `HashMap<SessionId, Session>` behind one `mpsc` command loop; `SessionState` as an enum; `tokio::time::sleep` for idle                                                |
 | `src/wire.ts`   | `#[serde(tag = "t")]` enums; event passthrough with `RawValue`                                                                                                        |
-| `src/server.ts` | `axum` router + `axum::extract::ws`; `include_bytes!` for the static client                                                                                           |
+| `src/server.ts` | `axum` router + `axum::extract::ws`; `include_bytes!` for the static client; reload is a supervised restart, not a module swap                                        |
+| `src/reload/*`  | Node-only: generation-tagged `import()` plus `module.register`. The port may discard it and restart under supervision while keeping the same user-visible contract.   |
 | `src/client/*`  | unchanged (static assets)                                                                                                                                             |
 | tests           | `cargo test` for framing/frames; the same JS tests keep guarding the client                                                                                           |
 
@@ -857,15 +923,18 @@ per child, and raw bytes/strings on the hot path.
 
 ## Open design questions
 
+Reload/restart closed the old “hub restart kills live children” question: an
+in-place `/reload` keeps children and sockets, while `/pixup-restart` persists
+the live set and the new daemon reattaches it, so the dashboard's hot/warm
+grouping does not change. There is no separate resume-all-on-start path.
+
 1. Cold attach is 1.3 s. Warm pool of one idle child per cwd? The bounded JSONL
    window hides it for reads, but a create still waits for the child; the pool
    would remove that wait (see the Pi hot-swap spike in the ticket board).
-2. Hub restart kills live children. Resume-all-on-start (by last activity) or
-   leave them stopped?
-3. Worktree create/list/remove/prune are implemented across the dashboard, REST
+2. Worktree create/list/remove/prune are implemented across the dashboard, REST
    and CLI; the remaining worktree gaps belong to the options TOML and desktop
    surface tickets, not the lifecycle.
-4. Ordering: snapshot + live events have a small race window; a durable cursor
+3. Ordering: snapshot + live events have a small race window; a durable cursor
    (`get_entries?since=<leafId>`) on reconnect closes it properly.
-5. Multi-client: today each socket is independent; two phones on one session both
+4. Multi-client: today each socket is independent; two phones on one session both
    get full streams (fine) but neither sees the other's optimistic input.

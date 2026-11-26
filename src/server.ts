@@ -316,6 +316,7 @@ async function handleHttp(
 					pid: process.pid,
 					startedAt: state.startedAt,
 					reloads: state.reloads,
+					generation: options.reloadCode?.generation ?? 0,
 				}),
 			);
 			return;
