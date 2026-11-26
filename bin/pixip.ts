@@ -66,7 +66,9 @@ interface Options {
 	port: number;
 	dataDir: string;
 	piBin: string;
-	/** `--pi-host [path]` / `PIXIP_PI_HOST`; `""` means resolve the installed host bin. */
+	/** `--use-system-pi`: spawn the legacy `pi --mode rpc` backend. */
+	useSystemPi: boolean;
+	/** `PIXIP_PI_HOST`: host executable path; undefined resolves the installed bin. */
 	piHost?: string;
 	idleMs: number;
 	/** Blocking UI timeout with no browser attached; 0 disables. */
@@ -138,6 +140,7 @@ function parseArgs(argv: string[]): Options {
 		port: 8137,
 		dataDir: resolve(process.env["PIXIP_DATA_DIR"] ?? "tmp/dev"),
 		piBin: "pi",
+		useSystemPi: false,
 		piHost: undefined,
 		idleMs: 15 * 60_000,
 		pendingUiTimeoutMs: 5 * 60 * 60_000,
@@ -165,6 +168,7 @@ function parseArgs(argv: string[]): Options {
 		detached: false,
 		positionals: [],
 	};
+	let piFlag: string | undefined;
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index];
 		const next = () => {
@@ -172,10 +176,6 @@ function parseArgs(argv: string[]): Options {
 			if (value === undefined) throw new Error(`${arg} needs a value`);
 			return value;
 		};
-		if (arg !== undefined && arg.startsWith("--pi-host=")) {
-			options.piHost = arg.slice("--pi-host=".length);
-			continue;
-		}
 		switch (arg) {
 			case "--host":
 				options.host = next();
@@ -187,19 +187,12 @@ function parseArgs(argv: string[]): Options {
 				options.dataDir = resolve(next());
 				break;
 			case "--pi":
-				options.piBin = next();
+				piFlag = next();
+				options.piBin = piFlag;
 				break;
-			case "--pi-host": {
-				// The value is optional: a bare flag means "resolve the installed host".
-				const value = argv[index + 1];
-				if (value !== undefined && !value.startsWith("-")) {
-					options.piHost = value;
-					index += 1;
-				} else {
-					options.piHost = "";
-				}
+			case "--use-system-pi":
+				options.useSystemPi = true;
 				break;
-			}
 			case "--idle-ms":
 				options.idleMs = Number(next());
 				break;
@@ -304,8 +297,29 @@ function parseArgs(argv: string[]): Options {
 	if (!Number.isInteger(options.inboxLimit) || options.inboxLimit < 1) {
 		throw new Error("--inbox-limit must be an integer of 1 or more");
 	}
-	if (options.piHost === undefined && process.env["PIXIP_PI_HOST"]) {
-		options.piHost = process.env["PIXIP_PI_HOST"];
+	const piEnv = process.env["PIXIP_PI"]?.trim() || undefined;
+	const hostEnv = process.env["PIXIP_PI_HOST"]?.trim() || undefined;
+	if (!options.useSystemPi) {
+		if (piFlag !== undefined || piEnv !== undefined) {
+			throw new Error("--pi and PIXIP_PI require --use-system-pi");
+		}
+		options.piHost = hostEnv;
+		return options;
+	}
+
+	// System mode never uses the host override. An explicit path beats the
+	// literal default `pi`; when both are explicit, the flag wins.
+	options.piHost = undefined;
+	const flagIsDefault = piFlag === undefined || piFlag === "pi";
+	const envIsDefault = piEnv === undefined || piEnv === "pi";
+	if (piFlag !== undefined && piEnv !== undefined) {
+		options.piBin = flagIsDefault && !envIsDefault ? piEnv : piFlag;
+	} else if (piFlag !== undefined) {
+		options.piBin = piFlag;
+	} else if (piEnv !== undefined) {
+		options.piBin = piEnv;
+	} else {
+		throw new Error("--use-system-pi needs --pi <path> or PIXIP_PI");
 	}
 	return options;
 }
@@ -316,10 +330,12 @@ function printHelp(): void {
   --data-dir <path>   isolation root; sessions, pixip.pid, pixip.state.json
                       and pixip.log live here (default ./tmp/dev), never
                       ~/.agent/sessions
-  --pi <path>         pi executable (default: pi from PATH)
-  --pi-host [path]    spawn pixip-pi-host instead of pi; no value resolves the
-                      installed workspace bin, a value overrides it
-                      (env: PIXIP_PI_HOST). Legacy --pi stays the default.
+  --use-system-pi     spawn the legacy pi --mode rpc backend instead of
+                      pixip-pi-host; requires --pi or PIXIP_PI
+  --pi <path>         system Pi executable (only with --use-system-pi;
+                      default: PIXIP_PI, then required)
+                      Host binary override: PIXIP_PI_HOST (unset resolves the
+                      installed pixip-pi-host workspace bin)
   --idle-ms <ms>      detach an idle session after this long, keeping its JSONL
                       for resume (default 900000; 0 disables)
   --pending-ui-timeout-ms <ms>
@@ -449,8 +465,6 @@ function serveArgs(options: Options): string[] {
 		String(options.port),
 		"--data-dir",
 		options.dataDir,
-		"--pi",
-		options.piBin,
 		"--idle-ms",
 		String(options.idleMs),
 		"--pending-ui-timeout-ms",
@@ -463,10 +477,7 @@ function serveArgs(options: Options): string[] {
 		String(options.inboxLimit),
 	];
 	if (options.inboxToken) args.push("--inbox-token", options.inboxToken);
-	if (options.piHost !== undefined) {
-		args.push("--pi-host");
-		if (options.piHost) args.push(options.piHost);
-	}
+	if (options.useSystemPi) args.push("--use-system-pi", "--pi", options.piBin);
 	if (!options.dev) args.push("--serious-mode");
 	for (const name of options.allowCommands) args.push("--allow-command", name);
 	for (const name of options.denyCommands) args.push("--deny-command", name);
@@ -530,7 +541,7 @@ async function main(): Promise<void> {
 function resolvePiHost(value: string | undefined): string {
 	if (value) {
 		const path = resolve(value);
-		if (!existsSync(path)) throw new Error(`--pi-host not found: ${path}`);
+		if (!existsSync(path)) throw new Error(`PIXIP_PI_HOST not found: ${path}`);
 		return path;
 	}
 	const require = createRequire(import.meta.url);
@@ -538,7 +549,7 @@ function resolvePiHost(value: string | undefined): string {
 	try {
 		packagePath = require.resolve("pixip-pi-host/package.json");
 	} catch {
-		throw new Error("pixip-pi-host is not installed; pass --pi-host <path> or install the workspace");
+		throw new Error("pixip-pi-host is not installed; set PIXIP_PI_HOST=<path> or install the workspace");
 	}
 	const pkg = JSON.parse(readFileSync(packagePath, "utf8")) as {
 		bin?: string | Record<string, string>;
@@ -550,9 +561,14 @@ function resolvePiHost(value: string | undefined): string {
 	return path;
 }
 
+/** Environment a detached daemon needs in addition to its argv. */
+function daemonEnv(options: Options): Record<string, string> {
+	return !options.useSystemPi && options.piHost ? { PIXIP_PI_HOST: options.piHost } : {};
+}
+
 async function serve(options: Options): Promise<void> {
 	const paths = daemonPaths(options.dataDir);
-	const piHostBin = options.piHost === undefined ? undefined : resolvePiHost(options.piHost || undefined);
+	const piHostBin = options.useSystemPi ? undefined : resolvePiHost(options.piHost);
 	await mkdir(join(options.dataDir, "sessions"), { recursive: true });
 
 	const existing = await runningDaemon(options.dataDir);
@@ -603,6 +619,7 @@ async function serve(options: Options): Promise<void> {
 		startedAt: new Date().toISOString(),
 		dataDir: options.dataDir,
 		args: serveArgs(options),
+		env: daemonEnv(options),
 	});
 
 	log(`pixip listening on ${server.url}`);
@@ -612,6 +629,9 @@ async function serve(options: Options): Promise<void> {
 			? "dev mode: client assets re-read per request"
 			: "serious mode: client assets served from the startup snapshot",
 	);
+	if (options.useSystemPi) {
+		log(`warning: using system pi at ${options.piBin}; pixip-pi-host capabilities such as the panel are unavailable`);
+	}
 	if (options.host !== "127.0.0.1" && options.host !== "::1") {
 		log(`warning: bound to ${options.host}; this UI has no authentication`);
 	}
@@ -656,7 +676,11 @@ async function cmdDaemon(options: Options): Promise<void> {
 	if (!(await portAvailable(options.host, options.port))) {
 		throw new Error(`port ${options.port} is already in use on ${options.host}`);
 	}
-	const state = await startDaemon({ dataDir: options.dataDir, args: serveArgs(options) });
+	const state = await startDaemon({
+		dataDir: options.dataDir,
+		args: serveArgs(options),
+		env: daemonEnv(options),
+	});
 	process.stdout.write(`pixip listening on ${state.url} (pid ${state.pid})\n`);
 }
 
@@ -872,7 +896,7 @@ async function runRestartHelper(options: Options): Promise<void> {
 			return;
 		}
 	}
-	const state = await startDaemon({ dataDir: options.dataDir, args });
+	const state = await startDaemon({ dataDir: options.dataDir, args, env: running?.env ?? daemonEnv(options) });
 	note(`listening on ${state.url} (pid ${state.pid})`);
 }
 

@@ -7,8 +7,9 @@
  * State files:
  * - `<data-dir>/pixip.pid` — bare pid of the serving process;
  * - `<data-dir>/pixip.state.json` — `{pid, host, port, url, startedAt, dataDir,
- *   args}`, where `args` are the serve flags so `restart` can reproduce the
- *   running configuration;
+ *   args, env}`, where `args` are the serve flags and `env` the extra
+ *   environment (for example a custom `PIXIP_PI_HOST`) so `restart` can
+ *   reproduce the running configuration;
  * - `<data-dir>/pixip.log` — detached stdout/stderr.
  *
  * A "stale" pid is a state file whose pid is no longer alive; `start`, `status`
@@ -37,6 +38,8 @@ export interface DaemonState {
 	dataDir: string;
 	/** Serve args (without the subcommand) so `restart` keeps the configuration. */
 	args: string[];
+	/** Extra environment for a detached start (for example `PIXIP_PI_HOST`). */
+	env?: Record<string, string>;
 }
 
 export interface DaemonPaths {
@@ -102,6 +105,12 @@ export async function readDaemonState(dataDir: string): Promise<DaemonState | un
 			startedAt: typeof raw.startedAt === "string" ? raw.startedAt : new Date(0).toISOString(),
 			dataDir: typeof raw.dataDir === "string" ? raw.dataDir : dataDir,
 			args: Array.isArray(raw.args) ? raw.args.filter((arg): arg is string => typeof arg === "string") : [],
+			env:
+				raw.env && typeof raw.env === "object"
+					? Object.fromEntries(
+							Object.entries(raw.env).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+						)
+					: undefined,
 		};
 	} catch {
 		return undefined;
@@ -238,9 +247,11 @@ export async function stopDaemon(
 export async function startDaemon(input: {
 	dataDir: string;
 	args: string[];
+	/** Extra environment for the detached serve process. */
+	env?: Record<string, string>;
 	timeoutMs?: number;
 }): Promise<DaemonState> {
-	const { dataDir, args, timeoutMs = 15_000 } = input;
+	const { dataDir, args, env, timeoutMs = 15_000 } = input;
 	const paths = daemonPaths(dataDir);
 	await mkdir(join(dataDir, "sessions"), { recursive: true });
 	const log = await open(paths.log, "a");
@@ -249,7 +260,7 @@ export async function startDaemon(input: {
 			detached: true,
 			stdio: ["ignore", log.fd, log.fd],
 			cwd: process.cwd(),
-			env: spawnEnv(),
+			env: { ...spawnEnv(), ...env },
 		});
 		child.unref();
 		let exited = false;

@@ -58,7 +58,7 @@ function cli(args: string[], env: Record<string, string> = {}): Promise<RunResul
 }
 
 async function start(dir: string): Promise<{ url: string; pid: number }> {
-	const result = await cli(["daemon", "--data-dir", dir, "--port", "0", "--pi", FIXTURE]);
+	const result = await cli(["daemon", "--data-dir", dir, "--port", "0", "--use-system-pi", "--pi", FIXTURE]);
 	assert.equal(result.code, 0, result.stderr);
 	const match = /on (http\S+)/.exec(result.stdout);
 	assert.ok(match?.[1], result.stdout);

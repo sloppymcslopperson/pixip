@@ -19,22 +19,27 @@ node bin/pixip.ts --data-dir ./tmp/dev        # http://127.0.0.1:8137/
 <data-dir>/sessions`, so pointing it at a scratch directory never touches
 `~/.pi/agent/sessions`.
 
-`pi-host/` is an optional workspace package, `pixip-pi-host`: an embedded Pi RPC
-host that pixip can use instead of spawning `pi --mode rpc`. It adds a blocking
-`panel` UI request for A2UI while otherwise keeping Pi RPC v1. See
-[pi-host/README.md](pi-host/README.md). It is opt-in:
+`pi-host/` is a workspace package, `pixip-pi-host`: an embedded Pi RPC host
+that adds a blocking `panel` UI request for A2UI while otherwise keeping Pi RPC
+v1. See [pi-host/README.md](pi-host/README.md). It is the default backend:
 
 ```bash
-node bin/pixip.ts --data-dir ./tmp/dev --pi-host  # resolve the workspace bin
-node bin/pixip.ts --data-dir ./tmp/dev --pi-host /path/to/pixip-pi-host
-PIXIP_PI_HOST=/path/to/pixip-pi-host node bin/pixip.ts --data-dir ./tmp/dev
+node bin/pixip.ts --data-dir ./tmp/dev                  # spawn pixip-pi-host
+PIXIP_PI_HOST=/path/to/pixip-pi-host node bin/pixip.ts  # override the host bin
 ```
 
-Without `--pi-host`/`PIXIP_PI_HOST`, pixip keeps using `pi --mode rpc`.
+The legacy `pi --mode rpc` backend is an explicit opt-in and needs a Pi
+executable from `--pi` or `PIXIP_PI`:
 
-The host embeds the project-local Pi SDK, shares the user's Pi agent dir and
-extension set for now, and is **not yet the default backend**. Plugin/config
-isolation is tracked in `90-pi-plugin-isolation` on the board.
+```bash
+node bin/pixip.ts --data-dir ./tmp/dev --use-system-pi --pi /path/to/pi
+PIXIP_PI=/path/to/pi node bin/pixip.ts --data-dir ./tmp/dev --use-system-pi
+```
+
+A missing host executable fails startup with an install hint instead of silently
+falling back. The host embeds the project-local Pi SDK and shares the user's Pi
+agent dir and extension set for now; plugin/config isolation is tracked in
+`90-pi-plugin-isolation` on the board.
 
 ### Inline panels and questionnaires
 
