@@ -2,6 +2,7 @@
 area: extension-ui
 part: inventory
 project: feature-inventory
+commit: fb58819
 ---
 
 Capture how Pi extension requests reach the user and how they are answered: blocking dialogs, the inline panel surface, A2UI panels, timeouts, replay and re-ask. This is the main intersection between Pi plugins and the phone UI.
