@@ -17,6 +17,8 @@
 	"scripts": {
 		"start": "node bin/pixip.ts",
 		"test": "node --import ./test/setup.ts --test test/*.test.js test/*.test.ts",
+		"test:full": "npm test",
+		"test:fast": "node --import ./test/setup.ts --test --test-concurrency=4 $(find test -maxdepth 1 \\( -name '*.test.js' -o -name '*.test.ts' \\) ! -name 'daemon.test.ts' ! -name 'backend.test.ts' ! -name 'reload.test.ts' ! -name 'worktree-cli.test.ts')",
 		"typecheck": "tsc --noEmit",
 		"lint": "eslint .",
 		"format": "prettier --write .",
@@ -24,6 +26,7 @@
 		"format:docs": "prettier --check \"**/*.md\"",
 		"check": "npm run check:static && npm test && npm run check:browser && npm run check --workspace pixip-pi-host && npm run check --workspace pixip-questionnaire && npm run check --workspace pixip-show-image && npm run check --workspace pixip-inbox",
 		"check:static": "node tools/check-parallel.mjs",
+		"check:fast": "npm run check:static && npm run test:fast",
 		"check:imports": "node tools/check-client-imports.mjs",
 		"check:browser": "node tools/browser-check.mjs",
 		"shot": "node tools/shot.mjs"

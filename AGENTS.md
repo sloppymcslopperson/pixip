@@ -123,6 +123,12 @@ pid on 8137 and relaunch, or start a second instance on another
 instead. If a change moves the numbers in ARCHITECTURE.md, update them there
 (that file is the source of truth for the latency budget).
 
+`npm run check:fast` is the inner-loop command: the four static gates in
+parallel plus `test:fast`, which excludes the four process-heavy suites
+(`daemon`, `backend`, `reload`, `worktree-cli`). Use it while working a ticket,
+but a ticket closes on the full `npm run check` — and the last ticket in a
+queue must run the full suite. Never end a ticket queue on `test:fast`.
+
 Client tickets need a real browser pass, not just screenshots: drive the flow with
 the `browser` tool (agent-browser) against a running daemon, and say which
 commands you ran and what you saw. `tools/shot.mjs` is a layout probe;
