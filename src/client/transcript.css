@@ -17,7 +17,7 @@
 	white-space: pre-wrap;
 }
 /* Ref tags inside a sent user message: the composer chip language, inline and
-   inert (no remove button; navigation is a separate ticket). */
+   display-only. Composer chips navigate; these stay inert. */
 .reftag-inline {
 	display: inline-flex;
 	align-items: center;
@@ -144,6 +144,20 @@
 .reftag-menu button:hover {
 	background: var(--bg-soft);
 	color: var(--accent);
+}
+@keyframes reftag-flash {
+	0%,
+	35% {
+		outline: 2px solid var(--accent);
+		outline-offset: 3px;
+	}
+	100% {
+		outline: 2px solid transparent;
+		outline-offset: 3px;
+	}
+}
+.block.reftag-flash {
+	animation: reftag-flash 1.5s ease-out;
 }
 @media (pointer: coarse) {
 	.reftag-actions {

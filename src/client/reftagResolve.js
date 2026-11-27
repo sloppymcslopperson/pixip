@@ -1,6 +1,7 @@
 // Composer reftag chips. Cluster-neutral: it reads kernel state and the one
 // grammar, never composer or inbox internals. app.js wires the function; the
 // inbox list is fetched here only when an inbox tag is present.
+import { confirmJump } from "./reftagJump.js";
 import { messageKey, scanRefTags } from "./reftags.js";
 import { INBOX_SUBJECT_CHARS, clipText, firstWords, purposeLabel, removeRefTag } from "./reftagText.js";
 import { state } from "./kernel/state.js";
@@ -10,6 +11,34 @@ const INBOX_URL = "/api/inbox?all=1&filter=all";
 
 let inboxCache = null;
 let updateSeq = 0;
+let primedChip = null;
+
+/** Expose × and remember this chip as the one awaiting a second tap. */
+function primeChip(node) {
+	if (primedChip && primedChip !== node) primedChip.classList.remove("open");
+	primedChip = node;
+	node.classList.add("open");
+}
+
+function clearPrime() {
+	primedChip?.classList.remove("open");
+	primedChip = null;
+}
+
+// Any click that is not the primed chip drops the prime; the next tap starts over.
+document.addEventListener(
+	"click",
+	(event) => {
+		if (!primedChip) return;
+		if (!primedChip.isConnected) {
+			primedChip = null;
+			return;
+		}
+		const chip = event.target.closest?.(".reftag-chip");
+		if (chip !== primedChip) clearPrime();
+	},
+	true,
+);
 
 function shortId(id) {
 	return typeof id === "string" && id.length > 0 ? id.slice(0, 8) : "unknown";
@@ -117,9 +146,10 @@ function resolveHistory(ref) {
 		return { tag: ref.tag, kind: "history", label: "unresolved", unresolved: true };
 	}
 
-	// Never opened here: the sessions frame still knows the name and location,
-	// which is enough for a name-only chip.
-	if (meta) return { tag: ref.tag, kind: "history", label: source, unresolved: false };
+	// Never opened here: the active session or the sessions frame still knows
+	// the name and location, which is enough for a name-only chip. A valid entry
+	// outside the loaded window must stay navigable.
+	if (meta || active) return { tag: ref.tag, kind: "history", label: source, unresolved: false };
 	return { tag: ref.tag, kind: "history", label: "unresolved", unresolved: true };
 }
 
@@ -194,17 +224,28 @@ function chipElement(chip) {
 	remove.textContent = "×";
 	remove.addEventListener("click", (event) => {
 		event.stopPropagation();
+		if (primedChip === node) clearPrime();
 		ui.input.value = removeRefTag(ui.input.value, chip.tag);
 		ui.input.focus();
 		ui.input.dispatchEvent(new Event("input", { bubbles: true }));
 	});
 	node.append(label, remove);
-	const toggle = () => node.classList.toggle("open");
-	node.addEventListener("click", toggle);
+	const activate = () => {
+		if (primedChip === node) {
+			confirmJump(chip);
+			return;
+		}
+		primeChip(node);
+	};
+	node.addEventListener("click", (event) => {
+		if (event.target.closest(".reftag-chip-remove")) return;
+		activate();
+	});
 	node.addEventListener("keydown", (event) => {
 		if (event.key === "Enter" || event.key === " ") {
 			event.preventDefault();
-			toggle();
+			if (event.target.closest(".reftag-chip-remove")) return;
+			activate();
 		}
 	});
 	return node;
@@ -212,6 +253,7 @@ function chipElement(chip) {
 
 function renderChips(chips) {
 	const host = ui.reftagChips;
+	primedChip = null;
 	host.textContent = "";
 	host.hidden = chips.length === 0;
 	for (const chip of chips) host.append(chipElement(chip));

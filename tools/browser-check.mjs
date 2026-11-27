@@ -708,6 +708,178 @@ async function inject(hub, sessionId, request) {
 	hub.onRecord(info, raw, request);
 }
 
+async function chipStates(page) {
+	return await page.evaluate(() =>
+		[...document.querySelectorAll("#reftag-chips .reftag-chip")].map((chip) => ({
+			open: chip.classList.contains("open"),
+			tag: chip.dataset.tag ?? "",
+			unresolved: chip.classList.contains("unresolved"),
+		})),
+	);
+}
+
+async function tapChip(page) {
+	await page.evaluate(() => document.querySelector("#reftag-chips .reftag-chip")?.click());
+}
+
+async function waitChipTag(page, tag) {
+	await page.waitForFunction(
+		(tag) => document.querySelector("#reftag-chips .reftag-chip")?.dataset.tag === tag,
+		{ timeout: FLOW_TIMEOUT },
+		tag,
+	);
+}
+
+async function clickSheetLabel(page, label) {
+	await page.evaluate((label) => {
+		[...document.querySelectorAll("#sheet .sheet-actions button")]
+			.find((button) => (button.textContent ?? "").trim() === label)
+			?.click();
+	}, label);
+}
+
+async function waitSheet(page, open = true) {
+	await page.waitForFunction(
+		(open) => (document.querySelector("#sheet")?.hidden === false) === open,
+		{ timeout: FLOW_TIMEOUT },
+		open,
+	);
+}
+
+async function runRefChipNavigationFlow(page, base, sessionId, fixture) {
+	await page.goto(`${base}?flow=refjump#s=${sessionId}`, { waitUntil: "domcontentloaded", timeout: FLOW_TIMEOUT });
+	await waitForSession(page);
+	const logical = await page.evaluate(async (id) => {
+		const data = await (await fetch("/api/sessions")).json();
+		const list = Array.isArray(data) ? data : (data.sessions ?? []);
+		return list.find((session) => session.id === id || session.logicalId === id)?.logicalId ?? id;
+	}, sessionId);
+	const historyTag = `[pixip-ref=history/${logical}/h319]`;
+
+	// First tap only exposes × and primes; it never navigates or opens a sheet.
+	await setComposer(page, historyTag);
+	await waitChipTag(page, historyTag);
+	await page.waitForFunction(() => document.querySelector("#reftag-chips .reftag-chip:not(.unresolved)") !== null, {
+		timeout: FLOW_TIMEOUT,
+	});
+	const startHash = await page.evaluate(() => location.hash);
+	await tapChip(page);
+	assert.equal(await page.evaluate(() => document.querySelector("#sheet")?.hidden), true, "first tap opens no dialog");
+	assert.deepEqual(
+		(await chipStates(page)).map((chip) => chip.open),
+		[true],
+		"first tap exposes the remove button",
+	);
+	assert.equal(await page.evaluate(() => location.hash), startHash, "first tap does not navigate");
+
+	// A click elsewhere drops the prime.
+	await page.evaluate(() => document.querySelector("#bar")?.click());
+	assert.equal((await chipStates(page))[0].open, false, "an outside click drops the prime");
+
+	// Second tap on the same chip opens the confirmation sheet.
+	await tapChip(page);
+	await tapChip(page);
+	await waitSheet(page);
+	assert.equal(
+		await page.evaluate(() => document.querySelector("#sheet .sheet-title")?.textContent),
+		"jump to message?",
+	);
+	await clickSheetLabel(page, "Cancel");
+	await waitSheet(page, false);
+	assert.equal(await page.evaluate(() => location.hash), startHash, "cancel leaves the route alone");
+
+	// Jump to an entry outside the initial window: it pages earlier, scrolls
+	// and flashes without leaving the session.
+	const olderTag = `[pixip-ref=history/${logical}/h0]`;
+	await setComposer(page, olderTag);
+	await waitChipTag(page, olderTag);
+	await tapChip(page);
+	await tapChip(page);
+	await waitSheet(page);
+	await clickSheetLabel(page, "Jump");
+	await page.waitForFunction(
+		() => document.querySelector('[data-entry="h0"]')?.classList.contains("reftag-flash") === true,
+		{ timeout: 30_000 },
+	);
+	assert.equal(await page.evaluate(() => location.hash), startHash, "an in-session jump stays on the route");
+
+	// × remains the only removal path.
+	const beforeRemove = await page.evaluate(() => document.querySelector("#input").value);
+	await tapChip(page);
+	const remove = await page.evaluate(() => {
+		const button = document.querySelector("#reftag-chips .reftag-chip-remove");
+		button?.click();
+		return Boolean(button);
+	});
+	assert.equal(remove, true, "the primed chip exposes ×");
+	await page.waitForFunction(
+		(tag) => !document.querySelector("#input").value.includes(tag),
+		{ timeout: FLOW_TIMEOUT },
+		olderTag,
+	);
+	assert.equal(
+		await page.evaluate(() => document.querySelector("#input").value),
+		beforeRemove.replace(olderTag, ""),
+		"× removes only the token",
+	);
+
+	// A missing entry pages to the start and reports it.
+	const missingTag = `[pixip-ref=history/${logical}/does-not-exist]`;
+	await setComposer(page, missingTag);
+	await waitChipTag(page, missingTag);
+	await tapChip(page);
+	await tapChip(page);
+	await waitSheet(page);
+	await clickSheetLabel(page, "Jump");
+	await page.waitForFunction(() => (document.querySelector("#toast")?.textContent ?? "") === "message not found", {
+		timeout: 30_000,
+	});
+
+	// Inbox chips open the inbox page.
+	const inboxTag = `[pixip-ref=inbox/${fixture.inboxId}]`;
+	await setComposer(page, inboxTag);
+	await waitChipTag(page, inboxTag);
+	await page.waitForFunction(
+		() => !(document.querySelector("#reftag-chips .reftag-chip")?.classList.contains("unresolved") ?? true),
+		{ timeout: FLOW_TIMEOUT },
+	);
+	await tapChip(page);
+	await tapChip(page);
+	await waitSheet(page);
+	await clickSheetLabel(page, "Jump");
+	await page.waitForSelector("#inbox-page:not([hidden])", { timeout: FLOW_TIMEOUT });
+
+	// Cross-session history opens the owning session and targets the entry.
+	// Arrive through the dashboard so the sessions frame is in memory.
+	await page.goto(`${base}?flow=refjump-peer`, { waitUntil: "domcontentloaded", timeout: FLOW_TIMEOUT });
+	await page.waitForSelector(`.row[data-id="${sessionId}"]`, { timeout: FLOW_TIMEOUT });
+	await page.evaluate((id) => document.querySelector(`.row[data-id="${id}"] .row-open`)?.click(), sessionId);
+	await waitForSession(page);
+	const peer = await page.evaluate(async () => {
+		const data = await (await fetch("/api/sessions")).json();
+		const list = Array.isArray(data) ? data : (data.sessions ?? []);
+		return list.find((session) => session.name === "repo peer") ?? null;
+	});
+	assert.ok(peer?.id && peer?.logicalId, "repo peer is listed");
+	const peerTag = `[pixip-ref=history/${peer.logicalId}/h319]`;
+	await setComposer(page, peerTag);
+	await waitChipTag(page, peerTag);
+	await page.waitForFunction(
+		() => (document.querySelector("#reftag-chips .reftag-chip-label")?.textContent ?? "").includes("repo peer"),
+		{ timeout: FLOW_TIMEOUT },
+	);
+	await tapChip(page);
+	await tapChip(page);
+	await waitSheet(page);
+	await clickSheetLabel(page, "Jump");
+	await page.waitForFunction((id) => location.hash === `#s=${id}`, { timeout: FLOW_TIMEOUT }, peer.id);
+	await page.waitForFunction(
+		() => document.querySelector('[data-entry="h319"]')?.classList.contains("reftag-flash") === true,
+		{ timeout: FLOW_TIMEOUT },
+	);
+	await checkNoOverflow(page, "reftag chip navigation");
+}
+
 async function runSelectFlow(page, base, sessionId, hub, paths) {
 	await page.goto(`${base}?flow=select#s=${sessionId}`, { waitUntil: "domcontentloaded", timeout: FLOW_TIMEOUT });
 	await waitForSession(page);
@@ -1168,6 +1340,7 @@ async function runViewport(browser, base, fixture, viewport) {
 		await runComposerFlow(page, base, fixture.sessionId, fixture.paths, viewport);
 		await runRefTagChipsFlow(page, base, fixture.sessionId, fixture);
 		await runRefCopyFlow(page, base, fixture.sessionId, fixture.hub, fixture.paths);
+		await runRefChipNavigationFlow(page, base, fixture.sessionId, fixture);
 		await runTranscriptRefChipsFlow(page, base, fixture.sessionId, fixture.hub);
 		await runSelectFlow(page, base, fixture.sessionId, fixture.hub, fixture.paths);
 		await runPanelFlow(page, base, fixture.sessionId);
