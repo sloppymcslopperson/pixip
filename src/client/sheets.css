@@ -640,6 +640,9 @@
 .inbox-sender-status.archived {
 	color: var(--fg-faint);
 }
+.inbox-toggle {
+	cursor: pointer;
+}
 .inbox-subject {
 	margin-top: 4px;
 	font-size: 13.5px;

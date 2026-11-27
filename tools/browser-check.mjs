@@ -456,9 +456,10 @@ async function runRefTagChipsFlow(page, base, sessionId, fixture) {
 	const beforeInbox = await page.evaluate(() => window.__inboxFetches);
 	await setComposer(page, "");
 	await page.type("#input", `[pixip-ref=inbox/${fixture.inboxId}]`);
-	await page.waitForFunction(() => document.querySelector("#input .reftag-chip") !== null, {
-		timeout: FLOW_TIMEOUT,
-	});
+	await page.waitForFunction(
+		() => (document.querySelector("#input .reftag-chip-label")?.textContent ?? "").includes("browser inbox"),
+		{ timeout: FLOW_TIMEOUT },
+	);
 	const inbox = await chipLabels(page);
 	assert.equal(inbox.length, 1);
 	assert.match(inbox[0].label, /browser inbox/);
@@ -1234,8 +1235,15 @@ async function runInboxFlow(page, base) {
 	await checkNoOverflow(page, "inbox page");
 
 	// Reading a message is expanding it; that marks it read without a reload.
-	await page.evaluate(() => document.querySelector("#inbox-page .inbox-card").click());
+	await page.evaluate(() => document.querySelector("#inbox-page .inbox-card-head").click());
 	await page.waitForSelector("#inbox-page .inbox-body:not(.preview)", { timeout: FLOW_TIMEOUT });
+	// Clicking the body (to select text) must not collapse the message again.
+	await page.evaluate(() => document.querySelector("#inbox-page .inbox-body").click());
+	assert.equal(
+		await page.evaluate(() => document.querySelector("#inbox-page .inbox-body")?.classList.contains("preview")),
+		false,
+		"clicking the body leaves the message expanded",
+	);
 	await page.waitForFunction(
 		() => (document.querySelector("#inbox-page .inbox-meta")?.textContent ?? "").includes("read"),
 		{

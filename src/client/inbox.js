@@ -254,7 +254,7 @@ function renderCard(message) {
 	card.dataset.id = message.id;
 
 	const head = document.createElement("div");
-	head.className = "inbox-card-head";
+	head.className = "inbox-card-head inbox-toggle";
 	const status = statusLabel(message);
 	const session = replySession(message.sender, state.sessions);
 	if (session && status !== "deleted" && status !== "archived") {
@@ -284,7 +284,7 @@ function renderCard(message) {
 	card.append(head);
 
 	const subject = document.createElement("div");
-	subject.className = "inbox-subject";
+	subject.className = "inbox-subject inbox-toggle";
 	subject.textContent = message.subject;
 	card.append(subject);
 
@@ -332,7 +332,10 @@ function renderCard(message) {
 	actions.append(copy, archive, remove);
 	card.append(actions);
 
-	card.addEventListener("click", () => {
+	// Only the header/subject read as the message control: selecting text in the
+	// body must not collapse it. The sender and action buttons stop propagation.
+	card.addEventListener("click", (event) => {
+		if (!event.target.closest(".inbox-toggle")) return;
 		viewState.expanded = expanded ? null : message.id;
 		if (!expanded && !message.readAt) void markRead(message);
 		else renderInboxPage();

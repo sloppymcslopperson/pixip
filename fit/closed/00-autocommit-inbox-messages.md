@@ -1,0 +1,1 @@
+autocommit Inbox messages collapse when a click happens anywhere on the message. They should not collapse when the body of the message is clicked. Clicking the area that I have highlighted in red should be what collapses it.
