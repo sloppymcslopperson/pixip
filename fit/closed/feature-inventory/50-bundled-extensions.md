@@ -2,6 +2,7 @@
 area: bundled-extensions
 part: inventory
 project: feature-inventory
+commit: "4ba4e065e22b4d0f0759de5e5ad11104aba9a620"
 ---
 
 Capture the extensions pixip ships and the add-on surface they use: questionnaire, inbox, show-image, and footer widgets/statuses. This section is about the agent-facing tools and how their results appear, not the inbox page itself.
