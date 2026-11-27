@@ -1250,6 +1250,26 @@ async function runInboxFlow(page, base) {
 			timeout: FLOW_TIMEOUT,
 		},
 	);
+	// Collapsing and expanding re-render the list; the scroll offset must survive.
+	const scrollStyle = await page.addStyleTag({
+		content: "#inbox-page .inbox-list { max-height: 48px !important; }",
+	});
+	await page.evaluate(() => document.querySelector("#inbox-page .inbox-card-head").click());
+	await page.waitForSelector("#inbox-page .inbox-body.preview", { timeout: FLOW_TIMEOUT });
+	const beforeScroll = await page.evaluate(() => {
+		const list = document.querySelector("#inbox-page .inbox-list");
+		list.scrollTop = 30;
+		return list.scrollTop;
+	});
+	assert.ok(beforeScroll > 0, "the inbox list can scroll with a short test viewport");
+	await page.evaluate(() => document.querySelector("#inbox-page .inbox-card-head").click());
+	await page.waitForSelector("#inbox-page .inbox-body:not(.preview)", { timeout: FLOW_TIMEOUT });
+	assert.equal(
+		await page.evaluate(() => document.querySelector("#inbox-page .inbox-list")?.scrollTop),
+		beforeScroll,
+		"expanding keeps the inbox scroll position",
+	);
+	await scrollStyle.evaluate((node) => node.remove());
 	await checkNoOverflow(page, "inbox message expanded");
 	assert.equal(
 		await page.evaluate(() => document.querySelector("#inbox-page .inbox-actions a.inbox-report")?.textContent ?? ""),

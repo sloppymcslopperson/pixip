@@ -185,6 +185,9 @@ function chip(label, active, action) {
 
 function renderInboxPage() {
 	const target = ui.inboxPage;
+	// Re-rendering replaces the only scroller; without this an expand/collapse
+	// jumps the list back to the top. Capture it before the old list is removed.
+	const previousScroll = target.querySelector(".inbox-list")?.scrollTop ?? 0;
 	target.hidden = false;
 	target.textContent = "";
 
@@ -240,6 +243,7 @@ function renderInboxPage() {
 	}
 	for (const message of visible) list.append(renderCard(message));
 	target.append(list);
+	list.scrollTop = previousScroll;
 }
 
 function statusLabel(message) {
