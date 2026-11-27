@@ -47,3 +47,7 @@ Editorial only; do not re-implement features. No screenshots. No port verdicts b
 ### Output
 
 Write `docs/feature-inventory/index.md`, then build the HTML report with `inbox_report` (suggested report name `feature-inventory`) and send it with `inbox_send` as purpose `reports`. Keep the Markdown index canonical and link every area file by its exact path. Read the area files from disk; do not rewrite their content unless fixing an inconsistency noted in the audit.
+
+### Completion
+
+When the inventory is finished, send the owner an inbox message from this session: `pixip inbox send --subject "feature inventory: <area> done" --purpose deliverable "<output path, what it covers, and anything you could not cover>"`. That message is how the owner learns the ticket is ready for review.

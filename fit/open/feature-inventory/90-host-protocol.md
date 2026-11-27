@@ -50,3 +50,7 @@ User-centric framing first, then the protocol contract in its own part. No port 
 ### Output
 
 Write this area to `docs/feature-inventory/90-host-protocol.md`. Do not create or edit `index.md`; `99-compile-report` owns it. The file must stand alone with a 3-5 line summary, its own TOC, user stories, inline SVG diagrams, and the protocol contract in a separate part.
+
+### Completion
+
+When the inventory is finished, send the owner an inbox message from this session: `pixip inbox send --subject "feature inventory: <area> done" --purpose deliverable "<output path, what it covers, and anything you could not cover>"`. That message is how the owner learns the ticket is ready for review.

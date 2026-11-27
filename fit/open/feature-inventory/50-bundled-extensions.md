@@ -48,3 +48,7 @@ User-centric language first. Port-relevant technical notes only, separate subsec
 ### Output
 
 Write this area to `docs/feature-inventory/50-bundled-extensions.md`. Do not create or edit `index.md`; `99-compile-report` owns it. The file must stand alone with a 3-5 line summary, its own TOC, user stories, inline SVG wireframes, and a separate port-relevant technical-notes part.
+
+### Completion
+
+When the inventory is finished, send the owner an inbox message from this session: `pixip inbox send --subject "feature inventory: <area> done" --purpose deliverable "<output path, what it covers, and anything you could not cover>"`. That message is how the owner learns the ticket is ready for review.
