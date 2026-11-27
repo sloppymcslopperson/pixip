@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { timingSafeEqual } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { open, readdir, readFile, stat } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, normalize } from "node:path";
@@ -8,6 +8,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 
 import { createDirectory, DirError, listDirectories } from "./dirs.ts";
 import { INBOX_PURPOSES, InboxError, type InboxFilter, type InboxPurpose } from "./inbox.ts";
+import { ReportError } from "./inboxReport.ts";
 import { detectImageMime, MAX_UPLOAD_BYTES, safeUploadName } from "./attachments.ts";
 import { coverageKeys, Hub } from "./hub.ts";
 import {
@@ -26,6 +27,7 @@ import {
 	frameInbox,
 	frameLiveThinking,
 	frameModels,
+	frameNotice,
 	frameOpened,
 	framePolicy,
 	frameQueue,
@@ -36,6 +38,16 @@ import {
 	WIRE_VERSION,
 } from "./wire.ts";
 import type { SessionInfo } from "./wire.ts";
+import type { ReloadBlocker, ReloadChildResult, ReloadCode, ReloadReport } from "./reload.ts";
+import {
+	formatPauseReport,
+	pauseTargets,
+	resumePaused,
+	steerPause,
+	PAUSE_WAIT_MS,
+	type PauseResumeReport,
+	type PauseTarget,
+} from "./reload/pause.ts";
 import { normalizeWorktreeRequest } from "./worktree.ts";
 
 export interface ServerOptions {
@@ -46,12 +58,38 @@ export interface ServerOptions {
 	log: (message: string) => void;
 	/** Re-read client assets per request, so CSS/JS edits need no restart. */
 	dev?: boolean;
+	/** Replace the daemon through the detached restart helper; receives the pause plan. */
+	restart?: (pause?: PauseTarget[]) => Promise<void>;
+	/** In-place daemon-code reload, supplied by the CLI entry. */
+	reloadCode?: ReloadCode;
+	/** How long a pause request waits for its targets (tests shorten this). */
+	pauseWaitMs?: number;
+	/** Optional `--watch`: cancel a deferred reload from the browser card. */
+	watchCancel?: () => void;
+}
+
+/** The swappable half of the server: a new generation replaces this object. */
+export interface ServerImpl {
+	handleHttp: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>;
+	handleSocket: (ws: WebSocket, url: URL) => Promise<void>;
+	refresh: () => Promise<RefreshReport>;
+	reload: (pause?: PauseTarget[]) => Promise<ReloadReport>;
 }
 
 export interface RunningServer {
 	url: string;
 	/** Soft refresh: re-read assets and the hub's caches; never touches children. */
 	refresh: () => Promise<RefreshReport>;
+	/** Daemon-wide `/reload`: gate, assets/policy swap, then every live child. */
+	reload: (pause?: PauseTarget[]) => Promise<ReloadReport>;
+	/** Publish the pause/resume outcome for the client that reconnects after a restart. */
+	setPauseResult: (report: PauseResumeReport) => void;
+	/** Send one ephemeral frame to every connected socket (`--watch` notices). */
+	broadcast: (frame: string) => void;
+	/** Swap a prepared module generation; the old one stays available for rollback. */
+	applyGeneration: (next: { hub: any; server: any }) => void;
+	/** Put a previous generation back after a failed swap. */
+	rollbackGeneration: (previous: { hub: any; server: any }) => void;
 	close: () => Promise<void>;
 }
 
@@ -65,10 +103,31 @@ interface ServerState {
 	assets: Map<string, Buffer>;
 	startedAt: number;
 	reloads: number;
-	refresh: () => Promise<RefreshReport>;
+	/** Browser-only capability for the user-initiated `/reload` control frame. */
+	nonce: string;
+	/** Read at call time so an open listener runs the current generation. */
+	impl: ServerImpl;
+	/** One reload at a time; reset when the promise settles. */
+	reloading?: Promise<ReloadReport>;
+	/** Broadcast to every connected socket, used by the reload notice. */
+	broadcast: (frame: string) => void;
+	/** Browser-only `/pixup-restart`: one replacement at a time. */
+	restart?: (pause?: PauseTarget[]) => Promise<void>;
+	restarting: boolean;
+	/** A paused reload that timed out; a later cancel can still resume its targets. */
+	pausePlan?: PauseTarget[];
+	/** Survives the browser reconnect so the client can paint one ephemeral row. */
+	pauseResult?: PauseResumeReport;
 }
 
 const LOOPBACK = /^(127\.|::1$|::ffff:127\.)/;
+const WILDCARD_HOSTS = new Set(["0.0.0.0", "::", "[::]"]);
+
+/** Compare IPv4-mapped IPv6 forms with their plain IPv4 spelling. */
+function normalizeAddress(address: string): string {
+	const value = address.trim().toLowerCase();
+	return value.startsWith("::ffff:") ? value.slice("::ffff:".length) : value;
+}
 
 /** Inbox auth seam: off when no token is configured, exact bearer match otherwise. */
 function inboxAuthorized(req: IncomingMessage, token: string | undefined): boolean {
@@ -80,9 +139,19 @@ function inboxAuthorized(req: IncomingMessage, token: string | undefined): boole
 	return presented.length === expected.length && timingSafeEqual(presented, expected);
 }
 
+const REPORT_CSP =
+	"default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; " +
+	"script-src 'none'; object-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; connect-src 'none'; media-src 'none'";
+
 /** The refresh endpoint changes server state, so only local peers may call it. */
-export function isLoopback(req: IncomingMessage): boolean {
-	return LOOPBACK.test(req.socket.remoteAddress ?? "");
+export function isLoopback(req: IncomingMessage, host: string): boolean {
+	const address = req.socket.remoteAddress ?? "";
+	if (LOOPBACK.test(address)) return true;
+	// A client reaching a concrete bind address presents that address locally;
+	// the wildcard is not an address any peer can present.
+	const bind = normalizeAddress(host);
+	if (!bind || WILDCARD_HOSTS.has(bind)) return false;
+	return normalizeAddress(address) === bind;
 }
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -134,15 +203,24 @@ async function requestSnapshot(
 	return { ...window, covered: coverageKeys(window.entries), resume: false };
 }
 
-export async function startServer(options: ServerOptions): Promise<RunningServer> {
-	const state: ServerState = {
-		assets: await loadAssets(options.clientDir),
-		startedAt: Date.now(),
-		reloads: 0,
+/**
+ * Build the swappable server surface. A new `src/server.ts` generation exposes
+ * this same factory, and `applyGeneration` installs its result on the live
+ * listener without restarting the daemon.
+ */
+export function createImpl(
+	hub: Hub,
+	state: ServerState,
+	options: ServerOptions,
+	broadcast: (frame: string) => void,
+): ServerImpl {
+	return {
+		handleHttp: (req, res) => handleHttp(req, res, hub, state, options.log, options),
+		handleSocket: (ws, url) => handleSocket(ws, url, hub, options.log, state, options),
 		refresh: async () => {
 			// Hub caches first (policy is re-resolved for live sessions); only then
 			// swap assets, so a bad config leaves the running daemon as it was.
-			const result = await options.hub.reload();
+			const result = await hub.reload();
 			state.assets = await loadAssets(options.clientDir);
 			state.reloads += 1;
 			options.log(
@@ -150,12 +228,35 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
 			);
 			return { reloaded: ["assets", "config", "index", "commands"], reloads: state.reloads };
 		},
+		reload: (pause?: PauseTarget[]) =>
+			(state.reloading ??= runReload(hub, state, options, broadcast, pause).finally(() => {
+				state.reloading = undefined;
+			})),
 	};
-	const { hub, log } = options;
+}
+
+export async function startServer(options: ServerOptions): Promise<RunningServer> {
+	const { hub } = options;
+	const clients = new Set<WebSocket>();
+	const broadcast = (frame: string) => {
+		for (const client of clients) {
+			if (client.readyState === client.OPEN) client.send(frame);
+		}
+	};
+	const state = {
+		assets: await loadAssets(options.clientDir),
+		startedAt: Date.now(),
+		reloads: 0,
+		restarting: false,
+		...(options.restart ? { restart: options.restart } : {}),
+		nonce: randomBytes(16).toString("hex"),
+		broadcast,
+	} as ServerState;
+	state.impl = createImpl(hub, state, options, broadcast);
 	const wss = new WebSocketServer({ noServer: true });
 
 	const server = createServer((req, res) => {
-		void handleHttp(req, res, hub, state, log, options);
+		void state.impl.handleHttp(req, res);
 	});
 
 	server.on("upgrade", (req, socket, head) => {
@@ -165,7 +266,9 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
 			return;
 		}
 		wss.handleUpgrade(req, socket, head, (ws) => {
-			void handleSocket(ws, url, hub, log);
+			clients.add(ws);
+			ws.on("close", () => clients.delete(ws));
+			void state.impl.handleSocket(ws, url);
 		});
 	});
 
@@ -176,9 +279,20 @@ export async function startServer(options: ServerOptions): Promise<RunningServer
 
 	const address = server.address();
 	const port = typeof address === "object" && address ? address.port : options.port;
+	const applyGeneration = (next: { hub: any; server: any }) => {
+		Object.setPrototypeOf(hub, next.hub.Hub.prototype);
+		state.impl = next.server.createImpl(hub, state, options, broadcast);
+	};
 	return {
 		url: `http://${options.host}:${port}/`,
-		refresh: state.refresh,
+		refresh: () => state.impl.refresh(),
+		reload: (pause?: PauseTarget[]) => state.impl.reload(pause),
+		setPauseResult: (report: PauseResumeReport) => {
+			state.pauseResult = report;
+		},
+		broadcast,
+		applyGeneration,
+		rollbackGeneration: applyGeneration,
 		close: async () => {
 			for (const client of wss.clients) client.close();
 			wss.close();
@@ -232,18 +346,47 @@ async function handleHttp(
 					pid: process.pid,
 					startedAt: state.startedAt,
 					reloads: state.reloads,
+					generation: options.reloadCode?.generation ?? 0,
+					...(state.pauseResult ? { pauseResult: state.pauseResult } : {}),
 				}),
 			);
 			return;
 		}
 		if (req.method === "POST" && url.pathname === "/api/refresh") {
-			if (!isLoopback(req)) {
+			if (!isLoopback(req, options.host)) {
 				log(`refresh refused from non-loopback peer ${req.socket.remoteAddress ?? "?"}`);
 				send(403, JSON.stringify({ error: "refresh is loopback-only" }));
 				return;
 			}
-			const report = await state.refresh();
+			const report = await state.impl.refresh();
 			send(200, JSON.stringify({ ok: true, ...report }));
+			return;
+		}
+		const reportMatch = /^\/reports\/([^/]+)(?:\/(.*))?$/.exec(url.pathname);
+		if (req.method === "GET" && reportMatch?.[1]) {
+			const name = decodeURIComponent(reportMatch[1]);
+			const rest = reportMatch[2];
+			if (rest === undefined) {
+				res.writeHead(301, { location: `${url.pathname}/${url.search}`, "cache-control": "no-store" });
+				res.end();
+				return;
+			}
+			const asset = rest === "" ? undefined : decodeURIComponent(rest);
+			if (asset && asset.includes("/")) {
+				send(404, JSON.stringify({ error: "not found" }));
+				return;
+			}
+			const file = await hub.reportStore.file(name, asset);
+			const body = await readFile(file.path);
+			res.writeHead(200, {
+				"content-type": file.contentType,
+				"content-length": body.length,
+				"cache-control": "no-store",
+				"content-security-policy": REPORT_CSP,
+				"x-content-type-options": "nosniff",
+				"referrer-policy": "no-referrer",
+			});
+			res.end(body);
 			return;
 		}
 		if (url.pathname === "/api/inbox" || url.pathname.startsWith("/api/inbox/")) {
@@ -276,8 +419,14 @@ async function handleHttp(
 					body: parsed["body"],
 					purpose: typeof purpose === "string" ? (purpose as InboxPurpose) : "attention-needed",
 					sessionId: typeof parsed["sessionId"] === "string" ? parsed["sessionId"] : undefined,
+					reportName: typeof parsed["reportName"] === "string" ? parsed["reportName"] : undefined,
 				});
 				send(200, JSON.stringify({ ok: true, message }));
+				return;
+			}
+			if (req.method === "POST" && url.pathname === "/api/inbox/reports") {
+				const parsed = JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>;
+				send(200, JSON.stringify({ ok: true, report: await hub.inboxReport(parsed) }));
 				return;
 			}
 			if (req.method === "POST" && url.pathname === "/api/inbox/extension") {
@@ -565,10 +714,11 @@ async function handleHttp(
 			send(404, JSON.stringify({ error: "not found" }));
 			return;
 		}
-		send(200, asset, CONTENT_TYPES[extname(normalized)] ?? "application/octet-stream");
+		const body = normalized === "/index.html" ? injectReloadNonce(asset, state.nonce) : asset;
+		send(200, body, CONTENT_TYPES[extname(normalized)] ?? "application/octet-stream");
 	} catch (error) {
 		const status =
-			error instanceof DirError || error instanceof InboxError
+			error instanceof DirError || error instanceof InboxError || error instanceof ReportError
 				? error.status
 				: error instanceof PayloadTooLargeError
 					? 413
@@ -582,7 +732,14 @@ function osHome(): string {
 	return process.env["HOME"] ?? process.cwd();
 }
 
-async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: string) => void): Promise<void> {
+async function handleSocket(
+	ws: WebSocket,
+	url: URL,
+	hub: Hub,
+	log: (message: string) => void,
+	state: ServerState,
+	options: ServerOptions,
+): Promise<void> {
 	const sessionId = url.searchParams.get("session");
 	const send = (frame: string) => {
 		if (ws.readyState === ws.OPEN) ws.send(frame);
@@ -594,7 +751,7 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 		const unwatch = hub.watch((frame) => send(frame));
 		ws.on("close", unwatch);
 		ws.on("message", (data) => {
-			void handleCommand(String(data), { id: null }, hub, send, log);
+			void handleCommand(String(data), { id: null }, hub, send, log, state, options);
 		});
 		return;
 	}
@@ -770,7 +927,7 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 		try {
 			message = JSON.parse(raw) as Record<string, unknown>;
 		} catch {
-			void handleCommand(raw, active, hub, send, log);
+			void handleCommand(raw, active, hub, send, log, state, options);
 			return;
 		}
 		if (message["t"] === "park") {
@@ -790,7 +947,7 @@ async function handleSocket(ws: WebSocket, url: URL, hub: Hub, log: (message: st
 			send(frameError("socket is parked"));
 			return;
 		}
-		void handleCommand(raw, active, hub, send, log);
+		void handleCommand(raw, active, hub, send, log, state, options);
 	});
 
 	const cursor = url.searchParams.get("since") ?? undefined;
@@ -803,6 +960,8 @@ async function handleCommand(
 	hub: Hub,
 	send: (frame: string) => void,
 	log: (message: string) => void,
+	state: ServerState,
+	options: ServerOptions,
 ): Promise<void> {
 	let message: Record<string, unknown>;
 	try {
@@ -827,6 +986,129 @@ async function handleCommand(
 			case "stop": {
 				if (!sessionId) return;
 				send(JSON.stringify({ t: "status", session: await hub.stop(sessionId) }));
+				return;
+			}
+			case "reload": {
+				const nonce = typeof message["nonce"] === "string" ? message["nonce"] : "";
+				if (nonce.length === 0 || nonce !== state.nonce) {
+					log("reload refused: missing or stale browser nonce");
+					send(frameNotice("reload refused: this page has a stale nonce; reload the page and try again"));
+					return;
+				}
+				const pause = message["pause"] === true;
+				let plan: PauseTarget[] = [];
+				if (pause) {
+					const blockers = hub.reloadBlockers();
+					if (blockers.length > 0) {
+						plan = pauseTargets(blockers, await hub.list());
+						const failed = await steerPause(hub, plan);
+						if (failed.length > 0)
+							log(`reload pause: could not steer ${failed.map((entry) => entry.name ?? entry.id).join(", ")}`);
+						const remaining = await waitForPause(hub, plan, "reload", pauseWait(options));
+						if (remaining.length > 0) {
+							state.pausePlan = plan;
+							const names = remaining.map((blocker) => `${blocker.name ?? blocker.id} (${blocker.reason})`).join(", ");
+							const text = `reload paused: still busy after ${Math.round(pauseWait(options) / 1000)}s: ${names}`;
+							log(text);
+							send(
+								frameNotice(text, {
+									pause: true,
+									status: "pause-timeout",
+									pauseKind: "reload",
+									blockers: remaining,
+									paused: true,
+								}),
+							);
+							return;
+						}
+					}
+				}
+				const report = await state.impl.reload(plan.length > 0 ? plan : undefined);
+				if (!report.ok) {
+					if (report.status === "refused" && report.blockers.length > 0) {
+						send(
+							frameNotice(report.message, {
+								pause: true,
+								status: "refused",
+								pauseKind: "reload",
+								blockers: report.blockers,
+							}),
+						);
+					} else {
+						send(frameNotice(report.message));
+					}
+				}
+				return;
+			}
+			case "watch_cancel": {
+				options.watchCancel?.();
+				return;
+			}
+			case "pause_cancel": {
+				const nonce = typeof message["nonce"] === "string" ? message["nonce"] : "";
+				if (nonce.length === 0 || nonce !== state.nonce) {
+					send(frameNotice("pause cancel refused: this page has a stale nonce; reload the page and try again"));
+					return;
+				}
+				const mode = message["mode"] === "resume" ? "resume" : "keep";
+				const plan = state.pausePlan ?? [];
+				state.pausePlan = undefined;
+				if (mode === "resume" && plan.length > 0) {
+					const report = await resumePaused(hub, plan);
+					log(formatPauseReport(report));
+					state.broadcast(frameNotice(formatPauseReport(report), { pauseResult: true, ...report }));
+				}
+				return;
+			}
+			case "restart": {
+				const nonce = typeof message["nonce"] === "string" ? message["nonce"] : "";
+				if (nonce.length === 0 || nonce !== state.nonce) {
+					log("restart refused: missing or stale browser nonce");
+					send(frameNotice("restart refused: this page has a stale nonce; reload the page and try again"));
+					return;
+				}
+				if (state.restarting) {
+					send(frameNotice("restart already in progress", { restart: true, status: "refused" }));
+					return;
+				}
+				const force = message["force"] === true;
+				const pause = message["pause"] === true;
+				const now = message["now"] === true;
+				const blockers = hub.restartBlockers();
+				if (blockers.length > 0 && !force) {
+					const names = blockers.map((blocker) => `${blocker.name ?? blocker.id} (${blocker.reason})`).join(", ");
+					const text = `restart refused: ${names}`;
+					log(text);
+					send(frameNotice(text, { restart: true, status: "refused", blockers }));
+					return;
+				}
+				if (!state.restart) {
+					send(frameNotice("restart is unavailable in this daemon", { restart: true, status: "refused" }));
+					return;
+				}
+				let plan: PauseTarget[] = [];
+				if (pause && blockers.length > 0) {
+					plan = pauseTargets(blockers, await hub.list());
+					const failed = await steerPause(hub, plan);
+					if (failed.length > 0)
+						log(`restart pause: could not steer ${failed.map((entry) => entry.name ?? entry.id).join(", ")}`);
+					if (!now) {
+						const remaining = await waitForPause(hub, plan, "restart", pauseWait(options));
+						if (remaining.length > 0) {
+							const names = remaining.map((blocker) => `${blocker.name ?? blocker.id} (${blocker.reason})`).join(", ");
+							const text = `restart paused: still busy after ${Math.round(pauseWait(options) / 1000)}s: ${names}`;
+							log(text);
+							send(frameNotice(text, { restart: true, status: "pause-timeout", blockers: remaining, pause: true }));
+							return;
+						}
+					}
+				}
+				state.restarting = true;
+				const names = blockers.map((blocker) => blocker.name ?? blocker.id).join(", ");
+				const text = force && blockers.length > 0 ? `restarting — interrupting ${names}` : "restarting…";
+				log(text);
+				send(frameNotice(text, { restart: true, status: "ok" }));
+				await state.restart(plan.length > 0 ? plan : undefined);
 				return;
 			}
 			default:
@@ -989,6 +1271,170 @@ async function handleCommand(
 		log(`ws command failed: ${(error as Error).message}`);
 		send(frameError((error as Error).message));
 	}
+}
+
+/** Put the per-daemon reload nonce into the served index without touching disk. */
+function injectReloadNonce(asset: Buffer, nonce: string): Buffer {
+	const text = asset.toString("utf8");
+	const tag = `<meta name="pixip-reload-nonce" content="${nonce}" />`;
+	if (text.includes('name="pixip-reload-nonce"')) {
+		return Buffer.from(text.replace(/<meta name="pixip-reload-nonce"[^>]*>/, tag));
+	}
+	if (text.includes("<head>")) return Buffer.from(text.replace("<head>", `<head>\n\t\t${tag}`));
+	return Buffer.from(`${tag}\n${text}`);
+}
+
+/**
+ * Daemon-wide `/reload`: gate first, then pre-read assets and re-apply the hub's
+ * policy/index, then commit assets + rotate the nonce, then reload children.
+ * A child failure is reported but does not roll assets back; a preflight failure
+ * leaves everything untouched.
+ */
+async function runReload(
+	hub: Hub,
+	state: ServerState,
+	options: ServerOptions,
+	broadcast: (frame: string) => void,
+	pause?: PauseTarget[],
+): Promise<ReloadReport> {
+	const blockers = hub.reloadBlockers();
+	const requiresRestart = options.reloadCode?.requiresRestart();
+	const generation = options.reloadCode?.generation;
+	if (blockers.length > 0) {
+		const names = blockers.map((blocker) => `${blocker.name ?? blocker.id} (${blocker.reason})`).join(", ");
+		const message = `reload refused: ${names}`;
+		options.log(message);
+		return {
+			ok: false,
+			status: "refused",
+			message,
+			blockers,
+			children: [],
+			reloaded: [],
+			reloads: state.reloads,
+			...(generation !== undefined ? { generation } : {}),
+			...(requiresRestart ? { requiresRestart } : {}),
+		};
+	}
+
+	// Import the next daemon generation first: the risk is the edited
+	// TypeScript, so it must fail before assets, policy or children move.
+	let applied = false;
+	try {
+		if (options.reloadCode) {
+			await options.reloadCode.prepare();
+			options.reloadCode.applyPending();
+			applied = true;
+		}
+	} catch (error) {
+		options.reloadCode?.rollback();
+		const message = `reload failed before any change: ${(error as Error).message}`;
+		options.log(message);
+		return {
+			ok: false,
+			status: "error",
+			message,
+			blockers: [],
+			children: [],
+			reloaded: [],
+			reloads: state.reloads,
+			...(generation !== undefined ? { generation } : {}),
+			...(requiresRestart ? { requiresRestart } : {}),
+		};
+	}
+
+	let assets: Map<string, Buffer>;
+	let policy: { sessions: number; policy: number };
+	try {
+		assets = await loadAssets(options.clientDir);
+		policy = await hub.reload();
+	} catch (error) {
+		if (applied) options.reloadCode?.rollback();
+		const message = `reload failed before any change: ${(error as Error).message}`;
+		options.log(message);
+		return {
+			ok: false,
+			status: "error",
+			message,
+			blockers: [],
+			children: [],
+			reloaded: [],
+			reloads: state.reloads,
+			...(generation !== undefined ? { generation } : {}),
+			...(requiresRestart ? { requiresRestart } : {}),
+		};
+	}
+
+	state.assets = assets;
+	state.nonce = randomBytes(16).toString("hex");
+	state.reloads += 1;
+	const committedGeneration = applied ? options.reloadCode?.commit() : generation;
+	const children = await hub
+		.reloadChildren()
+		.catch((error: unknown): ReloadChildResult[] => [{ id: "daemon", ok: false, error: (error as Error).message }]);
+	const failed = children.filter((child) => !child.ok);
+	const migrated = children.filter((child) => child.migrated).length;
+	const parts = [
+		"reloaded assets",
+		`config (${policy.policy} session(s))`,
+		`index (${policy.sessions} session(s))`,
+		`commands`,
+	];
+	if (committedGeneration !== undefined) parts.push(`daemon gen ${committedGeneration}`);
+	if (migrated > 0) parts.push(`${migrated} session(s) migrated to the host`);
+	if (failed.length > 0)
+		parts.push(`${failed.length} session(s) failed: ${failed.map((child) => child.name ?? child.id).join(", ")}`);
+	// A red/error dot does not block, but the report names it.
+	const errored = (await hub.list()).filter((session) => session.state === "error");
+	if (errored.length > 0) {
+		parts.push(`error sessions not reloaded: ${errored.map((session) => session.name ?? session.id).join(", ")}`);
+	}
+	if (requiresRestart) parts.push(`restart required: ${requiresRestart}`);
+	const pauseReport = pause && pause.length > 0 ? await resumePaused(hub, pause) : undefined;
+	if (pauseReport) parts.push(formatPauseReport(pauseReport));
+	const message = parts.join("; ");
+	options.log(`reload: ${message}`);
+	broadcast(frameNotice(message, { reload: true, status: failed.length > 0 ? "partial" : "ok" }));
+	return {
+		ok: failed.length === 0,
+		status: failed.length === 0 ? "ok" : "partial",
+		message,
+		blockers: [],
+		children,
+		reloaded: ["assets", "config", "index", "commands"],
+		reloads: state.reloads,
+		...(committedGeneration !== undefined ? { generation: committedGeneration } : {}),
+		...(requiresRestart ? { requiresRestart } : {}),
+		...(pauseReport ? { pause: pauseReport } : {}),
+	};
+}
+
+/** The pause wait budget; tests shorten it through `ServerOptions.pauseWaitMs`. */
+function pauseWait(options: ServerOptions): number {
+	return options.pauseWaitMs ?? PAUSE_WAIT_MS;
+}
+
+/** Gate blockers that still belong to the pause plan (matched by child or logical id). */
+function remainingPauseBlockers(hub: Hub, targets: PauseTarget[], mode: "reload" | "restart"): ReloadBlocker[] {
+	const blockers = mode === "restart" ? hub.restartBlockers() : hub.reloadBlockers();
+	const ids = new Set(targets.flatMap((target) => [target.id, target.logicalId]));
+	return blockers.filter((blocker) => ids.has(blocker.id));
+}
+
+/** Poll the same gate the operation will use, bounded, then return what still blocks. */
+async function waitForPause(
+	hub: Hub,
+	targets: PauseTarget[],
+	mode: "reload" | "restart",
+	timeoutMs: number,
+): Promise<ReloadBlocker[]> {
+	const deadline = Date.now() + timeoutMs;
+	let remaining = remainingPauseBlockers(hub, targets, mode);
+	while (remaining.length > 0 && Date.now() < deadline) {
+		await new Promise((resolve) => setTimeout(resolve, 100));
+		remaining = remainingPauseBlockers(hub, targets, mode);
+	}
+	return remaining;
 }
 
 async function readAsset(clientDir: string, relative: string): Promise<Buffer | undefined> {

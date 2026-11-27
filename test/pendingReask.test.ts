@@ -41,18 +41,20 @@ describe("pending re-ask records", () => {
 	it("stores, reads and removes records by logical session", async () => {
 		const dir = await tempRoot("pixip-reask-");
 		const key = pendingUiKey({ id: "pi-1", logicalId: "logical-1" });
-		await addPendingReask(dir, key, record);
+		const writes = new Map<string, Promise<void>>();
+		await addPendingReask(writes, dir, key, record);
 		assert.deepEqual(await readPendingReasks(dir, key), [record]);
 		assert.deepEqual(publicReask({ ...record, draft: { answers: { a: 1 } } }).draft, { answers: { a: 1 } });
-		await removePendingReask(dir, key, "ui-1");
+		await removePendingReask(writes, dir, key, "ui-1");
 		assert.deepEqual(await readPendingReasks(dir, key), []);
 	});
 
 	it("replaces a record with the same request id instead of duplicating it", async () => {
 		const dir = await tempRoot("pixip-reask-");
 		const key = pendingUiKey({ id: "pi-1" });
-		await addPendingReask(dir, key, record);
-		await addPendingReask(dir, key, { ...record, timedOutAt: "2026-11-22T01:00:00.000Z" });
+		const writes = new Map<string, Promise<void>>();
+		await addPendingReask(writes, dir, key, record);
+		await addPendingReask(writes, dir, key, { ...record, timedOutAt: "2026-11-22T01:00:00.000Z" });
 		const records = await readPendingReasks(dir, key);
 		assert.equal(records.length, 1);
 		assert.equal(records[0]?.timedOutAt, "2026-11-22T01:00:00.000Z");

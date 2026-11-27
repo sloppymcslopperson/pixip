@@ -668,15 +668,18 @@
 	gap: 6px;
 	margin-top: 6px;
 }
-.inbox-actions button {
+.inbox-actions button,
+.inbox-actions a {
 	padding: 4px 9px;
 	border: 1px solid var(--line);
 	border-radius: 7px;
 	background: none;
 	color: var(--fg-dim);
 	font-size: 11px;
+	text-decoration: none;
 }
-.inbox-actions button:hover {
+.inbox-actions button:hover,
+.inbox-actions a:hover {
 	border-color: var(--accent);
 	color: var(--accent);
 }

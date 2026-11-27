@@ -16,17 +16,25 @@
 	},
 	"scripts": {
 		"start": "node bin/pixip.ts",
-		"test": "node --test test/*.test.js test/*.test.ts",
-		"typecheck": "tsc --noEmit",
-		"lint": "eslint .",
+		"test": "node tools/test-run.mjs",
+		"test:full": "npm test",
+		"test:fast": "node tools/test-run.mjs --fast",
+		"typecheck": "tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsbuildinfo/root.tsbuildinfo",
+		"lint": "eslint . --cache --cache-location node_modules/.cache/eslint/root.cache",
 		"format": "prettier --write .",
-		"format:check": "prettier --check .",
-		"check": "npm run typecheck && npm run lint && npm run format:check && npm run check:imports && npm test && npm run check:browser && npm run check --workspace pixip-pi-host && npm run check --workspace pixip-questionnaire && npm run check --workspace pixip-show-image && npm run check --workspace pixip-inbox",
+		"format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,cjs,json,css,html}\"",
+		"format:docs": "prettier --check \"**/*.md\"",
+		"check": "npm run check:static && npm test && npm run check:browser && npm run check:workspaces",
+		"check:static": "node tools/check-parallel.mjs",
+		"check:fast": "npm run check:static && npm run test:fast",
+		"check:workspaces": "node tools/check-workspaces.mjs",
+		"check:timings": "node tools/check-timings.mjs",
 		"check:imports": "node tools/check-client-imports.mjs",
 		"check:browser": "node tools/browser-check.mjs",
 		"shot": "node tools/shot.mjs"
 	},
 	"dependencies": {
+		"parse5": "^7.3.0",
 		"ws": "^8.18.0"
 	},
 	"devDependencies": {

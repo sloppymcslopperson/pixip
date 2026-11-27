@@ -151,7 +151,11 @@ class FakeSession {
 
 	async waitForIdle(): Promise<void> {}
 
-	async reload(): Promise<void> {}
+	reloadCount = 0;
+
+	async reload(): Promise<void> {
+		this.reloadCount += 1;
+	}
 
 	dispose(): void {
 		this.disposed = true;
@@ -220,10 +224,23 @@ test("start emits hello first and binds RPC extensions", async () => {
 		type: "hello",
 		protocol: 1,
 		piVersion: "1.5.2-test",
-		capabilities: ["panel"],
+		capabilities: ["panel", "reload"],
 	});
 	assert.equal(runtime.session.bindings?.mode, "rpc");
 	assert.equal(typeof runtime.session.listener, "function");
+});
+
+test("reload calls the session loader and answers success", async () => {
+	const { host, output, runtime } = makeHost();
+	await host.start();
+	await host.handleLine(JSON.stringify({ type: "reload", id: "r1" }));
+	assert.deepEqual(lastResponse(output), {
+		id: "r1",
+		type: "response",
+		command: "reload",
+		success: true,
+	});
+	assert.equal(runtime.session.reloadCount, 1);
 });
 
 test("malformed JSON becomes a parse error response", async () => {

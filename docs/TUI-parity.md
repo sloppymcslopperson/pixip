@@ -158,7 +158,7 @@ adapter; its vendored bundle is fetched only for the first A2UI panel.
 | `questionnaire` (`05-pixip-questionnaire`) | done: A2UI inline panel with choice/text widgets         | same tool renders with `ctx.ui.custom`; other RPC/ACP hosts use sequential dialogs |
 
 Fallback order is **A2UI inline panel → TUI custom UI → sequential dialogs**. The
-panel path needs `--pi-host`; the legacy `pi --mode rpc` backend has no `panel`
+panel path needs the default `pixip-pi-host`; the explicit `--use-system-pi` backend has no `panel`
 and therefore uses dialogs even in pixip. On hosts that cannot collect typed
 text (stock `pi-acp`), the free-form row becomes "Answer this in chat" and
 multi-select gets "Add an item in chat" instead of a dead-end text prompt.

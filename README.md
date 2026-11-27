@@ -19,22 +19,27 @@ node bin/pixip.ts --data-dir ./tmp/dev        # http://127.0.0.1:8137/
 <data-dir>/sessions`, so pointing it at a scratch directory never touches
 `~/.pi/agent/sessions`.
 
-`pi-host/` is an optional workspace package, `pixip-pi-host`: an embedded Pi RPC
-host that pixip can use instead of spawning `pi --mode rpc`. It adds a blocking
-`panel` UI request for A2UI while otherwise keeping Pi RPC v1. See
-[pi-host/README.md](pi-host/README.md). It is opt-in:
+`pi-host/` is a workspace package, `pixip-pi-host`: an embedded Pi RPC host
+that adds a blocking `panel` UI request for A2UI while otherwise keeping Pi RPC
+v1. See [pi-host/README.md](pi-host/README.md). It is the default backend:
 
 ```bash
-node bin/pixip.ts --data-dir ./tmp/dev --pi-host  # resolve the workspace bin
-node bin/pixip.ts --data-dir ./tmp/dev --pi-host /path/to/pixip-pi-host
-PIXIP_PI_HOST=/path/to/pixip-pi-host node bin/pixip.ts --data-dir ./tmp/dev
+node bin/pixip.ts --data-dir ./tmp/dev                  # spawn pixip-pi-host
+PIXIP_PI_HOST=/path/to/pixip-pi-host node bin/pixip.ts  # override the host bin
 ```
 
-Without `--pi-host`/`PIXIP_PI_HOST`, pixip keeps using `pi --mode rpc`.
+The legacy `pi --mode rpc` backend is an explicit opt-in and needs a Pi
+executable from `--pi` or `PIXIP_PI`:
 
-The host embeds the project-local Pi SDK, shares the user's Pi agent dir and
-extension set for now, and is **not yet the default backend**. Plugin/config
-isolation is tracked in `90-pi-plugin-isolation` on the board.
+```bash
+node bin/pixip.ts --data-dir ./tmp/dev --use-system-pi --pi /path/to/pi
+PIXIP_PI=/path/to/pi node bin/pixip.ts --data-dir ./tmp/dev --use-system-pi
+```
+
+A missing host executable fails startup with an install hint instead of silently
+falling back. The host embeds the project-local Pi SDK and shares the user's Pi
+agent dir and extension set for now; plugin/config isolation is tracked in
+`90-pi-plugin-isolation` on the board.
 
 ### Inline panels and questionnaires
 
@@ -164,7 +169,8 @@ do in the TUI.
 - reconnect with backoff, durable entry-cursor resume and a stable pixip logical
   session id per session, so a dropped phone misses no entries;
 - sessions that were never prompted still list after detach (session index);
-- daemon lifecycle: `pixip start|stop|status|logs|refresh|restart` with pid,
+- daemon lifecycle: `pixip daemon|stop|status|logs|refresh|restart` (`pixip
+run` serves in the foreground) with pid,
   state and log under `--data-dir`; soft refresh re-reads assets, command policy
   and the session index without touching live children, and a `reload` action in
   the header does the same from the phone;
@@ -178,13 +184,16 @@ tickets that own each gap.
 
 ## Running as a daemon
 
-Bare `pixip` still serves in the foreground; the CLI manages a detached process:
+Bare `pixip` and `pixip run` serve in the foreground; `pixip daemon` manages a
+detached process:
 
 ```bash
-pixip start --data-dir ./tmp/dev          # prints the URL, writes pid/state/log
+pixip daemon --data-dir ./tmp/dev         # prints the URL, writes pid/state/log
+pixip daemon --watch                      # reload src/ + extensions/ after edits
 pixip status [--json]                     # non-zero when not running
 pixip logs [-f] [--lines 200]             # tails <data-dir>/pixip.log
 pixip refresh                             # soft: assets, policy, session index
+pixip reload                              # assets + every live child, in place
 pixip restart [--force] [--when-idle]     # replace the process, JSONL survives
 pixip protect [<session-id>] [--off]      # exclude a session from bulk archive
 pixip stop
@@ -193,9 +202,20 @@ pixip stop
 `--data-dir` owns everything (`pixip.pid`, `pixip.state.json`, `pixip.log`,
 `sessions/`, `inbox.json`), so parallel instances on another `--port`/`--data-dir` never
 collide. One process owns a data dir at a time: the bare foreground command
-refuses to start when a daemon already owns it. Soft refresh (`pixip refresh`, `SIGHUP`, or the header's `reload`) keeps
-children and sockets, and its endpoint is loopback-only because the UI has no
-auth. Hard restart refuses while a session is busy unless `--force`;
+refuses to start when a daemon already owns it. Soft refresh (`pixip refresh`,
+`SIGHUP`, or the header's `reload`) keeps children and sockets, and its endpoint
+accepts loopback peers and the exact bind address because the UI has no auth.
+`/reload` (or `pixip reload`) is the in-place step beyond that: it refuses while
+any session is busy, re-reads assets/policy/index, reloads every live host child
+(auto-respawning system-pi children to the current host), keeps a local
+transcript notice, and refreshes every connected page for the new nonce. It is
+user-only; a `pixip reload` run from inside an agent exits 2. `--watch` is an
+off-by-default developer convenience: a 200 ms debounce over `src/` and
+`extensions/` runs the same reload. A busy session defers the reload (the
+daemon keeps polling and shows a "reload deferred" card after a minute) rather
+than interrupting; a failed reload, including a half-written file, is logged and
+shown as a notice while the daemon keeps serving. Hard restart
+refuses while a session is busy unless `--force`;
 `--when-idle` waits up to `--timeout` seconds (default 300, exit 2) for the other
 sessions and is the safe way to pick up hub changes from inside pixip: the
 stop/start runs in a detached helper that survives the calling session, and
@@ -233,22 +253,53 @@ plain shell is labelled `local shell`. The CLI talks to `PIXIP_DAEMON_URL` when
 set, otherwise to the daemon running for `--data-dir`. Purposes are
 `attention-needed`, `deliverable`, `extra-info` and `no-rush`.
 
-The REST surface is `POST/GET /api/inbox`, `POST /api/inbox/read-all`,
-`POST /api/inbox/:id/read|archive|restore`, and `DELETE /api/inbox/:id`; the
-dashboard socket receives an `inbox` frame with the unread count and newest
-message on every change. `POST /api/inbox/extension` is the addon's one-shot
-"I am loaded" report: while it has not been seen and the inbox is empty, the
-dashboard bar stays hidden instead of showing dead chrome. The flag lives in
-daemon memory, so a restart re-learns it from the next Pi child that loads the
-extension. `--inbox-token` (or `PIXIP_INBOX_TOKEN`) turns on the
+The REST surface is `POST/GET /api/inbox`, `POST /api/inbox/reports`,
+`POST /api/inbox/read-all`, `POST /api/inbox/:id/read|archive|restore`, and
+`DELETE /api/inbox/:id`; the dashboard socket receives an `inbox` frame with the
+unread count and newest message on every change. `POST /api/inbox/extension` is
+the addon's one-shot "I am loaded" report: while it has not been seen and the
+inbox is empty, the dashboard bar stays hidden instead of showing dead chrome.
+The flag lives in daemon memory, so a restart re-learns it from the next Pi child
+that loads the extension. `--inbox-token` (or `PIXIP_INBOX_TOKEN`) turns on the
 `Authorization: Bearer` seam for the API and passes the same token to Pi
 children; it is off by default. Every child gets `PIXIP_DAEMON_URL` regardless.
 
+### HTML reports
+
+An agent can attach an HTML report to a message. Reports are agent-only (there is
+no CLI command) and live in hub-owned directories under `<data-dir>/reports/`.
+The `inbox_report` tool is the only editing surface:
+
+```text
+inbox_report({action:"new", name:"migration"})
+inbox_report({action:"add_asset", name:"migration", path:"/tmp/chart.png"})
+inbox_report({action:"write", name:"migration", html:"<!doctype html>…"})
+inbox_send({subject:"Migration report", body:"The staging run is green.", purpose:"deliverable", reportName:"migration"})
+```
+
+`write` validates the whole document and requires `existingHtml` (the exact
+current HTML from `action:"show"`) when overwriting. `add_asset` copies a local
+PNG/JPEG/GIF/WebP/SVG/CSS/font into the top level of the report and returns the
+filename to reference. Local images are capped at 1 MiB each, `index.html` at
+1 MiB and the whole report at 10 MiB. No JavaScript, iframes, objects/embeds,
+event handlers, external resource loads or form submission; form markup is
+allowed for style demos, and external `<a href>` navigation is allowed. Use
+`add_asset` for remote images rather than linking them.
+
+The report is served at `/reports/<name>/` (relative assets work, and
+`/reports/<name>` redirects to the slash) with a locked-down CSP. There is no
+report auth: the trust boundary is the same as the dashboard. A report can be
+attached to more than one message; deleting or evicting the last message that
+references it removes the directory. Unattached drafts older than 24 hours are
+swept.
+
 `extensions/pixip-inbox` is the opt-in agent face: `inbox_send({subject, body,
-  purpose})` posts to the same endpoint, sends `PIXIP_INBOX_TOKEN` only when it
-is set, and returns a tool error (daemon down, wrong token) instead of crashing.
-On load it announces itself (best-effort, failures ignored), which is what makes
-the empty inbox bar appear.
+purpose, reportName?})` and `inbox_report({action, …})` post to the same
+endpoint, send `PIXIP_INBOX_TOKEN` only when it is set, and return a tool error
+(daemon down, wrong token, validation failure) instead of crashing. Calling
+`inbox_report` with no arguments prints its help text. On load the extension
+announces itself (best-effort, failures ignored), which is what makes the empty
+inbox bar appear.
 
 ```bash
 pi install /path/to/pixip/extensions/pixip-inbox
@@ -328,7 +379,8 @@ PIXIP_CHROME=/path/to/chrome node tools/shot.mjs http://127.0.0.1:8137/ 1280 900
 
 It prints the box model of the header/list/log/composer (so a resize is asserted,
 not eyeballed), flags horizontal overflow, console errors and page errors, and
-writes the screenshot. Use `--dev` on the daemon so CSS/JS edits need no restart.
+writes the screenshot. Dev mode is the default, so CSS/JS edits need no restart;
+pass `--serious-mode` to serve the startup asset snapshot instead.
 
 `tools/browser-check.mjs` covers the main client flows (dashboard open,
 composer submit, inline `select`, A2UI fixture panel, transcript windows) with an

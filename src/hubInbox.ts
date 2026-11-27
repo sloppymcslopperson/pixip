@@ -14,6 +14,7 @@ import {
 	type InboxSummary,
 	type InboxView,
 } from "./inbox.ts";
+import { ReportError, type ReportInput } from "./inboxReport.ts";
 
 type StatusMap = Map<string, InboxSenderStatus>;
 
@@ -117,18 +118,58 @@ async function resolveSender(this: any, sessionId?: string): Promise<InboxSender
 
 export async function inboxSend(
 	this: any,
-	input: { subject: string; body: string; purpose: InboxPurpose; sessionId?: string },
+	input: { subject: string; body: string; purpose: InboxPurpose; sessionId?: string; reportName?: string },
 ): Promise<InboxView> {
+	const hasReport = typeof input.reportName === "string" && input.reportName.trim() !== "";
+	const reportName = hasReport ? await this.reportStore.assertPublishable(input.reportName) : undefined;
 	const sender = await resolveSender.call(this, input.sessionId);
 	const message = await this.inboxStore.add({
 		subject: input.subject,
 		body: input.body,
 		purpose: input.purpose,
 		sender,
+		...(reportName ? { reportName } : {}),
 	});
+	if (reportName) await this.reportStore.markAttached(reportName);
+	await inboxSweepReports.call(this);
 	const map = await statusMap.call(this);
 	await broadcastInbox.call(this);
 	return view(message, map);
+}
+
+/** One `inbox_report` action from the optional extension. */
+export async function inboxReport(this: any, input: ReportInput): Promise<unknown> {
+	switch (input.action) {
+		case "new":
+			return await this.reportStore.create(input.name);
+		case "write":
+			return await this.reportStore.write(input.name, input.html, input.existingHtml);
+		case "add_asset":
+			return await this.reportStore.addAsset(input.name, input.path, input.filename);
+		case "remove_asset":
+			return await this.reportStore.removeAsset(input.name, input.asset);
+		case "show": {
+			const name = typeof input.name === "string" ? input.name.trim() : "";
+			const messages = await this.inboxStore.all();
+			const attached = messages
+				.filter((message: InboxMessage) => typeof name === "string" && message.reportName === name)
+				.map((message: InboxMessage) => message.id);
+			return await this.reportStore.show(input.name, attached);
+		}
+		default:
+			throw new ReportError("action must be one of new, write, add_asset, remove_asset, show");
+	}
+}
+
+/** Drop published reports with no message and drafts past their TTL. */
+export async function inboxSweepReports(this: any): Promise<string[]> {
+	const messages = await this.inboxStore.all();
+	const referenced = new Set(
+		messages
+			.map((message: InboxMessage) => message.reportName)
+			.filter((name: string | undefined): name is string => typeof name === "string" && name !== ""),
+	);
+	return await this.reportStore.retain(referenced);
 }
 
 export async function inboxRead(this: any, id: string): Promise<number> {
@@ -149,6 +190,7 @@ export async function inboxRestore(this: any, id: string): Promise<void> {
 
 export async function inboxDelete(this: any, id: string): Promise<void> {
 	await this.inboxStore.delete(id);
+	await inboxSweepReports.call(this);
 	await broadcastInbox.call(this);
 }
 

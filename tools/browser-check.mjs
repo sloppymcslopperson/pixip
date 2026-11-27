@@ -102,11 +102,18 @@ async function bootFixture() {
 	const main = await hub.create(repo, "repo main");
 	const peer = await hub.create(repo, "repo peer");
 	const worktree = await hub.create(repo, "worktree agent", { branch: "ui-check" });
+	await hub.inboxReport({ action: "new", name: "browser-report" });
+	await hub.inboxReport({
+		action: "write",
+		name: "browser-report",
+		html: "<!doctype html><html><body><h1>Browser report</h1><p>served safely</p></body></html>",
+	});
 	const inbox = await hub.inboxSend({
 		subject: "browser inbox",
 		body: "This message checks the inbox sheet, filters and sender row.",
 		purpose: "attention-needed",
 		sessionId: main.logicalId,
+		reportName: "browser-report",
 	});
 	// The tag names the Pi session id, which the sessions frame carries, so a
 	// deep link resolves it as a name-only chip once that frame arrives.
@@ -1234,6 +1241,22 @@ async function runInboxFlow(page, base) {
 		},
 	);
 	await checkNoOverflow(page, "inbox message expanded");
+	assert.equal(
+		await page.evaluate(() => document.querySelector("#inbox-page .inbox-actions a.inbox-report")?.textContent ?? ""),
+		"view report",
+		"report message has a view-report link",
+	);
+	const reportTarget = page
+		.browser()
+		.waitForTarget((target) => target.url().includes("/reports/browser-report/"), { timeout: FLOW_TIMEOUT });
+	await page.click("#inbox-page .inbox-actions a.inbox-report");
+	const opened = await reportTarget;
+	const reportPage = await opened.page();
+	assert.ok(reportPage, "report opened in a new tab");
+	await reportPage.waitForFunction(() => document.querySelector("h1")?.textContent === "Browser report", {
+		timeout: FLOW_TIMEOUT,
+	});
+	await reportPage.close();
 
 	await clickRefCopy(page, "#inbox-page .inbox-card");
 	assert.match(await lastCopied(page), /^\[pixip-ref=inbox\/[A-Za-z0-9._-]+\]$/);

@@ -20,6 +20,7 @@ import {
 import type { CommandLayer } from "./commands.ts";
 import type { CreateWorktreeRequest } from "./worktree.ts";
 import type { RemoveWorktreeRequest, RemoveWorktreeResult, WorktreeListing } from "./hubWorktree.ts";
+import { InboxReportStore, type ReportInput } from "./inboxReport.ts";
 import type { RpcChild } from "./rpc.ts";
 import type {
 	NameSource,
@@ -30,6 +31,7 @@ import type {
 	SessionTarget,
 } from "./sessionIndex.ts";
 import type { BashResult, CommandPolicy, DynamicCommand, FooterData, ModelSummary, SessionInfo } from "./wire.ts";
+import type { ReloadBlocker, ReloadChildResult } from "./reload.ts";
 
 /**
  * The supervisor. One `pi --mode rpc` child per live session, nothing else.
@@ -131,6 +133,8 @@ interface LiveSession {
 	reaskAsk?: ReaskAsk;
 	/** Consumed `hello` from `pixip-pi-host`; never forwarded as a transcript event. */
 	host?: { protocol?: number; piVersion?: string; capabilities?: string[] };
+	/** Effective backend for this child, used by `/reload` to migrate system-pi sessions. */
+	backend?: "host" | "system";
 	idleTimer?: NodeJS.Timeout;
 	branch?: string;
 	footerTimer?: NodeJS.Timeout;
@@ -182,6 +186,8 @@ export class Hub {
 	private readonly branchCache = new Map<string, { branch?: string; at: number }>();
 	/** Durable inbox shared by every session and the dashboard. */
 	readonly inboxStore: InboxStore;
+	/** Hub-owned HTML reports attached to inbox messages. */
+	readonly reportStore: InboxReportStore;
 	/** Set when the optional `pixip-inbox` extension announced itself in this daemon run. */
 	inboxExtensionSeen = false;
 	/** Daemon URL injected into every Pi child, set once the server is listening. */
@@ -202,8 +208,15 @@ export class Hub {
 			...(options.inboxLimit !== undefined ? { limit: options.inboxLimit } : {}),
 			log: options.log,
 		});
+		this.reportStore = new InboxReportStore({ root: join(dataDir, "reports"), log: options.log });
 		this.startupTrash = options.skipStartupTrash ? Promise.resolve() : this.purgeTrashOnStart();
+		void this.inboxSweepReports().catch((error: unknown) =>
+			options.log(`report sweep failed: ${(error as Error).message}`),
+		);
 	}
+
+	/** Serializes pending-UI re-ask file writes per session; hub-owned so reload cannot fork it. */
+	private readonly pendingWrites = new Map<string, Promise<void>>();
 
 	// ---------------------------------------------------------------- listing
 
@@ -244,8 +257,19 @@ export class Hub {
 		body: string;
 		purpose: InboxPurpose;
 		sessionId?: string;
+		reportName?: string;
 	}): Promise<InboxView> {
 		return await hubInbox.inboxSend.apply(this, arguments as any);
+	}
+
+	/** Manage one hub-owned HTML report (`inbox_report` extension action). */
+	async inboxReport(input: ReportInput): Promise<unknown> {
+		return await hubInbox.inboxReport.apply(this, arguments as any);
+	}
+
+	/** Remove published reports with no message and drafts past their TTL. */
+	async inboxSweepReports(): Promise<string[]> {
+		return await hubInbox.inboxSweepReports.apply(this, arguments as any);
 	}
 
 	async inboxRead(id: string): Promise<number> {
@@ -498,6 +522,34 @@ export class Hub {
 
 	async abort(id: string): Promise<void> {
 		return await hubControl.abort.apply(this, arguments as any);
+	}
+
+	/**
+	 * Replace one idle session's child from its own JSONL using the daemon's
+	 * current spawn configuration. The logical id, session file and subscribers
+	 * stay put; a failed spawn leaves the old child serving.
+	 */
+	async respawnSession(id: string): Promise<SessionInfo> {
+		return await hubLive.respawnSession.apply(this, arguments as any);
+	}
+
+	/** Every live session that makes `/reload` unsafe, with the reason. */
+	reloadBlockers(): ReloadBlocker[] {
+		return hubControl.reloadBlockers.apply(this, arguments as any);
+	}
+
+	/** Every live session that makes a daemon replacement disruptive. */
+	restartBlockers(): ReloadBlocker[] {
+		return hubControl.restartBlockers.apply(this, arguments as any);
+	}
+
+	/**
+	 * Reload every live child after the asset/policy swap. System-pi children are
+	 * respawned with the daemon's current configuration; failures are reported
+	 * per child and do not stop the rest.
+	 */
+	async reloadChildren(): Promise<ReloadChildResult[]> {
+		return await hubControl.reloadChildren.apply(this, arguments as any);
 	}
 
 	async models(id: string): Promise<{ models: ModelSummary[]; current: string | null }> {

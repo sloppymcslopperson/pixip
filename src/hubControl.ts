@@ -23,6 +23,7 @@ import {
 	coverageKeys,
 } from "./jsonl.ts";
 import { resolveSessionPolicy, type CommandLayer } from "./commands.ts";
+import type { ReloadBlocker, ReloadChildResult } from "./reload.ts";
 import { isSlashPrompt } from "./titles.ts";
 import { framePolicy } from "./wire.ts";
 import type { BashResult, CommandPolicy, SessionInfo } from "./wire.ts";
@@ -509,6 +510,81 @@ export async function reload(this: any): Promise<{ sessions: number; policy: num
 	}
 	this.broadcastList(sessions);
 	return { sessions: sessions.length, policy: updates.length };
+}
+
+/** Every live session that makes a daemon-wide `/reload` unsafe. */
+export function reloadBlockers(this: any): ReloadBlocker[] {
+	const blockers: ReloadBlocker[] = [];
+	for (const live of this.live.values()) {
+		const reasons: string[] = [];
+		if (live.info.id === "") reasons.push("starting");
+		else if (live.info.state !== "idle" && live.info.state !== "stopped" && live.info.state !== "error") {
+			reasons.push(live.info.state);
+		}
+		if (live.pendingUi && live.pendingUi.size > 0) reasons.push("pending UI request");
+		if (live.bashId) reasons.push("running bash");
+		if (live.thinking?.active) reasons.push("turn not settled");
+		if (reasons.length === 0) continue;
+		blockers.push({
+			id: live.info.id || live.info.logicalId || "starting",
+			...(live.info.name ? { name: live.info.name } : {}),
+			reason: reasons.join(", "),
+		});
+	}
+	return blockers;
+}
+
+/**
+ * Sessions that make a daemon restart visibly disruptive. A restart is allowed
+ * to interrupt an unsettled turn (that is what force is for), but a pending UI
+ * request or a running bash command is a concrete thing the user chose to do.
+ */
+export function restartBlockers(this: any): ReloadBlocker[] {
+	const blockers: ReloadBlocker[] = [];
+	for (const live of this.live.values()) {
+		const reasons: string[] = [];
+		if (live.info.id === "") reasons.push("starting");
+		else if (live.info.state !== "idle" && live.info.state !== "stopped" && live.info.state !== "error") {
+			reasons.push(live.info.state);
+		}
+		if (live.pendingUi && live.pendingUi.size > 0) reasons.push("pending UI request");
+		if (live.bashId) reasons.push("running bash");
+		if (reasons.length === 0) continue;
+		blockers.push({
+			id: live.info.id || live.info.logicalId || "starting",
+			...(live.info.name ? { name: live.info.name } : {}),
+			reason: reasons.join(", "),
+		});
+	}
+	return blockers;
+}
+
+/**
+ * Reload every live child after the assets/policy have been swapped. A
+ * system-pi child is respawned into the current host configuration; host
+ * children answer the new `reload` command. Failures are per-child and do not
+ * stop the remaining sessions.
+ */
+export async function reloadChildren(this: any): Promise<ReloadChildResult[]> {
+	const results: ReloadChildResult[] = [];
+	for (const live of [...this.live.values()]) {
+		if (live.info.id === "") continue;
+		const id = live.info.id as string;
+		const name = live.info.name as string | undefined;
+		try {
+			const backend = live.backend ?? (this.options.piHostBin ? "host" : "system");
+			if (backend === "system") {
+				await this.respawnSession(id);
+				results.push({ id, ...(name ? { name } : {}), ok: true, migrated: true });
+				continue;
+			}
+			await live.proc.command({ type: "reload" });
+			results.push({ id, ...(name ? { name } : {}), ok: true });
+		} catch (error) {
+			results.push({ id, ...(name ? { name } : {}), ok: false, error: (error as Error).message });
+		}
+	}
+	return results;
 }
 
 export async function abort(this: any, id: string): Promise<void> {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { after, describe, it } from "node:test";
 
-import { announceInbox, runInboxTool, sendToInbox } from "../src/inbox.ts";
+import { announceInbox, runInboxTool, runReportTool, sendToInbox } from "../src/inbox.ts";
 
 interface Captured {
 	method: string;
@@ -84,6 +84,16 @@ describe("inbox_send", () => {
 		});
 	});
 
+	it("forwards reportName when attaching an existing report", async () => {
+		const hub = await boot();
+		const result = await sendToInbox(
+			{ subject: "Review", body: "see report", purpose: "deliverable", reportName: "demo" },
+			{ env: { PIXIP_DAEMON_URL: hub.url } },
+		);
+		assert.equal(result.reportName, "demo");
+		assert.equal(hub.captured[0]?.body["reportName"], "demo");
+	});
+
 	it("omits the bearer header and session id when the environment is bare", async () => {
 		const hub = await boot();
 		await sendToInbox({ subject: "hello", body: "body", purpose: "no-rush" }, { env: { PIXIP_DAEMON_URL: hub.url } });
@@ -158,6 +168,30 @@ describe("inbox_send", () => {
 		// No daemon URL, or a daemon that is not listening: silently no report.
 		assert.equal(await announceInbox({ env: {} }), false);
 		assert.equal(await announceInbox({ env: { PIXIP_DAEMON_URL: "http://127.0.0.1:1/" }, timeoutMs: 500 }), false);
+	});
+
+	it("posts report actions and turns failures into actionable tool errors", async () => {
+		const hub = await boot(200, { ok: true, report: { name: "demo", url: "/reports/demo/", asset: "chart.png" } });
+		const added = await runReportTool(
+			{ action: "add_asset", name: "demo", path: "/tmp/chart.png" },
+			{ env: { PIXIP_DAEMON_URL: hub.url, PIXIP_INBOX_TOKEN: "secret" } },
+		);
+		assert.equal("isError" in added, false);
+		assert.equal(hub.captured[0]?.url, "/api/inbox/reports");
+		assert.equal(hub.captured[0]?.headers["authorization"], "Bearer secret");
+		assert.deepEqual(hub.captured[0]?.body, { action: "add_asset", name: "demo", path: "/tmp/chart.png" });
+		assert.match((added.content[0] as { text: string }).text, /chart\.png/);
+
+		const missing = await runReportTool({ action: "write", name: "demo", html: "<p>x</p>" }, { env: {} });
+		assert.equal("isError" in missing && missing.isError, true);
+		assert.match((missing.content[0] as { text: string }).text, /PIXIP_DAEMON_URL/);
+	});
+
+	it("prints the report help text when called without an action", async () => {
+		const help = await runReportTool({}, { env: {} });
+		assert.equal("isError" in help, false);
+		assert.match((help.content[0] as { text: string }).text, /inbox_report: manage an HTML report/);
+		assert.match((help.content[0] as { text: string }).text, /add_asset/);
 	});
 
 	it("returns a tool result, and a tool error instead of throwing", async () => {
