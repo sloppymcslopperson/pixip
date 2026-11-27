@@ -43,7 +43,7 @@ interface RunResult {
 	stderr: string;
 }
 
-function run(args: string[], env: Record<string, string> = {}): Promise<RunResult> {
+function cli(args: string[], env: Record<string, string> = {}): Promise<RunResult> {
 	return new Promise((resolve) => {
 		execFile(
 			process.execPath,
@@ -58,7 +58,7 @@ function run(args: string[], env: Record<string, string> = {}): Promise<RunResul
 }
 
 async function start(dir: string): Promise<{ url: string; pid: number }> {
-	const result = await run(["start", "--data-dir", dir, "--port", "0", "--pi", FIXTURE]);
+	const result = await cli(["daemon", "--data-dir", dir, "--port", "0", "--use-system-pi", "--pi", FIXTURE]);
 	assert.equal(result.code, 0, result.stderr);
 	const match = /on (http\S+)/.exec(result.stdout);
 	assert.ok(match?.[1], result.stdout);
@@ -130,7 +130,7 @@ describe("pixip worktree CLI", () => {
 		const path = worktreePath(repo, "cli-live");
 		await writeFile(join(path, "dirty.txt"), "change\n");
 
-		const json = listingOf(await run(["worktree", "list", repo, "--data-dir", dir, "--json"]));
+		const json = listingOf(await cli(["worktree", "list", repo, "--data-dir", dir, "--json"]));
 		assert.equal(json.repo, repo);
 		const target = json.worktrees.find((entry) => entry.path === path);
 		assert.ok(target);
@@ -146,13 +146,13 @@ describe("pixip worktree CLI", () => {
 		assert.equal(target.sessions[0]?.live, true);
 		assert.equal(target.sessions[0]?.id, created["logicalId"] ?? created["id"]);
 
-		const human = await run(["worktree", "list", repo, "--data-dir", dir]);
+		const human = await cli(["worktree", "list", repo, "--data-dir", dir]);
 		assert.equal(human.code, 0, human.stderr);
 		assert.match(human.stdout, new RegExp(`repo: ${repo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
 		assert.match(human.stdout, /cli-live \(idle\)/);
 
-		await run(["stop", "--data-dir", dir]);
-		const offline = listingOf(await run(["worktree", "list", repo, "--data-dir", dir, "--json"]));
+		await cli(["stop", "--data-dir", dir]);
+		const offline = listingOf(await cli(["worktree", "list", repo, "--data-dir", dir, "--json"]));
 		const stopped = offline.worktrees.find((entry) => entry.path === path);
 		assert.ok(stopped);
 		assert.equal(stopped.liveAgents, 0);
@@ -171,7 +171,7 @@ describe("pixip worktree CLI", () => {
 		});
 		const path = worktreePath(repo, "cli-referenced");
 
-		const referenced = await run(["worktree", "remove", path, "--data-dir", dir]);
+		const referenced = await cli(["worktree", "remove", path, "--data-dir", dir]);
 		assert.equal(referenced.code, 2, referenced.stderr);
 		assert.match(referenced.stderr, /still reference it/);
 		assert.match(referenced.stderr, /holder/);
@@ -179,23 +179,23 @@ describe("pixip worktree CLI", () => {
 
 		await archiveSession(url, String(created["id"]));
 		await writeFile(join(path, "untracked.txt"), "change\n");
-		const dirty = await run(["worktree", "remove", path, "--data-dir", dir]);
+		const dirty = await cli(["worktree", "remove", path, "--data-dir", dir]);
 		assert.equal(dirty.code, 2, dirty.stderr);
 		assert.match(dirty.stderr, /1 changed file\(s\); use --force/);
 
-		const forced = await run(["worktree", "remove", path, "--data-dir", dir, "--force"]);
+		const forced = await cli(["worktree", "remove", path, "--data-dir", dir, "--force"]);
 		assert.equal(forced.code, 0, forced.stderr);
 		assert.match(forced.stdout, /removed .*pixip\/cli-referenced/);
 		assert.equal(await exists(path), false);
 
 		const external = join(root, "external-tree");
 		await git(repo, "worktree", "add", "-b", "external-branch", external, "HEAD");
-		const refused = await run(["worktree", "remove", external, "--data-dir", dir, "--force"]);
+		const refused = await cli(["worktree", "remove", external, "--data-dir", dir, "--force"]);
 		assert.equal(refused.code, 2, refused.stderr);
 		assert.match(refused.stderr, /external worktree; pixip will not remove it/);
 		assert.equal(await exists(external), true);
 
-		await run(["stop", "--data-dir", dir]);
+		await cli(["stop", "--data-dir", dir]);
 	});
 
 	it("prunes a stale worktree", async () => {
@@ -205,11 +205,11 @@ describe("pixip worktree CLI", () => {
 		await git(repo, "worktree", "add", "-b", "pixip/stale", path, "HEAD");
 		await rm(path, { recursive: true, force: true });
 
-		const pruned = await run(["worktree", "prune", repo, "--data-dir", dir]);
+		const pruned = await cli(["worktree", "prune", repo, "--data-dir", dir]);
 		assert.equal(pruned.code, 0, pruned.stderr);
 		assert.equal(pruned.stdout, `pruned ${repo}\n`);
 
-		const json = listingOf(await run(["worktree", "list", repo, "--data-dir", dir, "--json"]));
+		const json = listingOf(await cli(["worktree", "list", repo, "--data-dir", dir, "--json"]));
 		assert.equal(
 			json.worktrees.some((entry) => entry.path === path),
 			false,

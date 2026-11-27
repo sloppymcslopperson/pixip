@@ -124,10 +124,11 @@ It exists so an integration can stop spawning `pi --mode rpc` without patching
 Pi. The host emits protocol records on stdout only, shares the user's Pi agent
 dir and extension set for now, and is isolated by its own `--session-dir`.
 
-It is opt-in: `--pi-host [path]` (or `PIXIP_PI_HOST`) makes the hub spawn the
-host for new and reattached sessions; `--pi` remains the default. The host is
-resolved from the installed workspace package when the flag has no value, and
-there is no silent fallback to a global `pi`. `hello` is consumed by the hub for
+It is the default: the hub spawns the host for new and reattached sessions.
+`PIXIP_PI_HOST` overrides the host executable; unset resolves the installed
+workspace package, and there is no silent fallback to a global `pi`. The legacy
+`pi --mode rpc` backend is the explicit `--use-system-pi` opt-in, which requires
+a Pi executable from `--pi` or `PIXIP_PI`. `hello` is consumed by the hub for
 diagnostics and never forwarded as a transcript event; `panel` joins
 `select`/`confirm`/`input`/`editor` in the pending-UI cache and replay path.
 Automatic titles use the host's `--print` one-shot mode when the host backend is
@@ -143,19 +144,20 @@ The CLI restart helper and `startDaemon` use the same helper, so a daemon starte
 from inside a Pi session is clean as well.
 
 Measured on this box (2026-11-21, Node 22.23.5, real Pi 1.5.2 vs workspace host,
-three cold/warm attaches per backend):
+three cold/warm attaches per backend). The default host path is first; the
+`--use-system-pi` column is the explicit legacy opt-in:
 
-| metric                         | legacy `pi --mode rpc` | `pixip-pi-host` | delta  |
-| ------------------------------ | ---------------------- | --------------- | ------ |
-| cold attach (create)           | 1239 ms                | 3745 ms         | +202%  |
-| warm attach (reattach)         | 1240-1331 ms           | 3487-3657 ms    | ~+180% |
-| child RSS                      | 108-110 MB             | 149-152 MB      | ~+37%  |
-| command round-trip (get_state) | 1.55 ms                | 1.59 ms         | ~equal |
-| event -> frame, median / p95   | 0.30 / 1.71 ms         | 0.30 / 1.30 ms  | ~equal |
+| metric                         | `pixip-pi-host` (default) | legacy `pi --mode rpc` (`--use-system-pi`) | delta  |
+| ------------------------------ | ------------------------- | ------------------------------------------ | ------ |
+| cold attach (create)           | 3745 ms                   | 1239 ms                                    | -67%   |
+| warm attach (reattach)         | 3487-3657 ms              | 1240-1331 ms                               | ~-64%  |
+| child RSS                      | 149-152 MB                | 108-110 MB                                 | ~-27%  |
+| command round-trip (get_state) | 1.59 ms                   | 1.55 ms                                    | ~equal |
+| event -> frame, median / p95   | 0.30 / 1.30 ms            | 0.30 / 1.71 ms                             | ~equal |
 
 The host is slower to boot because it loads the SDK and the user's extension set
 in-process; once attached, command and event latency match the legacy child.
-That is why the host stays opt-in until boot cost is addressed.
+Boot cost is the reason `--use-system-pi` remains available as an explicit opt-out.
 
 ## Data flow
 
@@ -291,7 +293,8 @@ REST is only for discovery, process verbs and downloads: `GET /api/sessions`,
 (JSON `{cwd, worktree: {branch}, force?}`),
 `GET /api/sessions/:id/export.html` and `GET /api/sessions/:id/export.jsonl`
 (both `Content-Disposition: attachment`), `GET /api/info`, `GET /health`
-(`pid`, `startedAt`, `reloads`) and `POST /api/refresh`. Refresh is loopback-only;
+(`pid`, `startedAt`, `reloads`) and `POST /api/refresh`. Refresh accepts loopback
+peers and the exact bind address;
 the worktree routes follow the server bind like the rest of the dashboard, because
 managing a tree is a normal session action rather than a host-local admin verb.
 Streaming never uses HTTP requests.
@@ -429,17 +432,20 @@ Model and thinking are plain RPC passthroughs (`get_available_models`,
 the one place that shows and changes them. `thinking_level_changed` events keep it
 in sync when the change happens elsewhere.
 
-## Daemon lifecycle and refresh
+## Reload and restart
 
-`bin/pixip.ts` serves in the foreground by default; `start` spawns that same
-entry detached with stdio to `<data-dir>/pixip.log` and polls `/health` until it
+`bin/pixip.ts run` serves in the foreground (the bare command defaults to it);
+`daemon` spawns that same entry with `run` detached, stdio to
+`<data-dir>/pixip.log`, and polls `/health` until it
 answers. One daemon per data dir: `pixip.pid` holds the pid, `pixip.state.json`
-holds `{pid, host, port, url, startedAt, dataDir, args}` (args so `restart`
-reproduces the configuration). `status`, `stop` and `refresh` read those files; a
+holds `{pid, host, port, url, startedAt, dataDir, args, env}` (args and the
+extra environment, so `restart` reproduces the configuration). `status`, `stop` and `refresh` read those files; a
 dead pid is stale and gets cleaned rather than reported.
 
-Soft refresh (`pixip refresh`, `SIGHUP`, `POST /api/refresh`) is the default and
-must never disturb a turn:
+### Soft refresh
+
+Soft refresh (`pixip refresh`, `SIGHUP`, `POST /api/refresh`) must never disturb
+a turn:
 
 1. re-resolve the command policy for every live session — two-phase, so a
    malformed file fails the refresh before any policy is swapped;
@@ -448,41 +454,144 @@ must never disturb a turn:
 4. push the new `policy` frames and a fresh `sessions` frame to connected
    sockets.
 
-Children and websockets are untouched; `/health` exposes `startedAt` and a
-`reloads` counter so the CLI or the agent can verify it happened. The endpoint is
-loopback-only (the UI has no auth) and answers
+Children and websockets are untouched by a soft refresh; `/health` exposes
+`startedAt`, a `reloads` counter and the current daemon `generation`, so the CLI
+or the agent can verify it happened. The endpoint is loopback-only (the UI has no
+auth) and answers
 `{reloaded: ["assets", "config", "index", "commands"], reloads}`; the catalog is a
 client asset, so `commands` rides on the asset re-read.
 
-A hard restart is explicit: `pixip restart` refuses while a session is busy
-unless `--force`, or waits for every session to be idle with `--when-idle`
-(bounded by `--timeout`, default 300 s, exit 2 on timeout).
+### `/reload`: assets, policy and daemon code in place
 
-The stop/start itself runs in a **detached helper** (`restart --detached`, stdio
-to `<data-dir>/pixip.log`), not in the CLI process. This is what makes a restart
-issued from inside a pixip session work: a bash tool is a child of the Pi child
-the old daemon is about to stop, so the foreground CLI dies with its session.
-The helper is in its own session (`setsid` + `unref`), survives that shutdown,
-waits for the old pid to exit, and starts the same serve args. `PIXIP_INSIDE=1`
-and `PIXIP_SESSION_ID` are exported to every Pi child, so the CLI knows it is
-inside a session: `--when-idle` ignores the calling session (it is the one being
-replaced) and `pixip stop` from inside is turned into a forced restart instead of
-taking the service down. A shell outside pixip still stops for real.
+Daemon-wide `/reload` is the in-place step above soft refresh. It is daemon-wide:
+one request swaps assets/policy for every socket and reloads every live child.
+The gate refuses when any live session is not `idle`/`stopped`, has a pending UI
+request, is running bash, or has an unsettled turn; a refusal lists every blocker
+and changes nothing. `/reload` never forces.
 
-Nothing is lost that the JSONL does not already hold, and the client reconnects
-with backoff and its durable cursor.
+The transaction imports the next daemon code generation first and fails closed.
+`bin/pixip.ts` registers `src/reload/register.ts` as a Node resolve hook; it
+propagates `?gen=<N>` from the importing parent to every project `src/`
+specifier, so one import creates a fresh hub/server/hubControl graph while `bin/`
+and `node_modules/` stay shared. `src/reload/manager.ts` keeps the serving
+generation and a separate attempt counter. A failed import burns its attempt
+number, because Node caches a rejected dynamic import by URL; the next attempt
+after a fix uses a fresh URL. Nothing live changes before the import succeeds.
 
-A restart is announced before it happens. The helper stops the old daemon with
-`SIGUSR2` instead of `SIGTERM`; the daemon's handler broadcasts a
-`{"t":"restarting"}` frame to every live session socket, gives it ~50 ms to
-flush, and then closes. The browser shows `restarting…`, disables the composer,
-and keeps its durable entry cursor. If a turn was streaming when the frame
-arrived, the first reconnect snapshot appends a local (non-transcript) notice
-saying the turn was interrupted; it is never sent to Pi or persisted. The new
-daemon reattaches the same logical session on reconnect (spawning it from the
-JSONL or the index record), so the URL and transcript anchor stay stable.
-Unexpected daemon crashes have no frame; the same socket-close reconnect path
-still applies, without claiming a planned restart.
+The commit point then does `Object.setPrototypeOf(existingHub, NewHub.prototype)`
+and installs the new `state.impl = {handleHttp, handleSocket, refresh, reload}`.
+The listener, every open socket and every live child stay up: socket callbacks and
+HTTP requests read `state.impl` at call time, and hub methods stay `this`-state
+only (the former module-level `pendingReask` write map now lives on the hub). A
+new generation's hub methods therefore apply to an already-open socket, while
+wiring created once per connection (the socket handler chain) needs a reconnect
+to pick up a changed frame shape. Retired generations are retained only by the
+sockets/handlers that still reference them; the manager keeps the current
+generation plus report metadata, so old graphs are collectable once their
+sockets close.
+
+After the code swap it re-reads the client assets, re-applies policy/index (the
+same two-phase soft-refresh path), commits assets and rotates the browser nonce,
+then sends `reload` to every host child and respawns system-pi children through
+`respawnSession`. Child failures are reported per session and do not roll the
+code or assets back. A pre-import failure and a post-import/pre-commit failure
+both restore the previous prototype/impl; the report has `status: "error"` and
+the old generation keeps serving.
+
+The browser sends the nonce from the served `index.html` meta tag; the CLI uses
+`SIGUSR1` and polls `<data-dir>/pixip.reload.json`. A successful reload
+broadcasts an ephemeral `notice` frame (never JSONL), forces a page reload so
+every client picks up the new assets/nonce, and restores the row once from
+`sessionStorage`. The report includes the committed `generation`; changes to
+`bin/pixip.ts`, serve flags, `HubOptions` or the environment are not reloadable
+and add `requiresRestart` rather than pretending the swap covered them.
+
+A `/reload` refusal paints an inline card naming the blockers with an unchecked
+`Pause and resume sessions` opt-in. Checking it re-sends the reload with
+`pause: true`: the daemon steers each blocker with a pause prompt, waits up to
+30 s for the gate to clear, then runs the normal reload and steers each paused
+session back with `Reload is finished, please resume.`. If the gate does not
+clear, the card offers `Wait longer` or a cancel that either keeps the pause
+requests or sends the resume prompt immediately. The reload report names the
+resumed and skipped sessions.
+
+### `--watch`: debounced reload for development
+
+`--watch` is off by default and accepted on `run` and `daemon` (the detached
+start records it in the serve args). `src/reload/watch.ts` watches `src/` and
+`extensions/` recursively from the package root, ignores `node_modules`, `.git`,
+`fit/` and `tmp/`, and debounces bursts for 200 ms. It holds one reload in
+flight and coalesces edits that arrive during it into one pending rerun.
+
+It reads the same reload gate. When a session is busy it does not interrupt:
+it polls roughly once a second, logs the deferral once, and after 60 s broadcasts
+an ephemeral `watchDeferred` notice that paints a local card. Polling continues
+while the card is up, `Keep waiting` dismisses it until the next 60 s prompt, and
+`I'll reissue later` sends `watch_cancel` to drop the pending reload. A
+successful reload broadcasts the normal reload notice, so the card disappears
+with the page refresh. A failed reload keeps the daemon alive, logs the error
+and broadcasts a notice; the next file change retries, which is what makes a
+half-written TypeScript save harmless. The CLI owns the watcher and closes it on
+shutdown, so the test suite never starts one.
+
+### `/pixup-restart`: replace the process
+
+`/pixup-restart` is deliberately different: it replaces the daemon process
+through the detached restart helper. The browser control is user-only; it is an
+affordance, not an authentication boundary, consistent with the unauthenticated
+UI posture. A default request refuses and paints an inline card naming every
+blocking session (non-idle/`stopped`/`error`, pending UI, running bash); an
+unsettled thinking turn alone does not block. The card's Force action re-sends
+the request with `force` and interrupts those turns.
+
+The request travels as a `restart` WebSocket frame carrying the same reload
+nonce. The daemon persists the logical ids of sessions that were live, spawns
+`restart --detached`, and the old daemon announces `{"t":"restarting"}` before
+it closes. The browser reconnects with its durable cursor. The new daemon
+reattaches the persisted live set on startup, so the dashboard's hot/warm
+grouping does not visibly change; it then answers `/health` with the new `pid`
+and `startedAt`, and the client paints an ephemeral
+`daemon restarted (pid, uptime)` row. Nothing is lost that the JSONL does not
+already hold.
+
+A forced restart can opt into the same pause/resume flow through the card's
+`Pause and resume sessions` checkbox. The daemon steers the restart blockers,
+waits up to 30 s for them to settle, and only then spawns the restart helper; a
+timeout repaints the card with `Force restart anyway`, which records the pause
+plan and restarts immediately. The plan (child id, logical id, name, pre-op
+state) is persisted in `<data-dir>/pixip.pause.json` before the helper runs. The
+replacing daemon consumes it after reattaching the live set: a target that is
+missing, changed logical id, errored, or still busy is skipped and named, and
+only live `idle`/`stopped` sessions receive `Reload is finished, please
+resume.` as a steering prompt. The outcome rides on `/health` once so the
+reconnected client paints a single ephemeral row even though the broadcast
+happened before the socket came back.
+
+A hard restart from the CLI is still explicit: `pixip restart` refuses while a
+session is busy unless `--force`, or waits for every session to be idle with
+`--when-idle` (bounded by `--timeout`, default 300 s, exit 2 on timeout). It also
+works from inside a pixip session: the stop/start runs in a **detached helper**
+(`restart --detached`, stdio to `<data-dir>/pixip.log`), not in the CLI process,
+so it survives the shutdown of the Pi child that ran the bash tool. `PIXIP_INSIDE=1`
+and `PIXIP_SESSION_ID` are exported to every Pi child: `--when-idle` ignores the
+calling session (it is the one being replaced). `pixip stop` from inside a
+session now refuses with exit 2 and a user-only message instead of turning into
+a forced restart; a shell outside pixip still stops for real. Unexpected daemon
+crashes have no frame; the same socket-close reconnect path applies, without
+claiming a planned restart.
+
+### Backend and port boundary
+
+The default child is `pixip-pi-host`; `--use-system-pi` selects the legacy
+`pi --mode rpc` child and requires an explicit `--pi`/`PIXIP_PI`. `/reload` and
+`/pixup-restart` keep that choice: host children answer the `reload` command,
+system-pi children are respawned through the daemon's current host configuration,
+and `PIXIP_PI_HOST` is recorded in the state file so a restart reproduces it.
+There is no silent fallback to a global `pi`.
+
+Reload is a Node affordance, not a protocol requirement. A Rust port may
+implement the same user-visible contract as a supervised restart; the wire
+frames, JSONL truth and durable reconnect cursor stay the same.
 
 ## Built-in slash commands
 
@@ -522,6 +631,12 @@ The classifier in `src/client/commands.js` marks the RPC-drivable TUI built-ins;
 - `/export` → `export_html` writes under `<data-dir>/exports/`; the `export`
   frame carries download URLs for the HTML and the session's own JSONL, both
   served as attachments;
+- `/reload` → daemon-wide in-place reload of assets, policy and daemon code; the
+  browser sends the served nonce, refuses while blocked, then reloads the page
+  for the new assets/nonce;
+- `/pixup-restart [force]` → replace the daemon process. Without `force` it
+  refuses with an inline blocker card; the card's Force action sends `force`.
+  The reconnect paints the new pid/uptime row;
 - `/resume` → the session list; `/quit` → `stop` (detach) then the list.
 
 Every handler is only reachable through the `00` classifier, so the per-session
@@ -684,6 +799,8 @@ label is never applied over a name that appeared while the one-shot call ran.
 | switch green/yellow → window + resume delta                     | **7–43 ms**                       |
 | reconnect with durable cursor → delta                           | **5–24 ms**                       |
 | park/resume on one warm socket → delta (loopback)               | **~3 ms**                         |
+| soft refresh (`POST /api/refresh`, idle daemon)                 | **15.8 ms** median / 20.1 p95     |
+| `/reload` including daemon code generation swap                 | **152 ms** median / 152.6 p95     |
 | create → composer ready, alone                                  | **0.94–1.05 s**                   |
 | create → composer ready, another agent busy streaming           | **1.28 s**                        |
 | "load earlier" (200 entries from the JSONL, 17 MB session)      | 54–77 ms                          |
@@ -697,7 +814,12 @@ window.
 
 The reconnect/create rows are from `tools/reconnect-bench.mjs` on an 11 MB
 synthetic session, median of five socket runs against a local daemon with a real
-`pi` child. The bench also measures `park`/`resume` on one socket and a browser
+`pi` child. The reload rows are from `tools/reload-bench.mjs` on an idle daemon
+with no live children, five runs: the soft refresh baseline is 15.8 ms median
+(20.1 ms p95) and the full `/reload` with a fresh daemon generation is 152 ms
+median (152.6 ms p95), so the rough import/swap cost is ~136 ms. Reload is an
+explicit operator action, not on the prompt or event path. The bench also
+measures `park`/`resume` on one socket and a browser
 switch-away/back when Chromium is available. Before the bounded window, the authoritative `get_entries` call took
 4.6 s warm / 7.2 s cold and produced an 8.4 MB frame. The browser paint rows are
 older measurements from a synthetic 17 MB session; the bench measures paint too
@@ -767,59 +889,59 @@ still the only way to make the child itself fast, and is deliberately not done
 The hub and client are split along the same seams a Rust port needs, so the
 protocol path is still one obvious place to start:
 
-| module                                                                      | owns                                                                                                                       |
-| --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `src/backend.ts`                                                            | the spawn seam; the default backend creates `pi --mode rpc`, and `pixip-pi-host` can replace it without changing hub state |
-| `src/rpc.ts`                                                                | LF framing, response correlation, original-record passthrough                                                              |
-| `src/hub.ts`                                                                | public `Hub` facade and shared state; one method per operation                                                             |
-| `src/hubLive.ts`                                                            | one child: spawn, records/events, pending UI timers, footer, idle detach                                                   |
-| `src/hubStore.ts`                                                           | `sessions.json`, JSONL disk scan, archive/trash store, restore                                                             |
-| `src/hubControl.ts`                                                         | snapshot/history, prompt/steer, queue/bash, policy, soft refresh                                                           |
-| `src/hubSession.ts`                                                         | model/thinking/name, tree/fork/clone/import, `/new` re-key, UI replay                                                      |
-| `src/jsonl.ts`                                                              | pure parse/window/truncate/coverage helpers (unit-tested)                                                                  |
-| `src/inboxReport.ts`                                                        | hub-owned report directories, `parse5` allowlist validation, cleanup and serving lookup                                    |
-| `src/sessionIndex.ts`                                                       | index/archive/trash record shapes and normalization                                                                        |
-| `src/worktree.ts` / `src/hubWorktree.ts`                                    | the git boundary (detect/create/list/remove/dirty/merged) and hub list/remove safety rules                                 |
-| `src/wire.ts`                                                               | the frame constructors; the protocol table above is authoritative                                                          |
-| `src/client/app.js`                                                         | composition root: boot, DOM listeners, transport/navigation wiring; imports all features and exports nothing               |
-| `src/client/frames.js`                                                      | protocol adapter: one frame switch, routed to feature handlers, plus socket-close reconnect                                |
-| `src/client/navigation.js`                                                  | explicit route/navigation intents (`openSession`, `showList`, session cache helpers) installed by the composition root     |
-| `src/client/kernel/state.js`                                                | the one flat shared state container; slices are connection, dashboard, session, composer, addon/panel                      |
-| `src/client/kernel/ui.js`                                                   | the `$` helper and static element map for the shell in `index.html`                                                        |
-| `src/client/{sheetShell,clipboard,sendState}.js`                            | small seams: modal shell primitives, clipboard helpers, composer send-state selectors                                      |
-| `src/client/dashboard.js`                                                   | dashboard surface: list shell, archive/delete actions, settings entry                                                      |
-| `src/client/dashboardApi.js`                                                | dashboard HTTP surface: sessions, archives, directories, uploads                                                           |
-| `src/client/dashboardList.js`                                               | dashboard session list and cwd groups                                                                                      |
-| `src/client/dashboardPicker.js`                                             | directory picker sheet transitions and DOM                                                                                 |
-| `src/client/dashboardSettings.js`                                           | settings, archive and trash sheets                                                                                         |
-| `src/client/dashboardModel.js`                                              | pure dashboard view model (no DOM, HTTP or kernel state)                                                                   |
-| `src/client/dashboardWorktree.js`                                           | worktree create confirm and manage/delete sheet, including refusal states                                                  |
-| `src/client/session.js`                                                     | open/cache/restore and the new-session shell                                                                               |
-| `src/client/sessionEffects.js`                                              | snapshot/restart/status/re-key/socket-close frame effects                                                                  |
-| `src/client/sessionPlan.js`                                                 | pure frame-effect plans used by `session.js` and `sessionEffects.js`                                                       |
-| `src/client/transcript.js`                                                  | snapshot/windows, live events, footer, thinking state                                                                      |
-| `src/client/sheets.js`                                                      | app-owned modal sheets (settings/model/tree/export/directory/notices) and `notify` routing                                 |
-| `src/client/surface.js`                                                     | inline blocking-request surface: queue, collapse, Replace banner, answer/cancel                                            |
-| `src/client/surfaceQueue.js`                                                | DOM-free active/queued request queue used by `surface.js`                                                                  |
-| `src/client/panelHost.js`                                                   | generic `panel` renderer registry, fallback card, draft snapshot/restore in `sessionStorage`                               |
-| `src/client/a2ui.js`                                                        | A2UI adapter: lazy bundle import, v1.0 lifecycle, action JSON, fallback and draft hooks                                    |
-| `src/client/vendor/a2ui.esm.js`                                             | prebuilt A2UI v1.0 Lit renderer + Basic catalog, lazy-loaded; license and rebuild note beside it                           |
-| `src/client/composer.js`                                                    | composer orchestration, built-in commands                                                                                  |
-| `src/client/composerAttachments.js`                                         | attachment choose/render/prepare/upload lifecycle                                                                          |
-| `src/client/composerBash.js`                                                | optimistic bash cards plus the hub's authoritative result                                                                  |
-| `src/client/scroll.js`                                                      | shared transcript scroll seam: the only writer of the `#log` reading position                                              |
-| `src/client/menuView.js`                                                    | command-menu visibility seam shared by composer/session/dashboard                                                          |
-| `src/client/composerInput.js`                                               | composer field clear/resize primitives shared by composer and bash                                                         |
-| `src/client/queueView.js`                                                   | queue-chip rendering shared by dashboard/session/menu/transcript                                                           |
-| `src/client/transcriptView.js`                                              | append-only transcript DOM primitives other features may use                                                               |
-| `src/client/sessionView.js`                                                 | header/status/footer chrome and the busy indicator                                                                         |
-| `src/client/configure.js`                                                   | `installDeps` for the per-module `configureX({ ...callbacks })` boundaries                                                 |
-| `src/client/{addonUi,transcriptScale,transcriptScroll,transcriptWindow}.js` | addon status/widget cache, transcript text scale, pure scroll math, window planning                                        |
-| `src/client/{directoryPicker,sessionCache,sessionInfo,sessionGroups}.js`    | pure path math, session cache persistence, session info, cwd grouping                                                      |
-| `src/client/{markdown,render,attachments,commands,tree,footer}.js`          | pure/markup helpers: markdown, HTML painting, attachment encoding, command catalog, session tree, footer formatting        |     | `src/client/{menu,controls,toast,transport}.js` | menus/queue, scale/refresh controls, notices, keyed websocket manager with park/resume |
-| `tools/check-client-imports.mjs`                                            | client import-graph guard: cycles, `app.js` imports and feature-cluster boundaries                                         |
-| `tools/browser-check.mjs`                                                   | scripted client flows at 390x844 and 1280x900 against an in-process fixture Hub                                            |
-| `tools/shot.mjs` / `tools/build-a2ui.mjs`                                   | screenshot/layout probe, and the pinned A2UI bundle rebuild                                                                |
+| module                                                                      | owns                                                                                                                                   |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/backend.ts`                                                            | the spawn seam; the hub defaults to `pixip-pi-host` and `--use-system-pi` selects the `pi --mode rpc` child without changing hub state |
+| `src/rpc.ts`                                                                | LF framing, response correlation, original-record passthrough                                                                          |
+| `src/hub.ts`                                                                | public `Hub` facade and shared state; one method per operation                                                                         |
+| `src/hubLive.ts`                                                            | one child: spawn, records/events, pending UI timers, footer, idle detach                                                               |
+| `src/hubStore.ts`                                                           | `sessions.json`, JSONL disk scan, archive/trash store, restore                                                                         |
+| `src/hubControl.ts`                                                         | snapshot/history, prompt/steer, queue/bash, policy, soft refresh                                                                       |
+| `src/hubSession.ts`                                                         | model/thinking/name, tree/fork/clone/import, `/new` re-key, UI replay                                                                  |
+| `src/jsonl.ts`                                                              | pure parse/window/truncate/coverage helpers (unit-tested)                                                                              |
+| `src/inboxReport.ts`                                                        | hub-owned report directories, `parse5` allowlist validation, cleanup and serving lookup                                                |
+| `src/sessionIndex.ts`                                                       | index/archive/trash record shapes and normalization                                                                                    |
+| `src/worktree.ts` / `src/hubWorktree.ts`                                    | the git boundary (detect/create/list/remove/dirty/merged) and hub list/remove safety rules                                             |
+| `src/wire.ts`                                                               | the frame constructors; the protocol table above is authoritative                                                                      |
+| `src/client/app.js`                                                         | composition root: boot, DOM listeners, transport/navigation wiring; imports all features and exports nothing                           |
+| `src/client/frames.js`                                                      | protocol adapter: one frame switch, routed to feature handlers, plus socket-close reconnect                                            |
+| `src/client/navigation.js`                                                  | explicit route/navigation intents (`openSession`, `showList`, session cache helpers) installed by the composition root                 |
+| `src/client/kernel/state.js`                                                | the one flat shared state container; slices are connection, dashboard, session, composer, addon/panel                                  |
+| `src/client/kernel/ui.js`                                                   | the `$` helper and static element map for the shell in `index.html`                                                                    |
+| `src/client/{sheetShell,clipboard,sendState}.js`                            | small seams: modal shell primitives, clipboard helpers, composer send-state selectors                                                  |
+| `src/client/dashboard.js`                                                   | dashboard surface: list shell, archive/delete actions, settings entry                                                                  |
+| `src/client/dashboardApi.js`                                                | dashboard HTTP surface: sessions, archives, directories, uploads                                                                       |
+| `src/client/dashboardList.js`                                               | dashboard session list and cwd groups                                                                                                  |
+| `src/client/dashboardPicker.js`                                             | directory picker sheet transitions and DOM                                                                                             |
+| `src/client/dashboardSettings.js`                                           | settings, archive and trash sheets                                                                                                     |
+| `src/client/dashboardModel.js`                                              | pure dashboard view model (no DOM, HTTP or kernel state)                                                                               |
+| `src/client/dashboardWorktree.js`                                           | worktree create confirm and manage/delete sheet, including refusal states                                                              |
+| `src/client/session.js`                                                     | open/cache/restore and the new-session shell                                                                                           |
+| `src/client/sessionEffects.js`                                              | snapshot/restart/status/re-key/socket-close frame effects                                                                              |
+| `src/client/sessionPlan.js`                                                 | pure frame-effect plans used by `session.js` and `sessionEffects.js`                                                                   |
+| `src/client/transcript.js`                                                  | snapshot/windows, live events, footer, thinking state                                                                                  |
+| `src/client/sheets.js`                                                      | app-owned modal sheets (settings/model/tree/export/directory/notices) and `notify` routing                                             |
+| `src/client/surface.js`                                                     | inline blocking-request surface: queue, collapse, Replace banner, answer/cancel                                                        |
+| `src/client/surfaceQueue.js`                                                | DOM-free active/queued request queue used by `surface.js`                                                                              |
+| `src/client/panelHost.js`                                                   | generic `panel` renderer registry, fallback card, draft snapshot/restore in `sessionStorage`                                           |
+| `src/client/a2ui.js`                                                        | A2UI adapter: lazy bundle import, v1.0 lifecycle, action JSON, fallback and draft hooks                                                |
+| `src/client/vendor/a2ui.esm.js`                                             | prebuilt A2UI v1.0 Lit renderer + Basic catalog, lazy-loaded; license and rebuild note beside it                                       |
+| `src/client/composer.js`                                                    | composer orchestration, built-in commands                                                                                              |
+| `src/client/composerAttachments.js`                                         | attachment choose/render/prepare/upload lifecycle                                                                                      |
+| `src/client/composerBash.js`                                                | optimistic bash cards plus the hub's authoritative result                                                                              |
+| `src/client/scroll.js`                                                      | shared transcript scroll seam: the only writer of the `#log` reading position                                                          |
+| `src/client/menuView.js`                                                    | command-menu visibility seam shared by composer/session/dashboard                                                                      |
+| `src/client/composerInput.js`                                               | composer field clear/resize primitives shared by composer and bash                                                                     |
+| `src/client/queueView.js`                                                   | queue-chip rendering shared by dashboard/session/menu/transcript                                                                       |
+| `src/client/transcriptView.js`                                              | append-only transcript DOM primitives other features may use                                                                           |
+| `src/client/sessionView.js`                                                 | header/status/footer chrome and the busy indicator                                                                                     |
+| `src/client/configure.js`                                                   | `installDeps` for the per-module `configureX({ ...callbacks })` boundaries                                                             |
+| `src/client/{addonUi,transcriptScale,transcriptScroll,transcriptWindow}.js` | addon status/widget cache, transcript text scale, pure scroll math, window planning                                                    |
+| `src/client/{directoryPicker,sessionCache,sessionInfo,sessionGroups}.js`    | pure path math, session cache persistence, session info, cwd grouping                                                                  |
+| `src/client/{markdown,render,attachments,commands,tree,footer}.js`          | pure/markup helpers: markdown, HTML painting, attachment encoding, command catalog, session tree, footer formatting                    |     | `src/client/{menu,controls,toast,transport}.js` | menus/queue, scale/refresh controls, notices, keyed websocket manager with park/resume |
+| `tools/check-client-imports.mjs`                                            | client import-graph guard: cycles, `app.js` imports and feature-cluster boundaries                                                     |
+| `tools/browser-check.mjs`                                                   | scripted client flows at 390x844 and 1280x900 against an in-process fixture Hub                                                        |
+| `tools/shot.mjs` / `tools/build-a2ui.mjs`                                   | screenshot/layout probe, and the pinned A2UI bundle rebuild                                                                            |
 
 CSS is split into `base`, `transcript`, `list`, `status`, `composer`, `sheets` and
 `surface` files loaded in that order: one asset set, no bundler and no
@@ -871,7 +993,8 @@ The split exists so this is mechanical:
 | `src/rpc.ts`    | `tokio::process::Child` + `tokio_util::codec::LinesCodec` (LF only, strip `\r`), `HashMap<Id, oneshot::Sender<Response>>`; do **not** use a Unicode-aware line reader |
 | `src/hub.ts`    | `HashMap<SessionId, Session>` behind one `mpsc` command loop; `SessionState` as an enum; `tokio::time::sleep` for idle                                                |
 | `src/wire.ts`   | `#[serde(tag = "t")]` enums; event passthrough with `RawValue`                                                                                                        |
-| `src/server.ts` | `axum` router + `axum::extract::ws`; `include_bytes!` for the static client                                                                                           |
+| `src/server.ts` | `axum` router + `axum::extract::ws`; `include_bytes!` for the static client; reload is a supervised restart, not a module swap                                        |
+| `src/reload/*`  | Node-only: generation-tagged `import()` plus `module.register`. The port may discard it and restart under supervision while keeping the same user-visible contract.   |
 | `src/client/*`  | unchanged (static assets)                                                                                                                                             |
 | tests           | `cargo test` for framing/frames; the same JS tests keep guarding the client                                                                                           |
 
@@ -881,15 +1004,18 @@ per child, and raw bytes/strings on the hot path.
 
 ## Open design questions
 
+Reload/restart closed the old “hub restart kills live children” question: an
+in-place `/reload` keeps children and sockets, while `/pixup-restart` persists
+the live set and the new daemon reattaches it, so the dashboard's hot/warm
+grouping does not change. There is no separate resume-all-on-start path.
+
 1. Cold attach is 1.3 s. Warm pool of one idle child per cwd? The bounded JSONL
    window hides it for reads, but a create still waits for the child; the pool
    would remove that wait (see the Pi hot-swap spike in the ticket board).
-2. Hub restart kills live children. Resume-all-on-start (by last activity) or
-   leave them stopped?
-3. Worktree create/list/remove/prune are implemented across the dashboard, REST
+2. Worktree create/list/remove/prune are implemented across the dashboard, REST
    and CLI; the remaining worktree gaps belong to the options TOML and desktop
    surface tickets, not the lifecycle.
-4. Ordering: snapshot + live events have a small race window; a durable cursor
+3. Ordering: snapshot + live events have a small race window; a durable cursor
    (`get_entries?since=<leafId>`) on reconnect closes it properly.
-5. Multi-client: today each socket is independent; two phones on one session both
+4. Multi-client: today each socket is independent; two phones on one session both
    get full streams (fine) but neither sees the other's optimistic input.

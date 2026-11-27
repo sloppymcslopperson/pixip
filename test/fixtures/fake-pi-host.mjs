@@ -2,7 +2,7 @@
 // Minimal `pixip-pi-host` peer for tests. It speaks the host's protocol deltas
 // (`hello`, blocking `panel`) and the subset of Pi RPC the hub uses. Behaviour is
 // driven by FAKE_HOST_* env vars; it never touches the real agent or sessions.
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { StringDecoder } from "node:string_decoder";
 
@@ -38,8 +38,16 @@ log({ type: "spawn", args: argv });
 
 const sessionDir = option("--session-dir") ?? process.cwd();
 let sessionName = option("--name");
-const sessionId = env.FAKE_HOST_SESSION_ID ?? randomUUID();
 const requested = option("--session");
+let sessionId = env.FAKE_HOST_SESSION_ID;
+if (!sessionId && requested && existsSync(requested)) {
+	try {
+		sessionId = JSON.parse(readFileSync(requested, "utf8").split("\n")[0] ?? "{}").id;
+	} catch {
+		// unreadable file: fall through to a fresh id
+	}
+}
+sessionId ??= randomUUID();
 const models = [{ id: "fake-model", provider: "fake", contextWindow: 100_000, reasoning: false }];
 const entries = JSON.parse(env.FAKE_HOST_ENTRIES ?? "[]");
 const onPrompt = JSON.parse(env.FAKE_HOST_ON_PROMPT ?? "[]");
@@ -48,7 +56,7 @@ send({
 	type: "hello",
 	protocol: 1,
 	piVersion: "fake-host",
-	capabilities: ["panel"],
+	capabilities: ["panel", "reload"],
 });
 
 function handle(line) {
@@ -60,6 +68,11 @@ function handle(line) {
 		return;
 	}
 	switch (command.type) {
+		case "reload":
+			log({ type: "reload", pid: process.pid });
+			return env.FAKE_HOST_RELOAD_FAIL === "1"
+				? send({ id: command.id, type: "response", command: "reload", success: false, error: "reload failed" })
+				: ok(command.id, "reload");
 		case "get_state":
 			return ok(command.id, "get_state", {
 				sessionId,

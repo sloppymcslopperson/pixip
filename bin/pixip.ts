@@ -1,14 +1,18 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
-import { mkdir, open } from "node:fs/promises";
-import { createRequire } from "node:module";
+import { closeSync, existsSync, openSync, readFileSync, statSync } from "node:fs";
+import { mkdir, open, stat } from "node:fs/promises";
+import { createRequire, register } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Hub } from "../src/hub.ts";
 import type { RemoveWorktreeResult, WorktreeListing } from "../src/hub.ts";
-import { startServer } from "../src/server.ts";
+import type { RunningServer } from "../src/server.ts";
+import { GenerationManager } from "../src/reload/manager.ts";
+import { startWatch, type WatchHandle } from "../src/reload/watch.ts";
+import { formatPauseReport, resumePaused, takePauseSet, writePauseSet, type PauseTarget } from "../src/reload/pause.ts";
+import type { ReloadReport } from "../src/reload.ts";
 import {
 	busySessions,
 	clearDaemonState,
@@ -18,6 +22,7 @@ import {
 	fetchHealth,
 	fetchSessions,
 	logSize,
+	liveSessionIds,
 	portAvailable,
 	readDaemonState,
 	readLogTail,
@@ -25,14 +30,21 @@ import {
 	runningDaemon,
 	startDaemon,
 	stopDaemon,
+	takeResumeSet,
 	waitForHealth,
 	writeDaemonState,
+	writeReloadResult,
+	writeResumeSet,
 } from "../src/daemon.ts";
 import { detectRepo, pruneWorktrees, realCwd } from "../src/worktree.ts";
 import type { WorktreeEntry } from "../src/worktree.ts";
-import type { SessionInfo } from "../src/wire.ts";
+import { frameNotice, type SessionInfo } from "../src/wire.ts";
 import { INBOX_PURPOSES, type InboxList, type InboxView } from "../src/inbox.ts";
 import { spawnEnv } from "../src/spawnEnv.ts";
+
+// Install the generation-aware resolve hook before the serve path imports any
+// reloadable module. CLI-only imports (daemon, worktree, inbox) stay shared.
+register(new URL("../src/reload/register.ts", import.meta.url).href, import.meta.url);
 
 /**
  * pixip — supervisor + web UI for Pi sessions.
@@ -42,19 +54,21 @@ import { spawnEnv } from "../src/spawnEnv.ts";
  * `~/.agent/sessions`. The daemon's pid, state and log also live there, so two
  * instances on different `--port`/`--data-dir` never collide.
  *
- * Bare `pixip` serves in the foreground (as before). `start` detaches the same
- * serve path; `stop`/`status`/`logs`/`refresh`/`restart` manage it.
+ * Bare `pixip` and `pixip run` serve in the foreground. `daemon` detaches the
+ * same serve path; `stop`/`status`/`logs`/`refresh`/`restart` manage it.
  */
 
 type Command =
-	"serve" | "start" | "stop" | "status" | "logs" | "refresh" | "restart" | "worktree" | "protect" | "inbox";
+	"run" | "daemon" | "stop" | "status" | "logs" | "refresh" | "reload" | "restart" | "worktree" | "protect" | "inbox";
 
 const SUBCOMMANDS = new Set<string>([
-	"start",
+	"run",
+	"daemon",
 	"stop",
 	"status",
 	"logs",
 	"refresh",
+	"reload",
 	"restart",
 	"worktree",
 	"protect",
@@ -66,7 +80,9 @@ interface Options {
 	port: number;
 	dataDir: string;
 	piBin: string;
-	/** `--pi-host [path]` / `PIXIP_PI_HOST`; `""` means resolve the installed host bin. */
+	/** `--use-system-pi`: spawn the legacy `pi --mode rpc` backend. */
+	useSystemPi: boolean;
+	/** `PIXIP_PI_HOST`: host executable path; undefined resolves the installed bin. */
 	piHost?: string;
 	idleMs: number;
 	/** Blocking UI timeout with no browser attached; 0 disables. */
@@ -77,6 +93,8 @@ interface Options {
 	pendingUiMoreTimeMs: number;
 	titleModel: string;
 	dev: boolean;
+	/** `--watch`: reload after a debounced change in src/ or extensions/. */
+	watch: boolean;
 	allowCommands: string[];
 	denyCommands: string[];
 	noBash: boolean;
@@ -138,13 +156,15 @@ function parseArgs(argv: string[]): Options {
 		port: 8137,
 		dataDir: resolve(process.env["PIXIP_DATA_DIR"] ?? "tmp/dev"),
 		piBin: "pi",
+		useSystemPi: false,
 		piHost: undefined,
 		idleMs: 15 * 60_000,
 		pendingUiTimeoutMs: 5 * 60 * 60_000,
 		pendingUiOpenTimeoutMs: 10 * 60 * 60_000,
 		pendingUiMoreTimeMs: 2 * 60_000,
 		titleModel: process.env["PIXIP_TITLE_MODEL"] ?? "",
-		dev: false,
+		dev: true,
+		watch: false,
 		allowCommands: [],
 		denyCommands: [],
 		noBash: false,
@@ -165,6 +185,7 @@ function parseArgs(argv: string[]): Options {
 		detached: false,
 		positionals: [],
 	};
+	let piFlag: string | undefined;
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index];
 		const next = () => {
@@ -172,10 +193,6 @@ function parseArgs(argv: string[]): Options {
 			if (value === undefined) throw new Error(`${arg} needs a value`);
 			return value;
 		};
-		if (arg !== undefined && arg.startsWith("--pi-host=")) {
-			options.piHost = arg.slice("--pi-host=".length);
-			continue;
-		}
 		switch (arg) {
 			case "--host":
 				options.host = next();
@@ -187,19 +204,12 @@ function parseArgs(argv: string[]): Options {
 				options.dataDir = resolve(next());
 				break;
 			case "--pi":
-				options.piBin = next();
+				piFlag = next();
+				options.piBin = piFlag;
 				break;
-			case "--pi-host": {
-				// The value is optional: a bare flag means "resolve the installed host".
-				const value = argv[index + 1];
-				if (value !== undefined && !value.startsWith("-")) {
-					options.piHost = value;
-					index += 1;
-				} else {
-					options.piHost = "";
-				}
+			case "--use-system-pi":
+				options.useSystemPi = true;
 				break;
-			}
 			case "--idle-ms":
 				options.idleMs = Number(next());
 				break;
@@ -215,8 +225,11 @@ function parseArgs(argv: string[]): Options {
 			case "--title-model":
 				options.titleModel = next();
 				break;
-			case "--dev":
-				options.dev = true;
+			case "--serious-mode":
+				options.dev = false;
+				break;
+			case "--watch":
+				options.watch = true;
 				break;
 			case "--allow-command":
 				options.allowCommands.push(next());
@@ -304,8 +317,29 @@ function parseArgs(argv: string[]): Options {
 	if (!Number.isInteger(options.inboxLimit) || options.inboxLimit < 1) {
 		throw new Error("--inbox-limit must be an integer of 1 or more");
 	}
-	if (options.piHost === undefined && process.env["PIXIP_PI_HOST"]) {
-		options.piHost = process.env["PIXIP_PI_HOST"];
+	const piEnv = process.env["PIXIP_PI"]?.trim() || undefined;
+	const hostEnv = process.env["PIXIP_PI_HOST"]?.trim() || undefined;
+	if (!options.useSystemPi) {
+		if (piFlag !== undefined || piEnv !== undefined) {
+			throw new Error("--pi and PIXIP_PI require --use-system-pi");
+		}
+		options.piHost = hostEnv;
+		return options;
+	}
+
+	// System mode never uses the host override. An explicit path beats the
+	// literal default `pi`; when both are explicit, the flag wins.
+	options.piHost = undefined;
+	const flagIsDefault = piFlag === undefined || piFlag === "pi";
+	const envIsDefault = piEnv === undefined || piEnv === "pi";
+	if (piFlag !== undefined && piEnv !== undefined) {
+		options.piBin = flagIsDefault && !envIsDefault ? piEnv : piFlag;
+	} else if (piFlag !== undefined) {
+		options.piBin = piFlag;
+	} else if (piEnv !== undefined) {
+		options.piBin = piEnv;
+	} else {
+		throw new Error("--use-system-pi needs --pi <path> or PIXIP_PI");
 	}
 	return options;
 }
@@ -316,10 +350,12 @@ function printHelp(): void {
   --data-dir <path>   isolation root; sessions, pixip.pid, pixip.state.json
                       and pixip.log live here (default ./tmp/dev), never
                       ~/.agent/sessions
-  --pi <path>         pi executable (default: pi from PATH)
-  --pi-host [path]    spawn pixip-pi-host instead of pi; no value resolves the
-                      installed workspace bin, a value overrides it
-                      (env: PIXIP_PI_HOST). Legacy --pi stays the default.
+  --use-system-pi     spawn the legacy pi --mode rpc backend instead of
+                      pixip-pi-host; requires --pi or PIXIP_PI
+  --pi <path>         system Pi executable (only with --use-system-pi;
+                      default: PIXIP_PI, then required)
+                      Host binary override: PIXIP_PI_HOST (unset resolves the
+                      installed pixip-pi-host workspace bin)
   --idle-ms <ms>      detach an idle session after this long, keeping its JSONL
                       for resume (default 900000; 0 disables)
   --pending-ui-timeout-ms <ms>
@@ -333,7 +369,12 @@ function printHelp(): void {
                       (default 120000 = 2m; 0 disables)
   --title-model <p/id> model for the automatic 3-5 word session label
                       (default: the session's current model; env: PIXIP_TITLE_MODEL)
-  --dev               re-read client assets per request (no restart on CSS/JS edits)
+  --serious-mode      host pixip as a stable service: serve client assets from
+                      the startup snapshot and disable the dev panel fixture.
+                      Dev mode (per-request asset reads) is the default
+  --watch             after a 200 ms debounce, reload when src/ or extensions/
+                      changes; busy sessions defer instead of interrupting.
+                      Off by default (an explicit /reload is the default trigger)
   --inbox-limit <n>   maximum retained inbox messages (default 200; archived
                       then read messages are evicted first)
   --inbox-token <t>   require Authorization: Bearer <t> on the inbox API and
@@ -349,23 +390,29 @@ function printHelp(): void {
 	const usage = `Usage: pixip [command] [options]
 
 Commands:
-  (none)|serve        serve in the foreground (default)
-  start               detach a daemon, write the pid/state, print the URL
+  (none)|run          serve in the foreground (default)
+  daemon              detach a daemon, write the pid/state, print the URL
   stop                SIGTERM the daemon and clean its pid file. From inside a
-                      pixip session this restarts instead, so an agent cannot
-                      take the service down; use a shell outside pixip to stop it
+                      pixip session this refuses (exit 2) with a user-only
+                      message; use /pixup-restart from the browser to replace
+                      the daemon
   status [--json]     pid, URL, uptime and session count; non-zero when down
   logs [-f] [--lines] tail <data-dir>/pixip.log (-f follows)
   refresh             soft reload: assets, command policy, session index and the
                       catalog; live children and sockets stay up
+  reload              daemon-wide in-place reload: refuse while any session is
+                      busy, then re-read assets/policy and reload every live
+                      child. Writes <data-dir>/pixip.reload.json (exit 1 when
+                      refused, exit 2 from inside an agent)
   restart [--force] [--when-idle] [--timeout <s>]
-                      replace the process; sessions survive in their JSONL.
-                      The stop/start runs in a detached helper, so this also
-                      works when issued from inside a pixip session (that turn
-                      ends, the daemon comes back). Refuses while a session is
-                      busy unless --force; --when-idle waits for the other
-                      sessions (the calling one does not count) up to --timeout
-                      (default 300s, exit 2)
+                      replace the process; sessions survive in their JSONL and
+                      the new daemon reattaches the ones that were live. The
+                      stop/start runs in a detached helper, so this also works
+                      when issued from inside a pixip session (that turn ends,
+                      the daemon comes back). Refuses while a session is busy
+                      unless --force; --when-idle waits for the other sessions
+                      (the calling one does not count) up to --timeout (default
+                      300s, exit 2)
   protect [<session-id>] [--off] [--json]
                       mark one session as protected from the dashboard bulk
                       archive (or clear it with --off). Defaults to the caller's
@@ -447,8 +494,6 @@ function serveArgs(options: Options): string[] {
 		String(options.port),
 		"--data-dir",
 		options.dataDir,
-		"--pi",
-		options.piBin,
 		"--idle-ms",
 		String(options.idleMs),
 		"--pending-ui-timeout-ms",
@@ -461,11 +506,9 @@ function serveArgs(options: Options): string[] {
 		String(options.inboxLimit),
 	];
 	if (options.inboxToken) args.push("--inbox-token", options.inboxToken);
-	if (options.piHost !== undefined) {
-		args.push("--pi-host");
-		if (options.piHost) args.push(options.piHost);
-	}
-	if (options.dev) args.push("--dev");
+	if (options.useSystemPi) args.push("--use-system-pi", "--pi", options.piBin);
+	if (!options.dev) args.push("--serious-mode");
+	if (options.watch) args.push("--watch");
 	for (const name of options.allowCommands) args.push("--allow-command", name);
 	for (const name of options.denyCommands) args.push("--deny-command", name);
 	if (options.noBash) args.push("--no-bash");
@@ -474,7 +517,12 @@ function serveArgs(options: Options): string[] {
 
 async function main(): Promise<void> {
 	const argv = process.argv.slice(2);
-	const command: Command = SUBCOMMANDS.has(argv[0] ?? "") ? (argv.shift() as Command) : "serve";
+	const first = argv[0];
+	let command: Command = "run";
+	if (first !== undefined && !first.startsWith("-")) {
+		if (!SUBCOMMANDS.has(first)) throw new Error(`unknown command ${first}`);
+		command = argv.shift() as Command;
+	}
 	if (command === "worktree") {
 		const action = argv.shift();
 		if (!action || action === "--help" || action === "-h" || action === "help") {
@@ -498,8 +546,8 @@ async function main(): Promise<void> {
 		throw new Error(`unknown argument ${options.positionals[0]}`);
 	}
 	switch (command) {
-		case "start":
-			return await cmdStart(options);
+		case "daemon":
+			return await cmdDaemon(options);
 		case "stop":
 			return await cmdStop(options);
 		case "status":
@@ -508,6 +556,8 @@ async function main(): Promise<void> {
 			return await cmdLogs(options);
 		case "refresh":
 			return await cmdRefresh(options);
+		case "reload":
+			return await cmdReload(options);
 		case "restart":
 			return await cmdRestart(options);
 		case "protect":
@@ -523,7 +573,7 @@ async function main(): Promise<void> {
 function resolvePiHost(value: string | undefined): string {
 	if (value) {
 		const path = resolve(value);
-		if (!existsSync(path)) throw new Error(`--pi-host not found: ${path}`);
+		if (!existsSync(path)) throw new Error(`PIXIP_PI_HOST not found: ${path}`);
 		return path;
 	}
 	const require = createRequire(import.meta.url);
@@ -531,7 +581,7 @@ function resolvePiHost(value: string | undefined): string {
 	try {
 		packagePath = require.resolve("pixip-pi-host/package.json");
 	} catch {
-		throw new Error("pixip-pi-host is not installed; pass --pi-host <path> or install the workspace");
+		throw new Error("pixip-pi-host is not installed; set PIXIP_PI_HOST=<path> or install the workspace");
 	}
 	const pkg = JSON.parse(readFileSync(packagePath, "utf8")) as {
 		bin?: string | Record<string, string>;
@@ -543,9 +593,14 @@ function resolvePiHost(value: string | undefined): string {
 	return path;
 }
 
+/** Environment a detached daemon needs in addition to its argv. */
+function daemonEnv(options: Options): Record<string, string> {
+	return !options.useSystemPi && options.piHost ? { PIXIP_PI_HOST: options.piHost } : {};
+}
+
 async function serve(options: Options): Promise<void> {
 	const paths = daemonPaths(options.dataDir);
-	const piHostBin = options.piHost === undefined ? undefined : resolvePiHost(options.piHost || undefined);
+	const piHostBin = options.useSystemPi ? undefined : resolvePiHost(options.piHost);
 	await mkdir(join(options.dataDir, "sessions"), { recursive: true });
 
 	const existing = await runningDaemon(options.dataDir);
@@ -553,7 +608,18 @@ async function serve(options: Options): Promise<void> {
 		throw new Error(`another pixip is running for ${options.dataDir} (pid ${existing.pid}); stop it first`);
 	}
 
-	const hub = new Hub({
+	const entryPath = fileURLToPath(import.meta.url);
+	const entryMtime = statSync(entryPath).mtimeMs;
+	const startupArgs = serveArgs(options).join("\u0000");
+	const loadGeneration = async (generation: number) => {
+		const suffix = generation === 0 ? "" : `?gen=${generation}`;
+		const hubModule = await import(new URL(`../src/hub.ts${suffix}`, import.meta.url).href);
+		const serverModule = await import(new URL(`../src/server.ts${suffix}`, import.meta.url).href);
+		return { hub: hubModule, server: serverModule };
+	};
+
+	const initial = await loadGeneration(0);
+	const hub = new initial.hub.Hub({
 		piBin: options.piBin,
 		piHostBin,
 		sessionsDir: join(options.dataDir, "sessions"),
@@ -575,16 +641,49 @@ async function serve(options: Options): Promise<void> {
 		log,
 	});
 
+	const running: { server?: RunningServer } = {};
+	let watchHandle: WatchHandle | undefined;
+	const manager = new GenerationManager({
+		initial,
+		load: loadGeneration,
+		apply: (next: any) => running.server?.applyGeneration(next),
+		rollback: (previous: any) => running.server?.rollbackGeneration(previous),
+		requiresRestart: () => {
+			if (statSync(entryPath).mtimeMs !== entryMtime) return "bin/pixip.ts changed";
+			if (serveArgs(options).join("\u0000") !== startupArgs) return "serve flags changed";
+			return undefined;
+		},
+	});
+
 	const clientDir = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "client");
-	const server = await startServer({
+	const server = await initial.server.startServer({
 		host: options.host,
 		port: options.port,
 		hub,
 		clientDir,
 		log,
 		dev: options.dev,
+		reloadCode: manager,
+		watchCancel: () => watchHandle?.cancel(),
+		restart: async (pause?: PauseTarget[]) => {
+			await writePauseSet(options.dataDir, pause ?? []);
+			await writeResumeSet(options.dataDir, liveSessionIds(await hub.list()));
+			spawnRestartHelper(options);
+		},
 	});
+	running.server = server;
 	hub.setDaemonUrl(server.url);
+	if (options.watch) {
+		const rootDir = fileURLToPath(new URL("..", import.meta.url));
+		watchHandle = startWatch({
+			roots: [join(rootDir, "src"), join(rootDir, "extensions")],
+			reload: () => server.reload(),
+			blockers: () => hub.reloadBlockers(),
+			log,
+			notice: (text, extra) => server.broadcast(frameNotice(text, extra)),
+		});
+		log(`watch mode: ${options.dev ? "dev" : "serious"} assets, src/ and extensions/`);
+	}
 
 	// The state file is what `status`, `stop`, `refresh` and `restart` read; it
 	// records the actual port (so `--port 0` works) and the serve flags.
@@ -596,13 +695,26 @@ async function serve(options: Options): Promise<void> {
 		startedAt: new Date().toISOString(),
 		dataDir: options.dataDir,
 		args: serveArgs(options),
+		env: daemonEnv(options),
 	});
 
 	log(`pixip listening on ${server.url}`);
 	log(`pid ${process.pid}, data dir ${options.dataDir}, log ${paths.log}`);
+	log(
+		options.dev
+			? "dev mode: client assets re-read per request"
+			: "serious mode: client assets served from the startup snapshot",
+	);
+	if (options.useSystemPi) {
+		log(`warning: using system pi at ${options.piBin}; pixip-pi-host capabilities such as the panel are unavailable`);
+	}
 	if (options.host !== "127.0.0.1" && options.host !== "::1") {
 		log(`warning: bound to ${options.host}; this UI has no authentication`);
 	}
+
+	// A restart persists the sessions that were live so the new daemon can put
+	// the dashboard's hot/warm set back before the browser even reconnects.
+	void resumeRestartedSessions(hub, options.dataDir, server);
 
 	const softRefresh = async (label: string) => {
 		try {
@@ -614,10 +726,29 @@ async function serve(options: Options): Promise<void> {
 	};
 	process.on("SIGHUP", () => void softRefresh("SIGHUP"));
 
+	let reloadChain: Promise<unknown> = Promise.resolve();
+	const daemonReload = (label: string) => {
+		const run = reloadChain.then(() => server.reload());
+		reloadChain = run.then(
+			() => undefined,
+			() => undefined,
+		);
+		void run
+			.then(async (report) => {
+				log(`${label}: ${report.message}`);
+				await writeReloadResult(options.dataDir, report).catch((error: unknown) => {
+					log(`${label}: could not write reload result: ${(error as Error).message}`);
+				});
+			})
+			.catch((error: unknown) => log(`${label} failed: ${(error as Error).message}`));
+	};
+	process.on("SIGUSR1", () => daemonReload("SIGUSR1"));
+
 	let closing = false;
 	const shutdown = async (signal: string, restart = false) => {
 		if (closing) return;
 		closing = true;
+		watchHandle?.close();
 		log(`${signal}: shutting down`);
 		if (restart) {
 			// SIGUSR2 means the helper is replacing this daemon: give live sockets
@@ -637,29 +768,31 @@ async function serve(options: Options): Promise<void> {
 
 // --------------------------------------------------------------- lifecycle
 
-async function cmdStart(options: Options): Promise<void> {
+async function cmdDaemon(options: Options): Promise<void> {
 	await mkdir(join(options.dataDir, "sessions"), { recursive: true });
 	const running = await runningDaemon(options.dataDir);
 	if (running) throw new Error(`pixip is already running for ${options.dataDir} (pid ${running.pid})`);
 	if (!(await portAvailable(options.host, options.port))) {
 		throw new Error(`port ${options.port} is already in use on ${options.host}`);
 	}
-	const state = await startDaemon({ dataDir: options.dataDir, args: serveArgs(options) });
+	const state = await startDaemon({
+		dataDir: options.dataDir,
+		args: serveArgs(options),
+		env: daemonEnv(options),
+	});
 	process.stdout.write(`pixip listening on ${state.url} (pid ${state.pid})\n`);
 }
 
 async function cmdStop(options: Options): Promise<void> {
-	// Never let a bash tool inside a session take the service down. A stop from
-	// inside pixip is a restart from the caller's point of view: the calling turn
-	// ends, the daemon comes back. A shell outside pixip still stops for real.
+	// Never let a bash tool inside a session take the service down. Stopping the
+	// daemon is a user action now; the old "stop means restart" conversion made
+	// an agent-triggered stop indistinguishable from a real one.
 	if (insidePixip()) {
-		const running = await runningDaemon(options.dataDir);
-		if (!running) {
-			process.stdout.write(`pixip is not running for ${options.dataDir}\n`);
-			return;
-		}
-		process.stderr.write("pixip stop requested from inside a pixip session: restarting instead\n");
-		return await cmdRestart({ ...options, force: true });
+		process.stderr.write(
+			"stop is user-only inside a pixip session, please ask your user to run the /pixup-restart command\n",
+		);
+		process.exitCode = 2;
+		return;
 	}
 
 	const result = await stopDaemon(options.dataDir);
@@ -815,6 +948,33 @@ function isCaller(session: SessionInfo, caller: string | undefined): boolean {
 	return session.logicalId === caller || session.id === caller;
 }
 
+/** Persist the current live set before the helper replaces the daemon. */
+async function recordLiveSessions(url: string, dataDir: string): Promise<void> {
+	const sessions = await fetchSessions(url).catch(() => []);
+	await writeResumeSet(dataDir, liveSessionIds(sessions));
+}
+
+/** New daemon side: put back the live children and resume the opted-in pause set. */
+async function resumeRestartedSessions(hub: Hub, dataDir: string, server?: RunningServer): Promise<void> {
+	const pause = await takePauseSet(dataDir);
+	const ids = await takeResumeSet(dataDir);
+	if (ids.length > 0) {
+		log(`[restart] resuming ${ids.length} session(s)`);
+		for (const id of ids) {
+			try {
+				await hub.attach(id);
+			} catch (error) {
+				log(`[restart] could not resume ${id}: ${(error as Error).message}`);
+			}
+		}
+	}
+	if (pause.length > 0) {
+		const report = await resumePaused(hub, pause);
+		log(`[restart] ${formatPauseReport(report)}`);
+		server?.setPauseResult(report);
+	}
+}
+
 /** Spawn the detached helper that performs the actual stop/start. */
 function spawnRestartHelper(options: Options): void {
 	const logFd = openSync(daemonPaths(options.dataDir).log, "a");
@@ -860,7 +1020,7 @@ async function runRestartHelper(options: Options): Promise<void> {
 			return;
 		}
 	}
-	const state = await startDaemon({ dataDir: options.dataDir, args });
+	const state = await startDaemon({ dataDir: options.dataDir, args, env: running?.env ?? daemonEnv(options) });
 	note(`listening on ${state.url} (pid ${state.pid})`);
 }
 
@@ -870,7 +1030,7 @@ async function cmdRestart(options: Options): Promise<void> {
 	const running = await runningDaemon(options.dataDir);
 	if (!running) {
 		// Idempotent: restarting a stopped data dir is just a start.
-		await cmdStart(options);
+		await cmdDaemon(options);
 		return;
 	}
 
@@ -900,6 +1060,7 @@ async function cmdRestart(options: Options): Promise<void> {
 	// Hand the destructive half to a detached helper. This process may be a child
 	// of a Pi child that is about to be stopped, so it must not be the one doing
 	// `stopDaemon()`; the helper survives the shutdown and starts the replacement.
+	await recordLiveSessions(running.url, options.dataDir);
 	spawnRestartHelper(options);
 
 	// A normal shell waits here and prints the new URL. Inside a session this
@@ -924,6 +1085,58 @@ async function cmdRestart(options: Options): Promise<void> {
 	}
 }
 
+/** `pixip reload`: SIGUSR1 the daemon, then poll the result file for exit status. */
+async function cmdReload(options: Options): Promise<void> {
+	if (insidePixip()) {
+		process.stderr.write("reload is user-only, please ask your user to run the /reload command\n");
+		process.exitCode = 2;
+		return;
+	}
+	const running = await runningDaemon(options.dataDir);
+	if (!running) {
+		process.stderr.write(`pixip is not running for ${options.dataDir}\n`);
+		process.exitCode = 1;
+		return;
+	}
+	const path = daemonPaths(options.dataDir).reload;
+	const before = await stat(path)
+		.then((info) => info.mtimeMs)
+		.catch(() => 0);
+	try {
+		process.kill(running.pid, "SIGUSR1");
+	} catch (error) {
+		process.stderr.write(`could not signal pixip (${(error as Error).message})\n`);
+		process.exitCode = 1;
+		return;
+	}
+	const deadline = Date.now() + 30_000;
+	while (Date.now() < deadline) {
+		const after = await stat(path)
+			.then((info) => info.mtimeMs)
+			.catch(() => 0);
+		if (after > before) {
+			let report: ReloadReport;
+			try {
+				report = JSON.parse(readFileSync(path, "utf8")) as ReloadReport;
+			} catch (error) {
+				process.stderr.write(`could not read reload result: ${(error as Error).message}\n`);
+				process.exitCode = 1;
+				return;
+			}
+			if (report.ok) {
+				process.stdout.write(`${report.message}\n`);
+				return;
+			}
+			process.stderr.write(`${report.message}\n`);
+			process.exitCode = 1;
+			return;
+		}
+		await delay(100);
+	}
+	process.stderr.write(`reload timed out after 30s (see ${daemonPaths(options.dataDir).log})\n`);
+	process.exitCode = 1;
+}
+
 // ------------------------------------------------------------------ inbox
 
 interface InboxTarget {
@@ -940,7 +1153,7 @@ async function inboxTarget(options: Options): Promise<InboxTarget> {
 		};
 	const state = await runningDaemon(options.dataDir);
 	if (!state) {
-		throw new Error(`pixip is not running for ${options.dataDir}; start it with \`pixip start\``);
+		throw new Error(`pixip is not running for ${options.dataDir}; start it with \`pixip daemon\``);
 	}
 	return { url: state.url, token: process.env["PIXIP_INBOX_TOKEN"] || undefined };
 }

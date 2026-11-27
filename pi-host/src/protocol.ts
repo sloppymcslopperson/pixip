@@ -150,7 +150,7 @@ export interface HostOptions {
 	exit?: (code: number) => void;
 }
 
-type HostCommand = RpcCommand | { id?: string; type: "shutdown" };
+type HostCommand = RpcCommand | { id?: string; type: "shutdown" | "reload" };
 
 interface PendingRequest {
 	resolve: (response: UiResponse) => void;
@@ -202,7 +202,7 @@ export class PiHost {
 			type: "hello",
 			protocol: RPC_PROTOCOL_VERSION,
 			piVersion: this.piVersion,
-			capabilities: ["panel"],
+			capabilities: ["panel", "reload"],
 		};
 	}
 
@@ -699,6 +699,10 @@ export class PiHost {
 			}
 			case "get_messages":
 				return this.success(id, "get_messages", { messages: this.session.messages });
+			case "reload": {
+				await this.session.reload();
+				return this.success(id, "reload");
+			}
 			case "get_commands": {
 				const commands: any[] = [];
 				for (const registered of this.session.extensionRunner.getRegisteredCommands()) {

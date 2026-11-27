@@ -243,7 +243,7 @@ export function watch(this: any, subscriber: Subscriber): () => void {
 export async function archive(this: any, id: string): Promise<SessionInfo> {
 	const { info, record } = await this.storeSession(id, this.archiveRoot);
 	const dataDir = this.options.dataDir ?? dirname(this.options.sessionsDir);
-	await clearPendingReasks(dataDir, record.logicalId);
+	await clearPendingReasks(this.pendingWrites, dataDir, record.logicalId);
 	await this.refreshPeers();
 	await this.broadcastSessions();
 	return info;
@@ -256,7 +256,7 @@ export async function deleteSession(
 	await this.startupTrash;
 	const { info, record, dir } = await this.storeSession(id, this.trashRoot);
 	const dataDir = this.options.dataDir ?? dirname(this.options.sessionsDir);
-	await clearPendingReasks(dataDir, record.logicalId);
+	await clearPendingReasks(this.pendingWrites, dataDir, record.logicalId);
 	const expiresAt = Date.now() + this.trashGraceMs;
 	setTimeout(() => {
 		void rm(dir, { recursive: true, force: true }).catch((error: unknown) => {

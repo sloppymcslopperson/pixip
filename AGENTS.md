@@ -74,11 +74,13 @@ Rules:
   the client small and keep `src/client/render.js` pure so `test/` can cover it.
 - The client is responsive by contract: one asset set, CSS media/container queries
   only, no user-agent branching and no duplicated markup per breakpoint. Every
-  layout change must be checked by resizing a desktop browser (roughly 360, 390,
-  768, 1280, 1600 px) — a real phone confirms, it is not the only evidence.
-  Widening must add information (session cards, rail, context), never stretch one
-  column; anything the desktop view shows must come from frames the hub already
-  streams.
+  layout change must be checked with the `browser` tool (agent-browser) by setting
+  the viewport to roughly 360, 390, 768, 1280 and 1600 px, taking a screenshot and
+  checking `document.documentElement.scrollWidth <= innerWidth`; a real phone
+  confirms, it is not the only evidence. `tools/shot.mjs` is an optional extra
+  when a Chrome binary is available via `PIXIP_CHROME`. Widening must add
+  information (session cards, rail, context), never stretch one column; anything
+  the desktop view shows must come from frames the hub already streams.
 - Commits use the repo-local identity already configured here
   (`Sloppy McSlopperson <thesloppyslopperson@gmail.com>`).
 
@@ -101,12 +103,17 @@ ticket, so `autocommit` without `review` is the expected mode. Do not pass
 `nogrill` — grilling is wanted. Tickets whose decisions are already recorded under
 `### Decisions` only need the remaining gaps grilled, not everything again.
 
-Definition of done for every ticket: `npm run check` green, plus `tools/shot.mjs`
-at 390 and 1280 for anything that touches the client. `--dev` only reloads client
-assets; hub or server changes need the daemon restarted (kill the pid on 8137 and
-relaunch, or start a second instance on another `--port`/`--data-dir`). If a change moves the
-numbers in ARCHITECTURE.md, update them there (that file is the source of truth
-for the latency budget).
+Definition of done for every ticket: `npm run check` green, plus a browser check
+at 390 and 1280 for anything that touches the client. Use the available `browser`
+tool (agent-browser): `set viewport 390 844`, open/screenshot, check for
+horizontal overflow, then repeat at `1280 900`. A `check:browser` skip because
+`PIXIP_CHROME` is unset is **not** a substitute for this; `tools/shot.mjs` is an
+optional extra when a Chrome binary is available. Dev mode (the default) only
+reloads client assets; hub or server changes need the daemon restarted (kill the
+pid on 8137 and relaunch, or start a second instance on another
+`--port`/`--data-dir`). Use `--serious-mode` to serve the startup asset snapshot
+instead. If a change moves the numbers in ARCHITECTURE.md, update them there
+(that file is the source of truth for the latency budget).
 
 Client tickets need a real browser pass, not just screenshots: drive the flow with
 the `browser` tool (agent-browser) against a running daemon, and say which

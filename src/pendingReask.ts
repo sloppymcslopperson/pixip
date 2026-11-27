@@ -44,7 +44,7 @@ export interface ReaskRequest {
 	attached: boolean;
 }
 
-const writes = new Map<string, Promise<void>>();
+export type PendingWrites = Map<string, Promise<void>>;
 
 function safeKey(value: string): string {
 	const clean = value.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120);
@@ -91,8 +91,13 @@ export async function readPendingReasks(dataDir: string, key: string): Promise<P
 	}
 }
 
-export function addPendingReask(dataDir: string, key: string, record: PendingUiRecord): Promise<void> {
-	return serialized(dataDir, key, async () => {
+export function addPendingReask(
+	writes: PendingWrites,
+	dataDir: string,
+	key: string,
+	record: PendingUiRecord,
+): Promise<void> {
+	return serialized(writes, dataDir, key, async () => {
 		const records = await readPendingReasks(dataDir, key);
 		const next = records.filter((entry) => entry.id !== record.id);
 		next.push(record);
@@ -100,8 +105,8 @@ export function addPendingReask(dataDir: string, key: string, record: PendingUiR
 	});
 }
 
-export function removePendingReask(dataDir: string, key: string, id: string): Promise<void> {
-	return serialized(dataDir, key, async () => {
+export function removePendingReask(writes: PendingWrites, dataDir: string, key: string, id: string): Promise<void> {
+	return serialized(writes, dataDir, key, async () => {
 		const records = await readPendingReasks(dataDir, key);
 		const next = records.filter((entry) => entry.id !== id);
 		if (next.length === records.length) return;
@@ -109,8 +114,8 @@ export function removePendingReask(dataDir: string, key: string, id: string): Pr
 	});
 }
 
-export async function clearPendingReasks(dataDir: string, key: string): Promise<void> {
-	await serialized(dataDir, key, async () => {
+export async function clearPendingReasks(writes: PendingWrites, dataDir: string, key: string): Promise<void> {
+	await serialized(writes, dataDir, key, async () => {
 		await rm(pendingUiFile(dataDir, key), { force: true });
 	});
 }
@@ -127,7 +132,7 @@ async function writeRecords(dataDir: string, key: string, records: PendingUiReco
 	await rename(temp, target);
 }
 
-function serialized(dataDir: string, key: string, task: () => Promise<void>): Promise<void> {
+function serialized(writes: PendingWrites, dataDir: string, key: string, task: () => Promise<void>): Promise<void> {
 	const id = `${dataDir}\u0000${key}`;
 	const previous = writes.get(id) ?? Promise.resolve();
 	const next = previous.catch(() => {}).then(task);

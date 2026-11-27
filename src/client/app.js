@@ -33,17 +33,11 @@ import {
 } from "./session.js";
 import { dismissSheet } from "./sheetShell.js";
 import { configureSheets, handleUiRequest, openSessionSheet, sheet } from "./sheets.js";
+import { appendRestartResult } from "./restart.js";
 import { cancelSurface, openFixturePanel, openSurfaceRequest, resetSurface, surfaceOpen } from "./surface.js";
 import { openImageSheet } from "./toast.js";
 import { DEFAULT_PERCENT, nextPercent, previousPercent } from "./transcriptScale.js";
-import {
-	appendRestartNotice,
-	configureTranscript,
-	lastEntryId,
-	renderResume,
-	renderSnapshot,
-	renderTranscript,
-} from "./transcript.js";
+import { configureTranscript, lastEntryId, renderResume, renderSnapshot, renderTranscript } from "./transcript.js";
 import { distanceFromBottom, shouldStick } from "./transcriptScroll.js";
 import { configureTransport, send } from "./transport.js";
 
@@ -381,7 +375,7 @@ configureSessionEffects({
 	clearPendingAttachment,
 	failPendingSession,
 	openSession,
-	appendRestartNotice,
+	appendRestartNotice: appendRestartResult,
 	lastEntryId,
 	renderResume,
 	renderSnapshot,

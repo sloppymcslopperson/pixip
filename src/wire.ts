@@ -8,6 +8,7 @@
  */
 
 import type { InboxSummary } from "./inbox.ts";
+import type { ReloadBlocker } from "./reload.ts";
 
 export const WIRE_VERSION = 1;
 
@@ -209,6 +210,35 @@ export function frameError(message: string): string {
 /** The old daemon tells live sockets it is being replaced before it closes. */
 export function frameRestarting(): string {
 	return JSON.stringify({ t: "restarting" });
+}
+
+/**
+ * A local, ephemeral transcript notice (never a Pi record). `/reload` sets
+ * `reload` so clients paint the row, store it for the post-reload reconnect and
+ * then reload the page for the new assets/nonce. `/pixup-restart` sets
+ * `restart`; a refusal carries the blockers for the inline force card.
+ */
+export function frameNotice(
+	text: string,
+	options: {
+		reload?: boolean;
+		restart?: boolean;
+		status?: string;
+		blockers?: ReloadBlocker[];
+		/** Opt-in pause/resume card or result frame. */
+		pause?: boolean;
+		pauseKind?: string;
+		paused?: boolean;
+		pauseResult?: boolean;
+		/** `--watch`: a deferred reload card (true) or its dismissal (false). */
+		watchDeferred?: boolean;
+		watchError?: boolean;
+		at?: string;
+		resumed?: string[];
+		skipped?: Array<{ id: string; name?: string; reason: string }>;
+	} = {},
+): string {
+	return JSON.stringify({ t: "notice", text, ...options });
 }
 
 export function frameFooter(footer: FooterData): string {

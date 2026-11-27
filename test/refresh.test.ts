@@ -10,7 +10,7 @@ import type { Hub } from "../src/hub.ts";
 import { isLoopback, startServer, type RunningServer } from "../src/server.ts";
 import { cleanupRoots, fixtureRoot, hubFor, spawns, waitFor, type TestPaths } from "./helpers/harness.ts";
 
-async function boot(paths: TestPaths): Promise<{ hub: Hub; server: RunningServer }> {
+async function boot(paths: TestPaths, dev = false): Promise<{ hub: Hub; server: RunningServer }> {
 	const hub = hubFor(paths, { log: (message) => paths.logs.push(message) });
 	const server = await startServer({
 		host: "127.0.0.1",
@@ -18,6 +18,7 @@ async function boot(paths: TestPaths): Promise<{ hub: Hub; server: RunningServer
 		hub,
 		clientDir: paths.clientDir,
 		log: (message) => paths.logs.push(message),
+		dev,
 	});
 	return { hub, server };
 }
@@ -66,14 +67,14 @@ describe("soft refresh", () => {
 		await writeFile(join(paths.clientDir, "index.html"), "v1");
 		const { hub, server } = await boot(paths);
 
-		assert.equal(await (await fetch(server.url)).text(), "v1");
+		assert.match(await (await fetch(server.url)).text(), /v1$/);
 		await writeFile(join(paths.clientDir, "index.html"), "v2");
 
 		const report = await postRefresh(server.url);
 		assert.equal(report.status, 200);
 		assert.deepEqual(report.body["reloaded"], ["assets", "config", "index", "commands"]);
 		assert.equal(report.body["reloads"], 1);
-		assert.equal(await (await fetch(server.url)).text(), "v2");
+		assert.match(await (await fetch(server.url)).text(), /v2$/);
 
 		const health = (await (await fetch(new URL("health", server.url))).json()) as Record<string, unknown>;
 		assert.equal(health["ok"], true);
@@ -154,15 +155,43 @@ describe("soft refresh", () => {
 	});
 });
 
+describe("serious mode", () => {
+	it("serves the startup asset snapshot and hides the dev fixture", async () => {
+		const paths = await fixtureRoot("pixip-serious-");
+		await writeFile(join(paths.clientDir, "index.html"), "v1");
+		const { hub, server } = await boot(paths);
+		await writeFile(join(paths.clientDir, "index.html"), "v2");
+
+		assert.match(await (await fetch(server.url)).text(), /v1$/);
+		const fixture = await fetch(new URL("api/dev/panel-fixture", server.url));
+		assert.equal(fixture.status, 404);
+
+		await server.close();
+		await hub.shutdown();
+	});
+});
+
 describe("refresh guard", () => {
 	const request = (address: string) => ({ socket: { remoteAddress: address } }) as unknown as IncomingMessage;
 
-	it("accepts loopback peers only", () => {
+	it("accepts loopback peers and the exact bind host", () => {
 		for (const address of ["127.0.0.1", "127.0.1.1", "::1", "::ffff:127.0.0.1"]) {
-			assert.equal(isLoopback(request(address)), true, address);
+			assert.equal(isLoopback(request(address), "100.42.42.1"), true, address);
 		}
-		for (const address of ["192.168.1.5", "::2", "10.0.0.1", ""]) {
-			assert.equal(isLoopback(request(address)), false, address);
+		assert.equal(isLoopback(request("100.42.42.1"), "100.42.42.1"), true);
+		assert.equal(isLoopback(request("::ffff:100.42.42.1"), "100.42.42.1"), true);
+		assert.equal(isLoopback(request("100.42.42.1"), "::ffff:100.42.42.1"), true);
+		for (const address of ["192.168.1.5", "::2", "10.0.0.1", "100.42.42.2", ""]) {
+			assert.equal(isLoopback(request(address), "100.42.42.1"), false, address);
+		}
+	});
+
+	it("keeps wildcard and empty binds loopback-only", () => {
+		for (const host of ["0.0.0.0", "::", ""]) {
+			assert.equal(isLoopback(request("127.0.0.1"), host), true, host);
+			assert.equal(isLoopback(request("::1"), host), true, host);
+			assert.equal(isLoopback(request("192.168.1.5"), host), false, host);
+			assert.equal(isLoopback(request("100.42.42.1"), host), false, host);
 		}
 	});
 });

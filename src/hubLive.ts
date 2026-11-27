@@ -141,6 +141,8 @@ interface LiveSession {
 	reaskAsk?: ReaskAsk;
 	/** Consumed `hello` from `pixip-pi-host`; never forwarded as a transcript event. */
 	host?: { protocol?: number; piVersion?: string; capabilities?: string[] };
+	/** Effective backend for this child, used by `/reload` to migrate system-pi sessions. */
+	backend?: "host" | "system";
 	idleTimer?: NodeJS.Timeout;
 	branch?: string;
 	footerTimer?: NodeJS.Timeout;
@@ -225,6 +227,54 @@ export async function attach(this: any, id: string): Promise<SessionInfo> {
 	});
 }
 
+/**
+ * Replace one idle session's child with a fresh spawn from its JSONL, using the
+ * daemon's current `piHostBin`/`piBin`/env. The replacement is started first; the
+ * old child is closed only after `spawn` has installed the new live entry, so a
+ * failed spawn leaves the old one serving. Subscribers move with the session.
+ */
+export async function respawnSession(this: any, id: string): Promise<SessionInfo> {
+	const previous =
+		this.live.get(id) ??
+		[...this.live.values()].find((live: LiveSession) => live.info.id === id || live.info.logicalId === id);
+	if (!previous || previous.info.id === "") throw new Error(`session ${id} is not attached`);
+	if (previous.info.state !== "idle") {
+		throw new Error(`session ${id} is ${previous.info.state}; respawn requires idle`);
+	}
+	if (previous.pendingUi && previous.pendingUi.size > 0) {
+		throw new Error(`session ${id} has a pending UI request; respawn requires idle`);
+	}
+	if (previous.bashId) {
+		throw new Error(`session ${id} is running a bash command; respawn requires idle`);
+	}
+
+	const record = await this.findRecord(previous.info.logicalId ?? previous.info.id);
+	const sessionFile = previous.info.sessionFile ?? record?.sessionFile;
+	if (!sessionFile) throw new Error(`session ${id} has no JSONL to reattach from`);
+
+	const info = await this.spawn({
+		cwd: previous.info.cwd,
+		logicalId: previous.info.logicalId,
+		createdAt: record?.createdAt,
+		worktree: previous.info.worktree ?? record?.worktree,
+		args: ["--mode", "rpc", "--session", sessionFile],
+		keepPrevious: true,
+	});
+
+	const replacement = this.live.get(info.id);
+	if (replacement) {
+		// The old subscriber closures unsubscribe through their own `live.subs`
+		// Set, so share that exact Set instead of copying its members.
+		replacement.subs = previous.subs;
+		this.emitStatus(replacement);
+	}
+	this.clearIdle(previous);
+	this.clearPendingUi(previous);
+	await previous.proc.close().catch(() => {});
+	this.options.log(`respawned ${info.id} with ${this.options.piHostBin ? "host" : "pi"}`);
+	return info;
+}
+
 export async function stop(this: any, id: string): Promise<SessionInfo> {
 	const live = this.live.get(id);
 	if (!live) {
@@ -266,6 +316,8 @@ export async function spawn(
 		logicalId?: string;
 		createdAt?: string;
 		worktree?: WorktreeInfo;
+		/** Keep a replaced child alive until the caller has committed the swap. */
+		keepPrevious?: boolean;
 	},
 ): Promise<SessionInfo> {
 	const started = Date.now();
@@ -326,7 +378,7 @@ export async function spawn(
 		},
 	});
 
-	const live: LiveSession = { proc, info, subs: new Set() };
+	const live: LiveSession = { proc, info, subs: new Set(), backend: host ? "host" : "system" };
 	// Register before the first command so records that arrive early find it.
 	this.live.set(SYMBOL_PENDING, live);
 
@@ -382,7 +434,7 @@ export async function spawn(
 
 	this.live.delete(SYMBOL_PENDING);
 	const previous = this.live.get(info.id);
-	if (previous) await previous.proc.close();
+	if (previous && !input.keepPrevious) await previous.proc.close();
 	this.live.set(info.id, live);
 
 	// Persist the logical -> Pi id mapping. A broken index must never take a
@@ -728,7 +780,7 @@ export async function finishReaskAsk(this: any, live: LiveSession, ask: ReaskAsk
 	}
 	const dataDir = this.options.dataDir ?? dirname(this.options.sessionsDir);
 	try {
-		await addPendingReask(dataDir, pendingUiKey(live.info), ask.record);
+		await addPendingReask(this.pendingWrites, dataDir, pendingUiKey(live.info), ask.record);
 		this.broadcast(live, frameReask(publicReask(ask.record)));
 		void this.refreshAwaitingUser(live);
 		this.options.log(`ui request ${ask.record.id} recorded for re-ask on resume`);
@@ -766,13 +818,13 @@ export async function reask(this: any, id: string, requestId: string, action: st
 	const record = records.find((entry) => entry.id === requestId);
 	if (!record) throw new Error(`unknown timed-out request ${requestId}`);
 	if (action === "dismiss") {
-		await removePendingReask(dataDir, key, requestId);
+		await removePendingReask(this.pendingWrites, dataDir, key, requestId);
 		void this.refreshAwaitingUser(live);
 		return;
 	}
 	if (action !== "ask") throw new Error(`unknown re-ask action ${action}`);
 	await this.prompt(id, reaskPrompt(record), "followUp");
-	await removePendingReask(dataDir, key, requestId);
+	await removePendingReask(this.pendingWrites, dataDir, key, requestId);
 	void this.refreshAwaitingUser(live);
 }
 
