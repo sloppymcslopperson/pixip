@@ -51,3 +51,7 @@ Write `docs/feature-inventory/index.md`, then build the HTML report with `inbox_
 ### Completion
 
 When the inventory is finished, send the owner an inbox message from this session: `pixip inbox send --subject "feature inventory: <area> done" --purpose deliverable "<output path, what it covers, and anything you could not cover>"`. That message is how the owner learns the ticket is ready for review.
+
+### Commit
+
+When the work is done, commit it on this worktree's branch with a descriptive message, including the ticket move to `closed/`. Do not push.
