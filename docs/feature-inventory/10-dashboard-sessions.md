@@ -1,8 +1,9 @@
 # 10 · Dashboard and sessions
 
-> **Owner note:** this area is currently about 4,250 words, above the project's
-> 1,500–2,500 word cap. The owner is aware and wants to know whether this area
-> should be split rather than trimmed.
+> **Owner note:** the area docs are running over the project's 1,500–2,500 word
+> cap (this one is about 4,250 words, and others are similar). The owner is aware
+> of all the misses, and whether any area should be split rather than trimmed is
+> an open question for all the Markdown reports.
 
 The dashboard is the product's home surface: every session on this box, grouped
 by repository and worktree, with live state dots and one-tap access to whatever
