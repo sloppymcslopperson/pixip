@@ -1,5 +1,9 @@
 # 10 · Dashboard and sessions
 
+> **Owner note:** this area is currently about 4,250 words, above the project's
+> 1,500–2,500 word cap. The owner is aware and wants to know whether this area
+> should be split rather than trimmed.
+
 The dashboard is the product's home surface: every session on this box, grouped
 by repository and worktree, with live state dots and one-tap access to whatever
 needs attention. From here a user starts a session in a typed path, a browsed
