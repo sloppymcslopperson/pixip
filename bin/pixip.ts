@@ -6,12 +6,11 @@ import { createRequire, register } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Hub } from "../src/hub.ts";
+import type { Hub } from "../src/hub.ts";
 import type { RemoveWorktreeResult, WorktreeListing } from "../src/hub.ts";
 import type { RunningServer } from "../src/server.ts";
-import { GenerationManager } from "../src/reload/manager.ts";
-import { startWatch, type WatchHandle } from "../src/reload/watch.ts";
-import { formatPauseReport, resumePaused, takePauseSet, writePauseSet, type PauseTarget } from "../src/reload/pause.ts";
+import type { WatchHandle } from "../src/reload/watch.ts";
+import type { PauseTarget } from "../src/reload/pause.ts";
 import type { ReloadReport } from "../src/reload.ts";
 import {
 	busySessions,
@@ -36,15 +35,13 @@ import {
 	writeReloadResult,
 	writeResumeSet,
 } from "../src/daemon.ts";
-import { detectRepo, pruneWorktrees, realCwd } from "../src/worktree.ts";
 import type { WorktreeEntry } from "../src/worktree.ts";
 import { frameNotice, type SessionInfo } from "../src/wire.ts";
-import { INBOX_PURPOSES, type InboxList, type InboxView } from "../src/inbox.ts";
+import type { InboxList, InboxView } from "../src/inbox.ts";
 import { spawnEnv } from "../src/spawnEnv.ts";
 
 // Install the generation-aware resolve hook before the serve path imports any
 // reloadable module. CLI-only imports (daemon, worktree, inbox) stay shared.
-register(new URL("../src/reload/register.ts", import.meta.url).href, import.meta.url);
 
 /**
  * pixip — supervisor + web UI for Pi sessions.
@@ -618,6 +615,7 @@ async function serve(options: Options): Promise<void> {
 		return { hub: hubModule, server: serverModule };
 	};
 
+	register(new URL("../src/reload/register.ts", import.meta.url).href, import.meta.url);
 	const initial = await loadGeneration(0);
 	const hub = new initial.hub.Hub({
 		piBin: options.piBin,
@@ -643,6 +641,7 @@ async function serve(options: Options): Promise<void> {
 
 	const running: { server?: RunningServer } = {};
 	let watchHandle: WatchHandle | undefined;
+	const { GenerationManager } = await import("../src/reload/manager.ts");
 	const manager = new GenerationManager({
 		initial,
 		load: loadGeneration,
@@ -666,6 +665,7 @@ async function serve(options: Options): Promise<void> {
 		reloadCode: manager,
 		watchCancel: () => watchHandle?.cancel(),
 		restart: async (pause?: PauseTarget[]) => {
+			const { writePauseSet } = await import("../src/reload/pause.ts");
 			await writePauseSet(options.dataDir, pause ?? []);
 			await writeResumeSet(options.dataDir, liveSessionIds(await hub.list()));
 			spawnRestartHelper(options);
@@ -674,6 +674,7 @@ async function serve(options: Options): Promise<void> {
 	running.server = server;
 	hub.setDaemonUrl(server.url);
 	if (options.watch) {
+		const { startWatch } = await import("../src/reload/watch.ts");
 		const rootDir = fileURLToPath(new URL("..", import.meta.url));
 		watchHandle = startWatch({
 			roots: [join(rootDir, "src"), join(rootDir, "extensions")],
@@ -911,7 +912,7 @@ async function cmdProtect(options: Options): Promise<void> {
 		);
 		info = result.session;
 	} else {
-		const hub = offlineHub(options);
+		const hub = await offlineHub(options);
 		try {
 			info = await hub.setProtected(id, value);
 		} finally {
@@ -956,6 +957,7 @@ async function recordLiveSessions(url: string, dataDir: string): Promise<void> {
 
 /** New daemon side: put back the live children and resume the opted-in pause set. */
 async function resumeRestartedSessions(hub: Hub, dataDir: string, server?: RunningServer): Promise<void> {
+	const { formatPauseReport, resumePaused, takePauseSet } = await import("../src/reload/pause.ts");
 	const pause = await takePauseSet(dataDir);
 	const ids = await takeResumeSet(dataDir);
 	if (ids.length > 0) {
@@ -1218,6 +1220,7 @@ async function cmdInboxSend(options: Options): Promise<void> {
 	if (!options.subject.trim() || !body) {
 		throw new Error("usage: pixip inbox send --subject <text> [--purpose <purpose>] <body>");
 	}
+	const { INBOX_PURPOSES } = await import("../src/inbox.ts");
 	if (!(INBOX_PURPOSES as readonly string[]).includes(options.purpose)) {
 		throw new Error(`--purpose must be one of ${INBOX_PURPOSES.join(", ")}`);
 	}
@@ -1322,7 +1325,8 @@ function enrichWorktrees(worktrees: WorktreeEntry[], repo: string, sessions: Ses
 	});
 }
 
-function offlineHub(options: Options): Hub {
+async function offlineHub(options: Options): Promise<Hub> {
+	const { Hub } = await import("../src/hub.ts");
 	return new Hub({
 		piBin: options.piBin,
 		sessionsDir: join(options.dataDir, "sessions"),
@@ -1362,7 +1366,7 @@ async function loadWorktreeListing(options: Options, cwd: string): Promise<Workt
 		return { ...listing, sessions, source: "daemon" };
 	}
 
-	const hub = offlineHub(options);
+	const hub = await offlineHub(options);
 	try {
 		const [listing, sessions] = await Promise.all([hub.listWorktrees(cwd), hub.list()]);
 		return { ...listing, sessions, source: "offline" };
@@ -1372,6 +1376,7 @@ async function loadWorktreeListing(options: Options, cwd: string): Promise<Workt
 }
 
 async function findWorktree(entries: WorktreeEntry[], target: string): Promise<WorktreeEntry | undefined> {
+	const { realCwd } = await import("../src/worktree.ts");
 	const realTarget = await realCwd(target);
 	for (const entry of entries) {
 		if ((await realCwd(entry.path)) === realTarget) return entry;
@@ -1493,7 +1498,7 @@ async function cmdWorktreeRemove(options: Options): Promise<void> {
 		return reportRemoval(result, options);
 	}
 
-	const hub = offlineHub(options);
+	const hub = await offlineHub(options);
 	try {
 		const listing = await hub.listWorktrees(target);
 		const entry = await findWorktree(listing.worktrees, target);
@@ -1514,6 +1519,7 @@ async function cmdWorktreePrune(options: Options): Promise<void> {
 		throw new Error("usage: pixip worktree prune [<repo-or-path>] [--json]");
 	}
 	const cwd = resolve(options.positionals[0] ?? process.cwd());
+	const { detectRepo, pruneWorktrees } = await import("../src/worktree.ts");
 	const repo = await detectRepo(cwd);
 	if (!repo) throw new Error(`not a git repository: ${cwd}`);
 	await pruneWorktrees(repo);
