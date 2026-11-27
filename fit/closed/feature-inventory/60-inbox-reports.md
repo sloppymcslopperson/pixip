@@ -2,6 +2,7 @@
 area: inbox-reports
 part: inventory
 project: feature-inventory
+commit: "7c6edead49d54d3fd840fa6ed8b7a06d40679191"
 ---
 
 Capture the inbox as a user surface: messages, unread state, filters, reply-to-session, and reading HTML reports. The agent-facing send/report tools are owned by the bundled-extensions section; this section owns consumption.
