@@ -1,6 +1,7 @@
 import { looksLikeImage } from "./attachments.js";
 import { configureComposer, submit } from "./composer.js";
 import { chooseAttachment, clearPendingAttachment, setAttachMenu } from "./composerAttachments.js";
+import { installComposerEditor, insertComposerText, normalizeComposerInput } from "./composerEditor.js";
 import { resize } from "./composerInput.js";
 import { bindScaleButton, readScale, setBarMenu, setScale, softRefresh } from "./controls.js";
 import { configureDashboard, showList } from "./dashboard.js";
@@ -149,6 +150,8 @@ ui.fileInput.addEventListener("change", () => {
 	ui.fileInput.value = "";
 	if (file) void chooseAttachment(file, false);
 });
+installComposerEditor();
+
 ui.composer.addEventListener("paste", (event) => {
 	const file = event.clipboardData?.files?.[0];
 	if (file) {
@@ -156,9 +159,11 @@ ui.composer.addEventListener("paste", (event) => {
 		void chooseAttachment(file, looksLikeImage(file));
 		return;
 	}
-	// The browser inserts the text after this event; the input handler sees it,
-	// but a paste can also arrive without an input event in tests.
-	setTimeout(() => void updateComposerRefTags(), 0);
+	// Keep pasted text plain: the editor owns the DOM so a pasted tag can
+	// become an inline chip instead of arbitrary clipboard HTML.
+	event.preventDefault();
+	const text = event.clipboardData?.getData("text/plain") ?? "";
+	if (text) insertComposerText(text);
 });
 
 /** Replacement snapshot: a compaction or a `/new` invalidates loaded windows. */
@@ -179,6 +184,7 @@ ui.composer.addEventListener("submit", (event) => {
 });
 
 ui.input.addEventListener("keydown", (event) => {
+	if (event.defaultPrevented || event.isComposing) return;
 	if (!ui.menu.hidden) {
 		if (event.key === "ArrowDown" || event.key === "ArrowUp") {
 			event.preventDefault();
@@ -196,12 +202,14 @@ ui.input.addEventListener("keydown", (event) => {
 			return;
 		}
 	}
-	if (event.key === "Enter" && !event.shiftKey && !state.coarse) {
+	if (event.key === "Enter") {
 		event.preventDefault();
-		submit();
+		if (!event.shiftKey && !state.coarse) submit();
+		else insertComposerText("\n");
 	}
 });
 ui.input.addEventListener("input", () => {
+	normalizeComposerInput();
 	resize();
 	renderMenu();
 	refreshSendState();

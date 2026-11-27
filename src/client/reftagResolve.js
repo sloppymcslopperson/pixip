@@ -1,9 +1,8 @@
 // Composer reftag chips. Cluster-neutral: it reads kernel state and the one
 // grammar, never composer or inbox internals. app.js wires the function; the
 // inbox list is fetched here only when an inbox tag is present.
-import { confirmJump } from "./reftagJump.js";
 import { messageKey, scanRefTags } from "./reftags.js";
-import { INBOX_SUBJECT_CHARS, clipText, firstWords, purposeLabel, removeRefTag } from "./reftagText.js";
+import { INBOX_SUBJECT_CHARS, clipText, firstWords, purposeLabel } from "./reftagText.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
 
@@ -11,34 +10,6 @@ const INBOX_URL = "/api/inbox?all=1&filter=all";
 
 let inboxCache = null;
 let updateSeq = 0;
-let primedChip = null;
-
-/** Expose × and remember this chip as the one awaiting a second tap. */
-function primeChip(node) {
-	if (primedChip && primedChip !== node) primedChip.classList.remove("open");
-	primedChip = node;
-	node.classList.add("open");
-}
-
-function clearPrime() {
-	primedChip?.classList.remove("open");
-	primedChip = null;
-}
-
-// Any click that is not the primed chip drops the prime; the next tap starts over.
-document.addEventListener(
-	"click",
-	(event) => {
-		if (!primedChip) return;
-		if (!primedChip.isConnected) {
-			primedChip = null;
-			return;
-		}
-		const chip = event.target.closest?.(".reftag-chip");
-		if (chip !== primedChip) clearPrime();
-	},
-	true,
-);
 
 function shortId(id) {
 	return typeof id === "string" && id.length > 0 ? id.slice(0, 8) : "unknown";
@@ -207,67 +178,21 @@ export async function resolveRefTags(text) {
 	return chips;
 }
 
-function chipElement(chip) {
-	const node = document.createElement("div");
-	node.className = `reftag-chip${chip.unresolved ? " unresolved" : ""}`;
-	node.dataset.tag = chip.tag;
-	node.setAttribute("role", "button");
-	node.tabIndex = 0;
-	node.title = chip.tag;
-	const label = document.createElement("span");
-	label.className = "reftag-chip-label";
-	label.textContent = chip.label;
-	const remove = document.createElement("button");
-	remove.type = "button";
-	remove.className = "reftag-chip-remove";
-	remove.setAttribute("aria-label", "Remove reftag");
-	remove.textContent = "×";
-	remove.addEventListener("click", (event) => {
-		event.stopPropagation();
-		if (primedChip === node) clearPrime();
-		ui.input.value = removeRefTag(ui.input.value, chip.tag);
-		ui.input.focus();
-		ui.input.dispatchEvent(new Event("input", { bubbles: true }));
-	});
-	node.append(label, remove);
-	const activate = () => {
-		if (primedChip === node) {
-			confirmJump(chip);
-			return;
-		}
-		primeChip(node);
-	};
-	node.addEventListener("click", (event) => {
-		if (event.target.closest(".reftag-chip-remove")) return;
-		activate();
-	});
-	node.addEventListener("keydown", (event) => {
-		if (event.key === "Enter" || event.key === " ") {
-			event.preventDefault();
-			if (event.target.closest(".reftag-chip-remove")) return;
-			activate();
-		}
-	});
-	return node;
-}
-
-function renderChips(chips) {
-	const host = ui.reftagChips;
-	primedChip = null;
-	host.textContent = "";
-	host.hidden = chips.length === 0;
-	for (const chip of chips) host.append(chipElement(chip));
-}
-
-/** Recompute the chip row from the textarea; stale async runs are dropped. */
+/** Update every inline chip in the editor; stale async runs are dropped. */
 export async function updateComposerRefTags() {
 	const token = ++updateSeq;
 	const text = ui.input.value;
-	if (scanRefTags(text).length === 0) {
-		renderChips([]);
-		return;
-	}
+	if (scanRefTags(text).length === 0) return;
 	const chips = await resolveRefTags(text);
 	if (token !== updateSeq) return;
-	renderChips(chips);
+	const byTag = new Map(chips.map((chip) => [chip.tag, chip]));
+	for (const node of ui.input.querySelectorAll(".reftag-chip[data-tag]")) {
+		const chip = byTag.get(node.dataset.tag);
+		if (!chip) continue;
+		node.classList.toggle("unresolved", chip.unresolved);
+		node.title = chip.tag;
+		node.setAttribute("aria-label", chip.label ? `Reference: ${chip.label}` : "Reference");
+		const label = node.querySelector(".reftag-chip-label");
+		if (label) label.textContent = chip.label;
+	}
 }

@@ -69,7 +69,6 @@
 			<div id="queue" hidden aria-live="polite"></div>
 			<form id="composer" hidden>
 				<div id="attachment" hidden></div>
-				<div id="reftag-chips" class="reftag-chips" hidden aria-label="References"></div>
 				<div id="compose-row">
 					<button
 						id="attach"
@@ -81,14 +80,17 @@
 					>
 						+
 					</button>
-					<textarea
+					<div
 						id="input"
-						rows="1"
-						placeholder="message pi…"
-						autocomplete="off"
+						class="composer-input is-empty"
+						contenteditable="true"
+						role="textbox"
+						aria-multiline="true"
+						aria-label="message pi"
+						data-placeholder="message pi…"
 						autocapitalize="sentences"
 						spellcheck="false"
-					></textarea>
+					></div>
 					<button id="send" type="submit" aria-label="Send">↑</button>
 				</div>
 				<input id="image-input" type="file" accept="image/*" hidden />

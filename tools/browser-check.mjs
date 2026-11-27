@@ -349,7 +349,7 @@ async function runRefCopyFlow(page, base, sessionId, hub, paths) {
 	await clickTagAction(page, liveTag, "insert");
 	assert.equal(await page.evaluate(() => document.querySelector("#input").value), liveTag);
 	await page.waitForFunction(
-		() => (document.querySelector("#reftag-chips .reftag-chip-label")?.textContent ?? "").includes("live ref insert"),
+		() => (document.querySelector("#input .reftag-chip-label")?.textContent ?? "").includes("live ref insert"),
 		{ timeout: FLOW_TIMEOUT },
 	);
 	const liveChip = await chipLabels(page);
@@ -409,7 +409,7 @@ async function setComposer(page, text) {
 
 async function chipLabels(page) {
 	return await page.evaluate(() =>
-		[...document.querySelectorAll("#reftag-chips .reftag-chip")].map((chip) => ({
+		[...document.querySelectorAll("#input .reftag-chip")].map((chip) => ({
 			label: chip.querySelector(".reftag-chip-label")?.textContent ?? "",
 			unresolved: chip.classList.contains("unresolved"),
 			tag: chip.dataset.tag ?? "",
@@ -434,7 +434,7 @@ async function runRefTagChipsFlow(page, base, sessionId, fixture) {
 	const beforeHistory = await page.evaluate(() => window.__inboxFetches);
 	await setComposer(page, historyTag);
 	await page.waitForFunction(
-		() => (document.querySelector("#reftag-chips .reftag-chip-label")?.textContent ?? "").includes("assistant"),
+		() => (document.querySelector("#input .reftag-chip-label")?.textContent ?? "").includes("assistant"),
 		{ timeout: FLOW_TIMEOUT },
 	);
 	const history = await chipLabels(page);
@@ -443,20 +443,20 @@ async function runRefTagChipsFlow(page, base, sessionId, fixture) {
 	assert.match(history[0].label, /history entry 319/);
 	assert.equal(await page.evaluate(() => window.__inboxFetches), beforeHistory, "history chips fetch nothing");
 
-	// Duplicates collapse; malformed fragments add no chip and stay text.
+	// Every occurrence renders in place; malformed fragments stay literal text.
 	await setComposer(page, `${historyTag} ${historyTag} [pixip-ref=history/only-two]`);
-	assert.equal((await chipLabels(page)).length, 1, "duplicate tags collapse");
+	assert.equal((await chipLabels(page)).length, 2, "duplicate tags each render inline");
 	assert.equal(
 		await page.evaluate(() => document.querySelector("#input").value.includes("[pixip-ref=history/only-two]")),
 		true,
-		"a malformed tag stays in the textarea",
+		"a malformed tag stays in the editor text",
 	);
 
 	// Inbox tag: one fetch for the connection, no matter how many keystrokes.
 	const beforeInbox = await page.evaluate(() => window.__inboxFetches);
 	await setComposer(page, "");
 	await page.type("#input", `[pixip-ref=inbox/${fixture.inboxId}]`);
-	await page.waitForFunction(() => document.querySelector("#reftag-chips .reftag-chip") !== null, {
+	await page.waitForFunction(() => document.querySelector("#input .reftag-chip") !== null, {
 		timeout: FLOW_TIMEOUT,
 	});
 	const inbox = await chipLabels(page);
@@ -470,7 +470,7 @@ async function runRefTagChipsFlow(page, base, sessionId, fixture) {
 	// A never-opened session is a name-only chip; an unknown inbox id is muted.
 	const peerTag = `[pixip-ref=history/${fixture.peerLogicalId}/x]`;
 	await setComposer(page, `${peerTag} [pixip-ref=inbox/does-not-exist]`);
-	await page.waitForFunction(() => document.querySelectorAll("#reftag-chips .reftag-chip").length === 2, {
+	await page.waitForFunction(() => document.querySelectorAll("#input .reftag-chip").length === 2, {
 		timeout: FLOW_TIMEOUT,
 	});
 	const mixed = await chipLabels(page);
@@ -479,12 +479,11 @@ async function runRefTagChipsFlow(page, base, sessionId, fixture) {
 	assert.equal(mixed[1].unresolved, true, "an unknown inbox id is unresolved");
 
 	// Tap reveals ×; × removes only the token.
-	await page.evaluate(() => document.querySelector("#reftag-chips .reftag-chip")?.click());
-	await page.waitForFunction(
-		() => document.querySelector("#reftag-chips .reftag-chip.open .reftag-chip-remove") !== null,
-		{ timeout: FLOW_TIMEOUT },
-	);
-	await page.evaluate(() => document.querySelector("#reftag-chips .reftag-chip-remove")?.click());
+	await page.evaluate(() => document.querySelector("#input .reftag-chip")?.click());
+	await page.waitForFunction(() => document.querySelector("#input .reftag-chip.open .reftag-chip-remove") !== null, {
+		timeout: FLOW_TIMEOUT,
+	});
+	await page.evaluate(() => document.querySelector("#input .reftag-chip-remove")?.click());
 	await page
 		.waitForFunction((tag) => !document.querySelector("#input").value.includes(tag), { timeout: FLOW_TIMEOUT }, peerTag)
 		.catch(() => {});
@@ -493,17 +492,16 @@ async function runRefTagChipsFlow(page, base, sessionId, fixture) {
 	await setComposer(page, "");
 	await page.evaluate((tag) => {
 		const input = document.querySelector("#input");
-		input.value = tag;
 		const data = new DataTransfer();
 		data.setData("text/plain", tag);
 		input.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
 	}, historyTag);
-	await page.waitForFunction(() => document.querySelector("#reftag-chips .reftag-chip") !== null, {
+	await page.waitForFunction(() => document.querySelector("#input .reftag-chip") !== null, {
 		timeout: FLOW_TIMEOUT,
 	});
 	assert.equal((await chipLabels(page)).length, 1, "a pasted tag produces a chip");
 
-	// A ref-only send keeps the raw tag in the textarea payload.
+	// A ref-only send keeps the raw tag in the prompt payload.
 	await setComposer(page, historyTag);
 	await page.click("#send");
 	await page.waitForFunction(
@@ -515,7 +513,11 @@ async function runRefTagChipsFlow(page, base, sessionId, fixture) {
 		{ timeout: FLOW_TIMEOUT },
 		historyTag,
 	);
-	assert.equal(await page.evaluate(() => document.querySelector("#reftag-chips").hidden), true, "sending clears chips");
+	assert.equal(
+		await page.evaluate(() => document.querySelectorAll("#input .reftag-chip").length),
+		0,
+		"sending clears chips",
+	);
 	await logHas(fixture.paths, (record) => record.type === "prompt" && record.text === historyTag, "ref-only prompt");
 	assert.equal(afterInbox - beforeInbox, 1, "no fetch at send");
 	console.log(
@@ -717,7 +719,7 @@ async function inject(hub, sessionId, request) {
 
 async function chipStates(page) {
 	return await page.evaluate(() =>
-		[...document.querySelectorAll("#reftag-chips .reftag-chip")].map((chip) => ({
+		[...document.querySelectorAll("#input .reftag-chip")].map((chip) => ({
 			open: chip.classList.contains("open"),
 			tag: chip.dataset.tag ?? "",
 			unresolved: chip.classList.contains("unresolved"),
@@ -726,12 +728,12 @@ async function chipStates(page) {
 }
 
 async function tapChip(page) {
-	await page.evaluate(() => document.querySelector("#reftag-chips .reftag-chip")?.click());
+	await page.evaluate(() => document.querySelector("#input .reftag-chip")?.click());
 }
 
 async function waitChipTag(page, tag) {
 	await page.waitForFunction(
-		(tag) => document.querySelector("#reftag-chips .reftag-chip")?.dataset.tag === tag,
+		(tag) => document.querySelector("#input .reftag-chip")?.dataset.tag === tag,
 		{ timeout: FLOW_TIMEOUT },
 		tag,
 	);
@@ -766,7 +768,7 @@ async function runRefChipNavigationFlow(page, base, sessionId, fixture) {
 	// First tap only exposes × and primes; it never navigates or opens a sheet.
 	await setComposer(page, historyTag);
 	await waitChipTag(page, historyTag);
-	await page.waitForFunction(() => document.querySelector("#reftag-chips .reftag-chip:not(.unresolved)") !== null, {
+	await page.waitForFunction(() => document.querySelector("#input .reftag-chip:not(.unresolved)") !== null, {
 		timeout: FLOW_TIMEOUT,
 	});
 	const startHash = await page.evaluate(() => location.hash);
@@ -814,7 +816,7 @@ async function runRefChipNavigationFlow(page, base, sessionId, fixture) {
 	const beforeRemove = await page.evaluate(() => document.querySelector("#input").value);
 	await tapChip(page);
 	const remove = await page.evaluate(() => {
-		const button = document.querySelector("#reftag-chips .reftag-chip-remove");
+		const button = document.querySelector("#input .reftag-chip-remove");
 		button?.click();
 		return Boolean(button);
 	});
@@ -847,7 +849,7 @@ async function runRefChipNavigationFlow(page, base, sessionId, fixture) {
 	await setComposer(page, inboxTag);
 	await waitChipTag(page, inboxTag);
 	await page.waitForFunction(
-		() => !(document.querySelector("#reftag-chips .reftag-chip")?.classList.contains("unresolved") ?? true),
+		() => !(document.querySelector("#input .reftag-chip")?.classList.contains("unresolved") ?? true),
 		{ timeout: FLOW_TIMEOUT },
 	);
 	await tapChip(page);
@@ -872,7 +874,7 @@ async function runRefChipNavigationFlow(page, base, sessionId, fixture) {
 	await setComposer(page, peerTag);
 	await waitChipTag(page, peerTag);
 	await page.waitForFunction(
-		() => (document.querySelector("#reftag-chips .reftag-chip-label")?.textContent ?? "").includes("repo peer"),
+		() => (document.querySelector("#input .reftag-chip-label")?.textContent ?? "").includes("repo peer"),
 		{ timeout: FLOW_TIMEOUT },
 	);
 	await tapChip(page);

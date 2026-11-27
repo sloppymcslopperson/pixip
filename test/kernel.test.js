@@ -77,8 +77,7 @@ describe("kernel ui map", () => {
 		assert.deepEqual(ui.inboxBarPreview, { selector: "#inbox-bar-preview" });
 		assert.deepEqual(ui.inboxBadge, { selector: "#inbox-badge" });
 		assert.deepEqual(ui.inboxPage, { selector: "#inbox-page" });
-		assert.deepEqual(ui.reftagChips, { selector: "#reftag-chips" });
-		assert.equal(Object.keys(ui).length, 41);
+		assert.equal(Object.keys(ui).length, 40);
 		assert.equal(selectors.filter((selector) => selector === "#bar").length, 1);
 	});
 });
