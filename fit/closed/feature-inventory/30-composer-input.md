@@ -2,6 +2,7 @@
 area: composer-input
 part: inventory
 project: feature-inventory
+commit: "582082f4a43544b17c4bc225216225a21375b956"
 ---
 
 Capture how a user composes and sends input: prompting, steering, stopping, queuing, attachments, slash commands, bash escape hatches, and command policy. This section covers the composer row, its menus, and every way text or files enter a session.
