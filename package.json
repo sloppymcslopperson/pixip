@@ -16,9 +16,9 @@
 	},
 	"scripts": {
 		"start": "node bin/pixip.ts",
-		"test": "node --import ./test/setup.ts --test --test-concurrency=2 test/*.test.js test/*.test.ts",
+		"test": "node tools/test-run.mjs",
 		"test:full": "npm test",
-		"test:fast": "node --import ./test/setup.ts --test --test-concurrency=4 $(find test -maxdepth 1 \\( -name '*.test.js' -o -name '*.test.ts' \\) ! -name 'daemon.test.ts' ! -name 'backend.test.ts' ! -name 'reload.test.ts' ! -name 'worktree-cli.test.ts')",
+		"test:fast": "node tools/test-run.mjs --fast",
 		"typecheck": "tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/tsbuildinfo/root.tsbuildinfo",
 		"lint": "eslint . --cache --cache-location node_modules/.cache/eslint/root.cache",
 		"format": "prettier --write .",

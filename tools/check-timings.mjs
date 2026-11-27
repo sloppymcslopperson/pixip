@@ -15,12 +15,14 @@
  */
 import { spawn } from "node:child_process";
 import { readdir } from "node:fs/promises";
+import { availableParallelism } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const NPM = process.platform === "win32" ? "npm.cmd" : "npm";
-const FILE_CONCURRENCY = 2;
+const FILE_CONCURRENCY = Math.max(1, availableParallelism());
+const TEST_CONCURRENCY = Math.max(1, availableParallelism());
 
 /** Soft budgets in seconds, from the settled full pipeline. */
 const BUDGETS = {
@@ -131,7 +133,14 @@ const steps = [
 	{
 		name: "test:full",
 		command: process.execPath,
-		args: ["--import", "./test/setup.ts", "--test", "--test-concurrency=2", "--test-reporter=tap", ...files],
+		args: [
+			"--import",
+			"./test/setup.ts",
+			"--test",
+			`--test-concurrency=${TEST_CONCURRENCY}`,
+			"--test-reporter=tap",
+			...files,
+		],
 		budget: BUDGETS["test:full"],
 	},
 	{ name: "check:browser", command: NPM, args: ["run", "--silent", "check:browser"], budget: BUDGETS["check:browser"] },
