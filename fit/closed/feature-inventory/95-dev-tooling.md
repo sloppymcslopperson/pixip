@@ -2,6 +2,7 @@
 area: dev-tooling
 part: inventory
 project: feature-inventory
+commit: "1920851ad275e97cc04f89bff5bcae24fe9c7a6d"
 ---
 
 Capture the development and operation tooling that is part of the product's workflow: hot reload, watch mode, the test and browser-check harness, static gates, and the architecture/parity docs. This is a process area, not a user-facing feature set, so it is written as a short appendix with explicit "keep or redesign" pressure points.
