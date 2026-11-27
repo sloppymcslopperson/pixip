@@ -25,3 +25,7 @@ Whether to fix this on the test side, the product side, or both. Test side: reus
 - `daemon.test.ts` wall time under 12 s on this box, measured before/after, with no test dropped or weakened.
 - If the lazy-import path is taken, `node bin/pixip.ts help` cold start under 0.25 s and the full suite still green.
 - The ticket records the spawn count before and after.
+
+### Work order
+
+Fifth: it only shortens the full suite (~20 s), and it is the only ticket here that changes product code (`bin/pixip.ts` imports), so it needs the owner's decision and possibly an `ARCHITECTURE.md` update. Everything above is independent of it, so it can wait.

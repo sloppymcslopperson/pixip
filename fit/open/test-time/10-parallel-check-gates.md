@@ -6,7 +6,7 @@ project: pixip
 
 ### Findings
 
-Measured on this 2-CPU box; the full baseline lives in the `check-timing` inbox report, and `50-check-timings-report` makes it reproducible.
+Measured on this 2-CPU box; the full baseline lives in the `check-timing` inbox report, and `30-check-timings-report` makes it reproducible.
 
 - `typecheck` 16.7 s
 - `lint` 40.7 s
@@ -33,4 +33,8 @@ The owner has not picked an implementation. Options: a tiny `tools/check-paralle
 
 ### Out of scope
 
-Making the individual steps faster (that is `20-workspace-tooling-once` and `40-daemon-spawn-tax`); only scheduling changes here.
+Making the individual steps faster (that is `40-workspace-tooling-once` and `50-daemon-spawn-tax`); only scheduling changes here.
+
+### Work order
+
+First of the test-time tickets: it is the smallest scheduling-only change, and it settles the shape of `check` into a `check:static` group that `20-fast-and-full-test-scripts` and `30-check-timings-report` both build on.

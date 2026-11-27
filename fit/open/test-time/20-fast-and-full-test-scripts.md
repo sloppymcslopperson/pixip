@@ -31,3 +31,7 @@ The split mechanism is open: an explicit deny-list or allow-list of files in the
 - `npm test` still runs all 502 tests, and a deliberate failure in an excluded file still fails `npm test`.
 - `npm run check:fast` is documented in `AGENTS.md` and measured.
 - The ticket records the actual file list of the fast set and the reason it is safe to skip the rest mid-ticket.
+
+### Work order
+
+Second: `check:fast` should call the `check:static` group from `10-parallel-check-gates`, so it wants that landed first. It is the biggest per-ticket relief (131&ndash;157 s suite down to ~20 s for the 58 cheap files) and carries no product risk.

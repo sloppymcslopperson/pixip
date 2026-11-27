@@ -25,3 +25,7 @@ Whether this is a script (`tools/check-timings.mjs`), a flag on an existing runn
 - One command reproduces the baseline numbers on the current tree.
 - The output makes the five slow suites and the four workspace constant costs visible without extra shell work.
 - No new dependency required; if one is, the ticket says which and why.
+
+### Work order
+
+Third: written after `10-parallel-check-gates` and `20-fast-and-full-test-scripts` so the harness encodes the settled step list and the fast/full split instead of today's serial chain. It is also what makes the before/after claims in `40` and `50` cheap to check.

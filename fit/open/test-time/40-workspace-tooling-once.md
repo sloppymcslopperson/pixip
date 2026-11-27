@@ -40,3 +40,7 @@ The four workspace checks together are under 60 s, measured before and after; al
 ### Notes
 
 Verify that a cache cannot mask a real type error: probe by introducing a bad type in one workspace and confirming the cached run still fails.
+
+### Work order
+
+Fourth: the largest absolute win (~154 s of every run) but the most dangerous, since a shared cache or build-info file can mask a real type error. Sequenced after the scheduling and split work so the cheaper wins land without waiting on this, and after `30-check-timings-report` so the payoff is measurable rather than asserted.
