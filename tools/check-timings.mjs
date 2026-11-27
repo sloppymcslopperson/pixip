@@ -25,7 +25,7 @@ const FILE_CONCURRENCY = 2;
 /** Soft budgets in seconds, from the settled full pipeline. */
 const BUDGETS = {
 	"check:static": 55,
-	"test:full": 170,
+	"test:full": 70,
 	"check:browser": 40,
 	"check:workspaces": 60,
 };
@@ -131,7 +131,7 @@ const steps = [
 	{
 		name: "test:full",
 		command: process.execPath,
-		args: ["--import", "./test/setup.ts", "--test", "--test-reporter=tap", ...files],
+		args: ["--import", "./test/setup.ts", "--test", "--test-concurrency=2", "--test-reporter=tap", ...files],
 		budget: BUDGETS["test:full"],
 	},
 	{ name: "check:browser", command: NPM, args: ["run", "--silent", "check:browser"], budget: BUDGETS["check:browser"] },
