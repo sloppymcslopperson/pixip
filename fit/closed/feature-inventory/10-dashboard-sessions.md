@@ -2,6 +2,7 @@
 area: dashboard-sessions
 part: inventory
 project: feature-inventory
+commit: "5f5f2032db1e2361564633bb1998b632d793b8c7"
 ---
 
 Capture the dashboard as the product's home surface: session discovery, grouping, creation, state visibility, settings, and archive/trash management. This section describes what a person sees and does before opening any transcript, on phone and wide layouts.
