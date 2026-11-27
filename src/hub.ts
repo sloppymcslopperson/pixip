@@ -20,6 +20,7 @@ import {
 import type { CommandLayer } from "./commands.ts";
 import type { CreateWorktreeRequest } from "./worktree.ts";
 import type { RemoveWorktreeRequest, RemoveWorktreeResult, WorktreeListing } from "./hubWorktree.ts";
+import { InboxReportStore, type ReportInput } from "./inboxReport.ts";
 import type { RpcChild } from "./rpc.ts";
 import type {
 	NameSource,
@@ -182,6 +183,8 @@ export class Hub {
 	private readonly branchCache = new Map<string, { branch?: string; at: number }>();
 	/** Durable inbox shared by every session and the dashboard. */
 	readonly inboxStore: InboxStore;
+	/** Hub-owned HTML reports attached to inbox messages. */
+	readonly reportStore: InboxReportStore;
 	/** Set when the optional `pixip-inbox` extension announced itself in this daemon run. */
 	inboxExtensionSeen = false;
 	/** Daemon URL injected into every Pi child, set once the server is listening. */
@@ -202,7 +205,11 @@ export class Hub {
 			...(options.inboxLimit !== undefined ? { limit: options.inboxLimit } : {}),
 			log: options.log,
 		});
+		this.reportStore = new InboxReportStore({ root: join(dataDir, "reports"), log: options.log });
 		this.startupTrash = options.skipStartupTrash ? Promise.resolve() : this.purgeTrashOnStart();
+		void this.inboxSweepReports().catch((error: unknown) =>
+			options.log(`report sweep failed: ${(error as Error).message}`),
+		);
 	}
 
 	// ---------------------------------------------------------------- listing
@@ -244,8 +251,19 @@ export class Hub {
 		body: string;
 		purpose: InboxPurpose;
 		sessionId?: string;
+		reportName?: string;
 	}): Promise<InboxView> {
 		return await hubInbox.inboxSend.apply(this, arguments as any);
+	}
+
+	/** Manage one hub-owned HTML report (`inbox_report` extension action). */
+	async inboxReport(input: ReportInput): Promise<unknown> {
+		return await hubInbox.inboxReport.apply(this, arguments as any);
+	}
+
+	/** Remove published reports with no message and drafts past their TTL. */
+	async inboxSweepReports(): Promise<string[]> {
+		return await hubInbox.inboxSweepReports.apply(this, arguments as any);
 	}
 
 	async inboxRead(id: string): Promise<number> {

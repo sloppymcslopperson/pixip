@@ -8,6 +8,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 
 import { createDirectory, DirError, listDirectories } from "./dirs.ts";
 import { INBOX_PURPOSES, InboxError, type InboxFilter, type InboxPurpose } from "./inbox.ts";
+import { ReportError } from "./inboxReport.ts";
 import { detectImageMime, MAX_UPLOAD_BYTES, safeUploadName } from "./attachments.ts";
 import { coverageKeys, Hub } from "./hub.ts";
 import {
@@ -79,6 +80,10 @@ function inboxAuthorized(req: IncomingMessage, token: string | undefined): boole
 	const expected = Buffer.from(token);
 	return presented.length === expected.length && timingSafeEqual(presented, expected);
 }
+
+const REPORT_CSP =
+	"default-src 'none'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; " +
+	"script-src 'none'; object-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'; connect-src 'none'; media-src 'none'";
 
 /** The refresh endpoint changes server state, so only local peers may call it. */
 export function isLoopback(req: IncomingMessage): boolean {
@@ -246,6 +251,33 @@ async function handleHttp(
 			send(200, JSON.stringify({ ok: true, ...report }));
 			return;
 		}
+		const reportMatch = /^\/reports\/([^/]+)(?:\/(.*))?$/.exec(url.pathname);
+		if (req.method === "GET" && reportMatch?.[1]) {
+			const name = decodeURIComponent(reportMatch[1]);
+			const rest = reportMatch[2];
+			if (rest === undefined) {
+				res.writeHead(301, { location: `${url.pathname}/${url.search}`, "cache-control": "no-store" });
+				res.end();
+				return;
+			}
+			const asset = rest === "" ? undefined : decodeURIComponent(rest);
+			if (asset && asset.includes("/")) {
+				send(404, JSON.stringify({ error: "not found" }));
+				return;
+			}
+			const file = await hub.reportStore.file(name, asset);
+			const body = await readFile(file.path);
+			res.writeHead(200, {
+				"content-type": file.contentType,
+				"content-length": body.length,
+				"cache-control": "no-store",
+				"content-security-policy": REPORT_CSP,
+				"x-content-type-options": "nosniff",
+				"referrer-policy": "no-referrer",
+			});
+			res.end(body);
+			return;
+		}
 		if (url.pathname === "/api/inbox" || url.pathname.startsWith("/api/inbox/")) {
 			if (!inboxAuthorized(req, hub.inboxToken)) {
 				send(401, JSON.stringify({ error: "inbox token required" }));
@@ -276,8 +308,14 @@ async function handleHttp(
 					body: parsed["body"],
 					purpose: typeof purpose === "string" ? (purpose as InboxPurpose) : "attention-needed",
 					sessionId: typeof parsed["sessionId"] === "string" ? parsed["sessionId"] : undefined,
+					reportName: typeof parsed["reportName"] === "string" ? parsed["reportName"] : undefined,
 				});
 				send(200, JSON.stringify({ ok: true, message }));
+				return;
+			}
+			if (req.method === "POST" && url.pathname === "/api/inbox/reports") {
+				const parsed = JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>;
+				send(200, JSON.stringify({ ok: true, report: await hub.inboxReport(parsed) }));
 				return;
 			}
 			if (req.method === "POST" && url.pathname === "/api/inbox/extension") {
@@ -568,7 +606,7 @@ async function handleHttp(
 		send(200, asset, CONTENT_TYPES[extname(normalized)] ?? "application/octet-stream");
 	} catch (error) {
 		const status =
-			error instanceof DirError || error instanceof InboxError
+			error instanceof DirError || error instanceof InboxError || error instanceof ReportError
 				? error.status
 				: error instanceof PayloadTooLargeError
 					? 413

@@ -9,7 +9,16 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { announceInbox, INBOX_PURPOSES, INBOX_TOOL, type InboxPurpose, runInboxTool } from "./inbox.ts";
+import {
+	announceInbox,
+	INBOX_PURPOSES,
+	INBOX_TOOL,
+	type InboxPurpose,
+	REPORT_ACTIONS,
+	REPORT_TOOL,
+	runInboxTool,
+	runReportTool,
+} from "./inbox.ts";
 
 const PurposeSchema = Type.String({
 	enum: [...INBOX_PURPOSES],
@@ -22,6 +31,31 @@ const InboxSendParams = Type.Object({
 		description: "The message itself. Plain text, up to 8 KB. Put details, links and next steps here.",
 	}),
 	purpose: PurposeSchema,
+	reportName: Type.Optional(
+		Type.String({ description: "Attach this existing HTML report; the message gets a view-report link" }),
+	),
+});
+
+const ReportParams = Type.Object({
+	action: Type.Optional(
+		Type.String({
+			enum: [...REPORT_ACTIONS],
+			description: "new, write, add_asset, remove_asset or show. Omit the whole call (or action) to print help.",
+		}),
+	),
+	name: Type.Optional(Type.String({ description: "Report name: letters, digits, dash, underscore or dot" })),
+	html: Type.Optional(Type.String({ description: "Complete index.html for action write (max 1 MiB)" })),
+	existingHtml: Type.Optional(
+		Type.String({
+			description:
+				"Exact current HTML from action show. Required when overwriting an existing report; omit on the first write.",
+		}),
+	),
+	path: Type.Optional(Type.String({ description: "Absolute path to a local file for action add_asset" })),
+	filename: Type.Optional(
+		Type.String({ description: "Optional top-level destination filename for add_asset; defaults to the source name" }),
+	),
+	asset: Type.Optional(Type.String({ description: "Top-level asset filename to remove for action remove_asset" })),
 });
 
 export default function pixipInbox(pi: ExtensionAPI) {
@@ -48,7 +82,30 @@ export default function pixipInbox(pi: ExtensionAPI) {
 				subject: params.subject,
 				body: params.body,
 				purpose: params.purpose as InboxPurpose,
+				...(params.reportName ? { reportName: params.reportName } : {}),
 			});
+		},
+	});
+
+	pi.registerTool({
+		name: REPORT_TOOL,
+		label: "Manage inbox report",
+		description:
+			"Create and edit an HTML report hosted by pixip for the user's inbox. The report is a hub-owned " +
+			"directory; edit it only through this tool. Actions: new (create), write (validate and replace " +
+			"index.html), add_asset (copy a local image/CSS/font/SVG), remove_asset (remove an unused asset), " +
+			"show (read the exact current HTML and assets). Reports are sandboxed: no JavaScript, iframes, " +
+			"external resource loads or form submission. Call without arguments for help. Attach a report to a " +
+			"message with inbox_send({reportName}).",
+		promptSnippet: "Create and edit an HTML report for the inbox",
+		promptGuidelines: [
+			"Use inbox_report to create and update an HTML report, then send it with inbox_send({reportName}).",
+			"Call inbox_report with no arguments for help. Keep reports self-contained: add local images with add_asset instead of external image URLs.",
+			"When overwriting an existing report, pass the exact current HTML from action show as existingHtml.",
+		],
+		parameters: ReportParams,
+		async execute(_toolCallId, params) {
+			return await runReportTool(params);
 		},
 	});
 }

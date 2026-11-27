@@ -231,22 +231,53 @@ plain shell is labelled `local shell`. The CLI talks to `PIXIP_DAEMON_URL` when
 set, otherwise to the daemon running for `--data-dir`. Purposes are
 `attention-needed`, `deliverable`, `extra-info` and `no-rush`.
 
-The REST surface is `POST/GET /api/inbox`, `POST /api/inbox/read-all`,
-`POST /api/inbox/:id/read|archive|restore`, and `DELETE /api/inbox/:id`; the
-dashboard socket receives an `inbox` frame with the unread count and newest
-message on every change. `POST /api/inbox/extension` is the addon's one-shot
-"I am loaded" report: while it has not been seen and the inbox is empty, the
-dashboard bar stays hidden instead of showing dead chrome. The flag lives in
-daemon memory, so a restart re-learns it from the next Pi child that loads the
-extension. `--inbox-token` (or `PIXIP_INBOX_TOKEN`) turns on the
+The REST surface is `POST/GET /api/inbox`, `POST /api/inbox/reports`,
+`POST /api/inbox/read-all`, `POST /api/inbox/:id/read|archive|restore`, and
+`DELETE /api/inbox/:id`; the dashboard socket receives an `inbox` frame with the
+unread count and newest message on every change. `POST /api/inbox/extension` is
+the addon's one-shot "I am loaded" report: while it has not been seen and the
+inbox is empty, the dashboard bar stays hidden instead of showing dead chrome.
+The flag lives in daemon memory, so a restart re-learns it from the next Pi child
+that loads the extension. `--inbox-token` (or `PIXIP_INBOX_TOKEN`) turns on the
 `Authorization: Bearer` seam for the API and passes the same token to Pi
 children; it is off by default. Every child gets `PIXIP_DAEMON_URL` regardless.
 
+### HTML reports
+
+An agent can attach an HTML report to a message. Reports are agent-only (there is
+no CLI command) and live in hub-owned directories under `<data-dir>/reports/`.
+The `inbox_report` tool is the only editing surface:
+
+```text
+inbox_report({action:"new", name:"migration"})
+inbox_report({action:"add_asset", name:"migration", path:"/tmp/chart.png"})
+inbox_report({action:"write", name:"migration", html:"<!doctype html>…"})
+inbox_send({subject:"Migration report", body:"The staging run is green.", purpose:"deliverable", reportName:"migration"})
+```
+
+`write` validates the whole document and requires `existingHtml` (the exact
+current HTML from `action:"show"`) when overwriting. `add_asset` copies a local
+PNG/JPEG/GIF/WebP/SVG/CSS/font into the top level of the report and returns the
+filename to reference. Local images are capped at 1 MiB each, `index.html` at
+1 MiB and the whole report at 10 MiB. No JavaScript, iframes, objects/embeds,
+event handlers, external resource loads or form submission; form markup is
+allowed for style demos, and external `<a href>` navigation is allowed. Use
+`add_asset` for remote images rather than linking them.
+
+The report is served at `/reports/<name>/` (relative assets work, and
+`/reports/<name>` redirects to the slash) with a locked-down CSP. There is no
+report auth: the trust boundary is the same as the dashboard. A report can be
+attached to more than one message; deleting or evicting the last message that
+references it removes the directory. Unattached drafts older than 24 hours are
+swept.
+
 `extensions/pixip-inbox` is the opt-in agent face: `inbox_send({subject, body,
-  purpose})` posts to the same endpoint, sends `PIXIP_INBOX_TOKEN` only when it
-is set, and returns a tool error (daemon down, wrong token) instead of crashing.
-On load it announces itself (best-effort, failures ignored), which is what makes
-the empty inbox bar appear.
+purpose, reportName?})` and `inbox_report({action, …})` post to the same
+endpoint, send `PIXIP_INBOX_TOKEN` only when it is set, and return a tool error
+(daemon down, wrong token, validation failure) instead of crashing. Calling
+`inbox_report` with no arguments prints its help text. On load the extension
+announces itself (best-effort, failures ignored), which is what makes the empty
+inbox bar appear.
 
 ```bash
 pi install /path/to/pixip/extensions/pixip-inbox

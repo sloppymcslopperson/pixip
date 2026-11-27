@@ -302,6 +302,16 @@ function renderCard(message) {
 
 	const actions = document.createElement("div");
 	actions.className = "inbox-actions";
+	if (typeof message.reportName === "string" && message.reportName) {
+		const report = document.createElement("a");
+		report.className = "inbox-report";
+		report.href = `/reports/${encodeURIComponent(message.reportName)}/`;
+		report.target = "_blank";
+		report.rel = "noopener noreferrer";
+		report.textContent = "view report";
+		report.addEventListener("click", (event) => event.stopPropagation());
+		actions.append(report);
+	}
 	const archive = document.createElement("button");
 	archive.type = "button";
 	archive.textContent = message.archivedAt ? "restore" : "archive";

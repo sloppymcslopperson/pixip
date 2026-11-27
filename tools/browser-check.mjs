@@ -84,11 +84,18 @@ async function bootFixture() {
 	const main = await hub.create(repo, "repo main");
 	const peer = await hub.create(repo, "repo peer");
 	const worktree = await hub.create(repo, "worktree agent", { branch: "ui-check" });
+	await hub.inboxReport({ action: "new", name: "browser-report" });
+	await hub.inboxReport({
+		action: "write",
+		name: "browser-report",
+		html: "<!doctype html><html><body><h1>Browser report</h1><p>served safely</p></body></html>",
+	});
 	await hub.inboxSend({
 		subject: "browser inbox",
 		body: "This message checks the inbox sheet, filters and sender row.",
 		purpose: "attention-needed",
 		sessionId: main.logicalId,
+		reportName: "browser-report",
 	});
 	return {
 		paths,
@@ -571,6 +578,22 @@ async function runInboxFlow(page, base) {
 		},
 	);
 	await checkNoOverflow(page, "inbox message expanded");
+	assert.equal(
+		await page.evaluate(() => document.querySelector("#inbox-page .inbox-actions a.inbox-report")?.textContent ?? ""),
+		"view report",
+		"report message has a view-report link",
+	);
+	const reportTarget = page
+		.browser()
+		.waitForTarget((target) => target.url().includes("/reports/browser-report/"), { timeout: FLOW_TIMEOUT });
+	await page.click("#inbox-page .inbox-actions a.inbox-report");
+	const opened = await reportTarget;
+	const reportPage = await opened.page();
+	assert.ok(reportPage, "report opened in a new tab");
+	await reportPage.waitForFunction(() => document.querySelector("h1")?.textContent === "Browser report", {
+		timeout: FLOW_TIMEOUT,
+	});
+	await reportPage.close();
 
 	// Archive hides the row; the archived toggle restores visibility.
 	await page.evaluate(() =>

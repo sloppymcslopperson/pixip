@@ -607,6 +607,40 @@ full-entry path use the same `toolResultParts()` rules. The tool's text keeps a
 original. That route streams one regular image file (magic-byte checked,
 `Content-Disposition: attachment`, 100 MB cap) and refuses relative paths.
 
+## Inbox HTML reports
+
+An inbox message may carry `reportName`, a hub-owned directory at
+`<data-dir>/reports/<name>/` with `index.html` plus top-level assets. The agent
+never edits those files directly: `extensions/pixip-inbox` exposes one
+`inbox_report` tool with `new`, `write`, `add_asset`, `remove_asset` and `show`
+actions. Each write is validated before the previous state is replaced, so the
+serving path does no parsing. `write` requires the exact previous HTML in
+`existingHtml` when overwriting, which makes edits optimistic-concurrency-safe;
+`add_asset` copies and validates one local file and returns its top-level
+filename; `remove_asset` refuses while HTML or CSS still references it.
+
+`src/inboxReport.ts` owns the directory, the JSON marker (created/updated/
+attached timestamps), and validation. `parse5` parses HTML and SVG into an
+allowlist of tags and attributes; scripts, iframes, objects/embeds, event
+handlers, `javascript:` URLs, meta refresh, external/root-relative resources and
+form submission are rejected. CSS `url()` may reference only top-level assets or
+small `data:image/*`; `@import` and executable CSS are rejected. Form markup is
+allowed but inert. Limits are 1 MiB for `index.html`, 1 MiB per asset and 10 MiB
+per report. Assets are PNG/JPEG/GIF/WebP/SVG/CSS/WOFF/WOFF2/TTF/OTF; raster
+images over 1 MiB are rejected (the agent must downscale, matching
+`show_image_to_user`).
+
+`GET /reports/<name>/` serves `index.html`, `/reports/<name>` redirects to the
+slash, and `/reports/<name>/<asset>` serves one top-level file. Responses carry
+a locked-down CSP (`script-src 'none'`, `object-src 'none'`, `frame-src 'none'`,
+`form-action 'none'`, local styles/images/fonts only), `nosniff` and
+`no-referrer`. There is no report auth, matching the dashboard trust boundary.
+
+Messages may share a report. Deleting or evicting the last message that
+references it removes the directory; a 24-hour sweep removes unattached drafts.
+The client renders a `view report` link on the message card and opens the report
+in a new tab.
+
 ## First-prompt session labels
 
 A new session with no messages and no name gets a label from its first user
@@ -743,6 +777,7 @@ protocol path is still one obvious place to start:
 | `src/hubControl.ts`                                                         | snapshot/history, prompt/steer, queue/bash, policy, soft refresh                                                           |
 | `src/hubSession.ts`                                                         | model/thinking/name, tree/fork/clone/import, `/new` re-key, UI replay                                                      |
 | `src/jsonl.ts`                                                              | pure parse/window/truncate/coverage helpers (unit-tested)                                                                  |
+| `src/inboxReport.ts`                                                        | hub-owned report directories, `parse5` allowlist validation, cleanup and serving lookup                                    |
 | `src/sessionIndex.ts`                                                       | index/archive/trash record shapes and normalization                                                                        |
 | `src/worktree.ts` / `src/hubWorktree.ts`                                    | the git boundary (detect/create/list/remove/dirty/merged) and hub list/remove safety rules                                 |
 | `src/wire.ts`                                                               | the frame constructors; the protocol table above is authoritative                                                          |

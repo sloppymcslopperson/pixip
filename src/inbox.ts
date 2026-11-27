@@ -39,6 +39,8 @@ export interface InboxMessage {
 	readAt: string | null;
 	archivedAt: string | null;
 	sender: InboxSender;
+	/** Hosted HTML report name (`/reports/<name>/`), when this message attaches one. */
+	reportName?: string;
 }
 
 export interface InboxView extends InboxMessage {
@@ -77,6 +79,7 @@ export interface InboxSendInput {
 	body: string;
 	purpose: InboxPurpose;
 	sender: InboxSender;
+	reportName?: string;
 }
 
 export class InboxError extends Error {
@@ -133,6 +136,7 @@ function normalizeMessage(raw: unknown): InboxMessage | undefined {
 		readAt: typeof item.readAt === "string" ? item.readAt : null,
 		archivedAt: typeof item.archivedAt === "string" ? item.archivedAt : null,
 		sender,
+		...(typeof item.reportName === "string" && item.reportName ? { reportName: item.reportName } : {}),
 	};
 }
 
@@ -203,6 +207,7 @@ export class InboxStore {
 				readAt: null,
 				archivedAt: null,
 				sender: input.sender,
+				...(input.reportName ? { reportName: input.reportName } : {}),
 			};
 			messages.push(message);
 			this.evict(messages);
