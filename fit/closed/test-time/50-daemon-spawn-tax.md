@@ -90,3 +90,23 @@ Applied `{ concurrency: 3 }` to all four top-level describes in `test/daemon.tes
 The 12 s target is still not met. Hard restart alone is **11.4 s** at concurrency 8 (8 tests, each replacing a daemon), so even perfect overlap of the other describes cannot go below ~11.5 s plus startup. Reaching <12 s reliably requires the in-process harness (excluded earlier) or merging hard-restart scenarios so fewer real restarts run.
 
 The concurrency change is being committed as an improvement while ticket 50 stays open for the owner's decision on the revised target.
+
+### Closure
+
+Closed by owner decision ("Don't let the perfect be the enemy of the good") with the 12 s target explicitly revised rather than met.
+
+Final outcome:
+
+- Product side met its target: `pixip --help` cold is **~170 ms** (was ~420 ms), and `status`/`logs`/`stop` are ~160–200 ms because they no longer load the hub/server graph.
+- Test side reduced CLI spawns **55 → 35** and `daemon.test.ts` from **42.4 s → 23.3 s**.
+- The 12 s target was not reached. Hard restart alone is 11.4 s and the suite still performs 17 real daemon starts plus 10 restarts; the in-process harness was explicitly out of scope.
+- Per-describe concurrency `{ concurrency: 3 }` was kept; running the four describes concurrently was tried and reverted because the SIGHUP test flaked.
+- No test was dropped or weakened: 27/27 daemon tests and 502/502 full-suite tests pass.
+
+Pipeline result after the later scheduling work (separate commits, not part of this ticket's acceptance):
+
+- `npm test`: **53.5 s** on this 2-core box, with concurrency sized from `os.availableParallelism()` (24 workers on a 24-core machine).
+- `npm run test:fast`: **25.3 s**, 461 tests.
+- Full `npm run check`: **120.8 s**, green.
+
+Commits: `4f1229e`, `c61571a`, `8c772cd`, `3c42efc`.
