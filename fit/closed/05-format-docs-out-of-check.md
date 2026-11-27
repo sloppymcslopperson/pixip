@@ -18,7 +18,7 @@ project: pixip
 ### Scope
 
 - `package.json`: `format:check` becomes an explicit code glob (`ts,tsx,js,mjs,cjs,json,css,html`); new `format:docs` checks `**/*.md`. `format` (`prettier --write .`) stays as the deliberate whole-tree rewrite.
-- `AGENTS.md`: one line in the pixip rules noting that prose is not part of `npm run check`, so nobody re-adds it or "fixes" a red docs file by hand.
+- `AGENTS.md`: one rule noting that prose is not part of `npm run check`, so nobody re-adds it or hand-fixes a red docs file.
 - No change to `.prettierignore` and no change to Prettier config.
 
 ### Acceptance
@@ -29,14 +29,6 @@ project: pixip
 - `npm run check` runs past `format:check` into lint, imports, tests, browser and workspace checks instead of aborting at step 3.
 - Existing coverage is not lost: every tracked non-Markdown file that the old `prettier --check .` covered is still covered.
 
-### Verification
-
-Compare the old and new file sets explicitly, probe a misformatted `.ts` (must fail), a misformatted file in `tmp/` and `fit/` (must be ignored), then run the full `npm run check` once and record the wall time against the 387 s baseline.
-
-### Notes
-
-Measured context for the sibling timing ticket: `format:check` was 20.2 s of the 387 s pipeline and is the step that currently reports red first.
-
 ### Result
 
 `package.json` now has:
@@ -44,7 +36,7 @@ Measured context for the sibling timing ticket: `format:check` was 20.2 s of the
 - `"format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,cjs,json,css,html}\""`
 - `"format:docs": "prettier --check \"**/*.md\""`
 
-`format` is unchanged (`prettier --write .`), so a whole-tree rewrite, including prose, is still one deliberate command. `.prettierignore` and `.prettierrc.json` are untouched.
+`format` is unchanged (`prettier --write .`), so a whole-tree rewrite, including prose, is still one deliberate command. `.prettierignore` and `.prettierrc.json` are untouched. Code shipped in `2c148b1`; the `AGENTS.md` rule followed once the file was free (see Deviations).
 
 ### Coverage check (old vs new file sets)
 
@@ -62,5 +54,5 @@ Worth recording: 83 of the repo's 91 tracked Markdown files were already uncheck
 
 ### Deviations
 
-- The `AGENTS.md` one-liner was **not** added. `AGENTS.md` already carries another agent's uncommitted edits, and staging the file to add my line would have swept unrelated work into this commit. Deferred to whoever finishes that change, or to a follow-up ticket.
+- The `AGENTS.md` rule was not in `2c148b1`: the file carried another agent's uncommitted edit, and staging it then would have swept unrelated work into that commit. Their change was committed on its own first (`22bc541` "Forbid unrequested daemon restarts"), and this ticket's rule was added afterwards. The rule sits with the other client/build rules: `format:check` covers code only, `format:docs` checks Markdown on demand, and Markdown must not go back into the gate.
 - `format:docs` is red on this tree right now (those 8 files). That is the intended state of an on-demand check, not a regression: it is no longer wired into `check`.

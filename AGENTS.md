@@ -76,6 +76,10 @@ Rules:
   ticket.
 - Client assets are served as-is: no bundler, no build step, no framework. Keep
   the client small and keep `src/client/render.js` pure so `test/` can cover it.
+- Prose is not format-gated: `npm run format:check` covers code only, and
+  `npm run format:docs` checks Markdown on demand. Trailing spaces or table
+  padding in a doc must not fail `npm run check`, so do not add Markdown back to
+  the gate and do not hand-fix a red docs file because a check complained.
 - The client is responsive by contract: one asset set, CSS media/container queries
   only, no user-agent branching and no duplicated markup per breakpoint. Every
   layout change must be checked with the `browser` tool (agent-browser) by setting
