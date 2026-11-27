@@ -2,6 +2,7 @@
 area: refs
 part: inventory
 project: feature-inventory
+commit: "011c6362566ef91786d67545db8d3afdc4202e1c"
 ---
 
 Capture the reference system end-to-end: how an agent writes `[pixip-ref=…]`, how it becomes a chip, how a user resolves, copies or navigates it, and how the CLI resolves it. This is a cross-cutting area spanning transcript, composer, client, hub and CLI.
