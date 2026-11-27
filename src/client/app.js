@@ -359,7 +359,7 @@ ui.jump.addEventListener("click", () => {
 	ui.log.scrollTo({ top: ui.log.scrollHeight, behavior: "smooth" });
 });
 
-/** Message actions (copy reftag, fork, copy with text) are delegated: the
+/** Message actions (insert reftag, fork, copy ref, copy with text) are delegated: the
  *  transcript is repainted in chunks, so per-button listeners would be lost. */
 ui.log.addEventListener("click", (event) => {
 	const image = event.target.closest(".msg-image img");

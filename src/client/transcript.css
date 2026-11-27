@@ -89,7 +89,7 @@
 	margin: 0 auto;
 	border-radius: 10px;
 }
-/* Per-message reftag actions: `#` copies the tag, `…` opens fork and the
+/* Per-message reftag actions: `#` inserts the tag, `…` opens fork and the
    tag-plus-excerpt escape hatch. In flow at the block's bottom-right corner so
    they never cover text at phone widths. */
 .reftag-actions {

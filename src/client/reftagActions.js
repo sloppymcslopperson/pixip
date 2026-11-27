@@ -1,8 +1,12 @@
 // Reftag actions for transcript blocks and inbox cards. Neutral module: it
 // imports the clipboard, toast and kernel state, never a feature cluster.
 import { copyText } from "./clipboard.js";
-import { resolveRefTags } from "./reftagResolve.js";
+import { resize } from "./composerInput.js";
+import { resolveRefTags, updateComposerRefTags } from "./reftagResolve.js";
+import { appendRefTag } from "./reftagText.js";
 import { formatRefTag, refForEntry } from "./reftags.js";
+import { refreshSendState } from "./sendState.js";
+import { toast } from "./toast.js";
 import { send } from "./transport.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
@@ -37,6 +41,31 @@ export function tagForLiveMessage(message, fallbackTimestamp) {
 	if (!session) return null;
 	const record = message && typeof message === "object" ? message : { role: "assistant", timestamp: fallbackTimestamp };
 	return formatRefTag(refForEntry(session, { message: record }) ?? {});
+}
+
+/** The composer can take the tag when it is enabled and no surface owns it. */
+function canInsertRef() {
+	return !ui.input.disabled && !ui.composer.hidden && (ui.surface?.hidden ?? true);
+}
+
+/** Put one block's tag into the composer; copy instead when the composer is gated. */
+export function insertBlockRef(block) {
+	const tag = block?.dataset?.reftag;
+	if (!tag) return;
+	if (!canInsertRef()) {
+		void copyText(tag).then((copied) => {
+			if (copied) toast("composer unavailable — ref tag copied");
+		});
+		return;
+	}
+	const input = ui.input;
+	input.value = appendRefTag(input.value, tag);
+	input.focus();
+	const end = input.value.length;
+	input.setSelectionRange(end, end);
+	resize();
+	refreshSendState();
+	void updateComposerRefTags();
 }
 
 let openMenu = null;
@@ -74,6 +103,7 @@ function showMenu(anchor, block, forkEntry) {
 	menu.className = "reftag-menu";
 	menu.setAttribute("role", "menu");
 	if (forkEntry) menu.append(menuButton("fork", () => send({ t: "fork", entryId: forkEntry })));
+	menu.append(menuButton("copy ref", () => copyBlockRef(block)));
 	menu.append(menuButton("copy with text", () => copyBlockRef(block, { withText: true })));
 	document.body.append(menu);
 	const box = anchor.getBoundingClientRect();
@@ -92,13 +122,13 @@ function actionsElement(block, tag) {
 	const actions = document.createElement("div");
 	actions.className = "reftag-actions";
 
-	const copy = document.createElement("button");
-	copy.type = "button";
-	copy.className = "reftag-copy";
-	copy.dataset.reftagCopy = "";
-	copy.title = "Copy reftag";
-	copy.setAttribute("aria-label", "Copy reftag");
-	copy.textContent = "#";
+	const insert = document.createElement("button");
+	insert.type = "button";
+	insert.className = "reftag-copy";
+	insert.dataset.reftagInsert = "";
+	insert.title = "Insert reftag";
+	insert.setAttribute("aria-label", "Insert reftag");
+	insert.textContent = "#";
 
 	const more = document.createElement("button");
 	more.type = "button";
@@ -108,7 +138,7 @@ function actionsElement(block, tag) {
 	more.setAttribute("aria-label", "More actions");
 	more.textContent = "…";
 
-	actions.append(copy, more);
+	actions.append(insert, more);
 	block.dataset.reftag = tag;
 	return actions;
 }
@@ -219,6 +249,13 @@ export function handleRefTagAction(event) {
 		const forkEntry = block?.classList.contains("user") ? block?.dataset?.entry : null;
 		if (openMenu) closeMenu();
 		else showMenu(more, block, forkEntry);
+		return true;
+	}
+	const insert = event.target.closest?.("[data-reftag-insert]");
+	if (insert) {
+		event.preventDefault();
+		event.stopPropagation();
+		insertBlockRef(insert.closest("[data-reftag]"));
 		return true;
 	}
 	const button = event.target.closest?.("[data-reftag-copy], [data-reftag-copy-text]");

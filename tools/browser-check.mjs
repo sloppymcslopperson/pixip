@@ -214,41 +214,113 @@ async function clickRefCopy(page, selector) {
 	assert.equal(clicked, true, `reftag copy button exists in ${selector}`);
 }
 
-async function runRefCopyFlow(page, base, sessionId, hub) {
+async function blockTags(page, count = 2) {
+	const tags = await page.evaluate(() =>
+		[...document.querySelectorAll("#log [data-reftag]")].map((node) => node.dataset.reftag).filter(Boolean),
+	);
+	const unique = [...new Set(tags)];
+	assert.ok(unique.length >= count, `at least ${count} addressable blocks: ${JSON.stringify(unique)}`);
+	return unique.slice(0, count);
+}
+
+async function clickTagAction(page, tag, action) {
+	const clicked = await page.evaluate(
+		({ tag, action }) => {
+			const block = [...document.querySelectorAll("#log [data-reftag]")].find((node) => node.dataset.reftag === tag);
+			const button = block?.querySelector(`[data-reftag-${action}]`);
+			button?.click();
+			return Boolean(button);
+		},
+		{ tag, action },
+	);
+	assert.equal(clicked, true, `reftag ${action} exists for ${tag}`);
+}
+
+async function openBlockMenu(page, tag) {
+	const clicked = await page.evaluate((tag) => {
+		const block = [...document.querySelectorAll("#log [data-reftag]")].find((node) => node.dataset.reftag === tag);
+		const button = block?.querySelector("[data-reftag-more]");
+		button?.click();
+		return Boolean(button);
+	}, tag);
+	assert.equal(clicked, true, `reftag menu exists for ${tag}`);
+}
+
+async function clickBlockMenu(page, label) {
+	const clicked = await page.evaluate((label) => {
+		const button = [...document.querySelectorAll("body > .reftag-menu button")].find(
+			(node) => (node.textContent ?? "").trim() === label,
+		);
+		button?.click();
+		return Boolean(button);
+	}, label);
+	assert.equal(clicked, true, `reftag menu item ${label} exists`);
+}
+
+async function runRefCopyFlow(page, base, sessionId, hub, paths) {
 	await page.goto(`${base}?flow=reftags#s=${sessionId}`, { waitUntil: "domcontentloaded", timeout: FLOW_TIMEOUT });
 	await waitForSession(page);
 	await page.waitForSelector("#log [data-entry] .reftag-actions", { timeout: FLOW_TIMEOUT });
+	const [firstTag, secondTag] = await blockTags(page);
+	const beforeCopied = await page.evaluate(() => window.__copied.length);
+	const beforeRecords = (await spawns(paths)).length;
 
-	// Snapshot block: one tap copies the bare history tag.
-	const first = await page.evaluate(
-		() => document.querySelector("#log [data-entry]")?.getAttribute("data-entry") ?? null,
+	// The default action inserts the bare tag, never copies and never sends.
+	await setComposer(page, "");
+	await clickTagAction(page, firstTag, "insert");
+	const emptyInsert = await page.evaluate(() => document.querySelector("#input").value);
+	assert.equal(emptyInsert, firstTag, "an empty composer gets exactly the bare tag");
+	assert.equal(await page.evaluate(() => window.__copied.length), beforeCopied, "inserting does not copy");
+	assert.deepEqual(
+		(await chipLabels(page)).map((chip) => chip.tag),
+		[firstTag],
+		"the inserted tag becomes a chip",
 	);
-	assert.ok(first, "a snapshot block is addressable");
-	await clickRefCopy(page, "#log [data-entry]");
-	assert.match(await lastCopied(page), /^\[pixip-ref=history\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+\]$/);
+	assert.equal(
+		(await spawns(paths)).slice(beforeRecords).filter((record) => record.type === "prompt").length,
+		0,
+		"inserting never sends a prompt",
+	);
 
-	// The menu carries fork on a user block and tag-plus-text on every block.
-	const menu = await page.evaluate(() => {
-		document.querySelector("#log .block.user[data-entry] .reftag-actions [data-reftag-more]")?.click();
-		const labels = [...document.querySelectorAll("body > .reftag-menu button")].map((button) =>
-			(button.textContent ?? "").trim(),
-		);
-		return { labels };
-	});
-	assert.deepEqual(menu.labels, ["fork", "copy with text"], "user menu has fork and tag plus text");
-	await page.evaluate(() => {
-		const button = [...document.querySelectorAll("body > .reftag-menu button")].find(
-			(node) => (node.textContent ?? "").trim() === "copy with text",
-		);
-		button?.click();
-	});
+	// A second insert appends on a new line; nothing else in the draft changes.
+	await clickTagAction(page, secondTag, "insert");
+	const twice = await page.evaluate(() => document.querySelector("#input").value);
+	assert.equal(twice, `${firstTag}\n${secondTag}`, "the second tag goes on a new line");
+	assert.equal((await chipLabels(page)).length, 2, "two distinct tags produce two chips");
+
+	// A half-typed draft keeps its bytes and gains one new line plus the tag.
+	await setComposer(page, "half draft");
+	await clickTagAction(page, firstTag, "insert");
+	assert.equal(
+		await page.evaluate(() => document.querySelector("#input").value),
+		`half draft\n${firstTag}`,
+		"the draft is preserved apart from the appended tag",
+	);
+	assert.equal(
+		(await spawns(paths)).slice(beforeRecords).filter((record) => record.type === "prompt").length,
+		0,
+		"no insert sends a prompt",
+	);
+
+	// The menu keeps both copy paths; `#` only inserts now.
+	await openBlockMenu(page, firstTag);
+	const labels = await page.evaluate(() =>
+		[...document.querySelectorAll("body > .reftag-menu button")].map((button) => (button.textContent ?? "").trim()),
+	);
+	assert.ok(labels.includes("copy ref"), `menu has copy ref: ${JSON.stringify(labels)}`);
+	assert.ok(labels.includes("copy with text"), `menu has copy with text: ${JSON.stringify(labels)}`);
+	await clickBlockMenu(page, "copy ref");
+	assert.equal(await lastCopied(page), firstTag, "copy ref copies just the tag");
+
+	await openBlockMenu(page, firstTag);
+	await clickBlockMenu(page, "copy with text");
 	const withText = await lastCopied(page);
 	assert.match(withText, /^\[pixip-ref=history\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+\]\n\n> /);
 
-	// Live block: copy works as soon as the message is painted. The fake Pi does
-	// not echo prompts, so inject the same record a real child would emit.
+	// Live block: insert works as soon as the message is painted. The fake Pi
+	// does not echo prompts, so inject the same record a real child would emit.
 	const stamp = 1735689600123;
-	const text = "live ref copy";
+	const text = "live ref insert";
 	await inject(hub, sessionId, {
 		type: "message_start",
 		message: { role: "user", timestamp: stamp, content: [{ type: "text", text }] },
@@ -261,17 +333,29 @@ async function runRefCopyFlow(page, base, sessionId, hub) {
 		{ timeout: FLOW_TIMEOUT },
 		text,
 	);
-	await page.evaluate(() => {
+	const liveTag = await page.evaluate(() => {
 		const block = [...document.querySelectorAll("#log .block.user[data-reftag]")].at(-1);
-		block?.querySelector("[data-reftag-copy]")?.click();
+		return block?.dataset.reftag ?? "";
 	});
-	assert.match(await lastCopied(page), new RegExp(`/msg:user:${stamp}\\]$`));
+	assert.match(liveTag, new RegExp(`/msg:user:${stamp}\\]$`));
+	await setComposer(page, "");
+	await clickTagAction(page, liveTag, "insert");
+	assert.equal(await page.evaluate(() => document.querySelector("#input").value), liveTag);
+	await page.waitForFunction(
+		() => (document.querySelector("#reftag-chips .reftag-chip-label")?.textContent ?? "").includes("live ref insert"),
+		{ timeout: FLOW_TIMEOUT },
+	);
+	const liveChip = await chipLabels(page);
+	assert.match(liveChip[0].label, /user/);
+	assert.equal(liveChip[0].unresolved, false, "a live block tag resolves through the painted block");
 
-	// Denied clipboard: the sheet opens with the tag selected.
+	// Denied clipboard through the copy menu: the sheet opens with the tag
+	// selected, exactly as before the default changed.
 	await page.evaluate(() => {
 		window.__clipboardDenied = true;
 	});
-	await clickRefCopy(page, "#log [data-entry]");
+	await openBlockMenu(page, firstTag);
+	await clickBlockMenu(page, "copy ref");
 	await page.waitForSelector("#sheet:not([hidden]) .sheet-text", { timeout: FLOW_TIMEOUT });
 	const fallback = await page.evaluate(() => ({
 		text: document.querySelector("#sheet .sheet-text")?.textContent ?? "",
@@ -284,7 +368,24 @@ async function runRefCopyFlow(page, base, sessionId, hub) {
 	});
 	await page.click("#sheet .sheet-actions button:last-child");
 	await page.waitForFunction(() => document.querySelector("#sheet")?.hidden === true, { timeout: FLOW_TIMEOUT });
-	await checkNoOverflow(page, "reftag copy");
+
+	// With a blocking surface open the composer is gated: copy instead of insert.
+	const beforeGateCopied = await page.evaluate(() => window.__copied.length);
+	await inject(hub, sessionId, selectRequest("browser-insert-gated"));
+	await waitSurface(page);
+	await setComposer(page, "");
+	await clickTagAction(page, firstTag, "insert");
+	assert.equal(await page.evaluate(() => document.querySelector("#input").value), "", "a gated composer stays empty");
+	assert.equal(
+		await page.evaluate(() => window.__copied.length),
+		beforeGateCopied + 1,
+		"the gated action copies the tag",
+	);
+	assert.equal(await lastCopied(page), firstTag, "the fallback copies the same tag");
+	assert.match(await page.evaluate(() => document.querySelector("#toast")?.textContent ?? ""), /composer unavailable/);
+	await page.click("#surface .surface-close");
+	await waitSurface(page, false);
+	await checkNoOverflow(page, "reftag insert default");
 }
 
 async function viewportOf(page) {
@@ -465,13 +566,16 @@ async function runTranscriptRefChipsFlow(page, base, sessionId, hub) {
 	);
 	assert.deepEqual(rawGone, { hasRawHistory: false, hasRawSecond: false }, "the raw brackets are not prose");
 
-	// The message keeps its own copyable tag through the existing `#` action.
-	await page.evaluate((tag) => {
+	// The message keeps its own copyable tag through the `copy ref` menu item.
+	const blockTag = await page.evaluate((tag) => {
 		const block = [...document.querySelectorAll("#log .block.user")].find(
 			(node) => node.querySelector(`.reftag-inline[data-reftag="${tag}"]`) !== null,
 		);
-		block?.querySelector("[data-reftag-copy]")?.click();
+		return block?.dataset.reftag ?? "";
 	}, historyTag);
+	assert.ok(blockTag, "the persisted message has its own tag");
+	await openBlockMenu(page, blockTag);
+	await clickBlockMenu(page, "copy ref");
 	assert.match(await lastCopied(page), /^\[pixip-ref=history\/[A-Za-z0-9._-]+\/h320\]$/);
 
 	// An unresolved tag is escaped literal text, never a chip.
@@ -1063,7 +1167,7 @@ async function runViewport(browser, base, fixture, viewport) {
 		await runWorktreeFlow(page, base, fixture);
 		await runComposerFlow(page, base, fixture.sessionId, fixture.paths, viewport);
 		await runRefTagChipsFlow(page, base, fixture.sessionId, fixture);
-		await runRefCopyFlow(page, base, fixture.sessionId, fixture.hub);
+		await runRefCopyFlow(page, base, fixture.sessionId, fixture.hub, fixture.paths);
 		await runTranscriptRefChipsFlow(page, base, fixture.sessionId, fixture.hub);
 		await runSelectFlow(page, base, fixture.sessionId, fixture.hub, fixture.paths);
 		await runPanelFlow(page, base, fixture.sessionId);

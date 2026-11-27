@@ -59,6 +59,36 @@ function entryFor(entries, ref) {
 	return null;
 }
 
+/** A live block painted from an event, before it has an entry in state.entries. */
+function liveBlock(tag) {
+	if (!ui.log?.querySelectorAll) return null;
+	return (
+		[...ui.log.querySelectorAll("section[data-reftag], details[data-reftag]")].find(
+			(node) => node.dataset.reftag === tag,
+		) ?? null
+	);
+}
+
+/** Visible block text without the speaker label or action bar. */
+function liveBlockText(block) {
+	const clone = block.cloneNode(true);
+	clone.querySelectorAll(".reftag-actions, .who, .load-full").forEach((node) => node.remove());
+	for (const chip of clone.querySelectorAll(".reftag-inline[data-reftag]")) {
+		chip.replaceWith(clone.ownerDocument.createTextNode(chip.dataset.reftag ?? ""));
+	}
+	return clone.textContent ?? "";
+}
+
+function liveHistoryChip(ref, block, source) {
+	const role = ref.message?.role ?? (block.classList.contains("user") ? "user" : "assistant");
+	const message = {
+		role,
+		timestamp: ref.message?.timestamp,
+		content: [{ type: "text", text: liveBlockText(block) }],
+	};
+	return historyChip(ref, { message }, source);
+}
+
 function historyChip(ref, entry, source) {
 	const message = entry?.message ?? {};
 	const role = typeof message.role === "string" ? message.role : "";
@@ -74,6 +104,8 @@ function resolveHistory(ref) {
 	if (active) {
 		const entry = entryFor(state.entries, ref);
 		if (entry) return historyChip(ref, entry, source);
+		const live = liveBlock(ref.tag);
+		if (live) return liveHistoryChip(ref, live, source);
 	}
 
 	const candidates = [meta?.id, ref.session, active ? state.info?.id : null].filter(Boolean);

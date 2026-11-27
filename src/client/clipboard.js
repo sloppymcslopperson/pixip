@@ -7,13 +7,15 @@ import { ui } from "./kernel/ui.js";
 export async function copyText(text) {
 	if (typeof text !== "string" || !text.trim()) {
 		toast("nothing to copy");
-		return;
+		return false;
 	}
 	try {
 		await navigator.clipboard.writeText(text);
 		toast("copied");
+		return true;
 	} catch {
 		copySheet(text);
+		return false;
 	}
 }
 

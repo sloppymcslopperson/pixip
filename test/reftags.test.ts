@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { coverageKeys } from "../src/jsonl.ts";
-import { clipText, firstWords, purposeLabel, removeRefTag } from "../src/client/reftagText.js";
+import { appendRefTag, clipText, firstWords, purposeLabel, removeRefTag } from "../src/client/reftagText.js";
 import { formatRefTag, messageKey, parseRefTag, refForEntry, scanRefTags } from "../src/reftags.ts";
 
 describe("formatRefTag / parseRefTag", () => {
@@ -163,6 +163,14 @@ describe("reftag chip text", () => {
 	it("clips subjects to the configured character budget", () => {
 		assert.equal(clipText("a  b\nc", 20), "a b c");
 		assert.equal(clipText("abcdefghij", 5), "abcd…");
+	});
+
+	it("appends a tag on a new line, except in an empty composer", () => {
+		const tag = "[pixip-ref=inbox/a]";
+		assert.equal(appendRefTag("", tag), tag);
+		assert.equal(appendRefTag("half draft", tag), `half draft\n${tag}`);
+		assert.equal(appendRefTag("line\n", tag), `line\n${tag}`);
+		assert.equal(appendRefTag("half draft", ""), "half draft");
 	});
 
 	it("removes only the exact token", () => {
