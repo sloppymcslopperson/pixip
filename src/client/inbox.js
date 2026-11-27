@@ -336,10 +336,12 @@ function renderCard(message) {
 	actions.append(copy, archive, remove);
 	card.append(actions);
 
-	// Only the header/subject read as the message control: selecting text in the
-	// body must not collapse it. The sender and action buttons stop propagation.
+	// The header/subject and a collapsed preview are the message control. Clicking
+	// the open body selects text and must not collapse it; the sender and action
+	// buttons stop propagation.
 	card.addEventListener("click", (event) => {
-		if (!event.target.closest(".inbox-toggle")) return;
+		const body = event.target.closest(".inbox-body");
+		if (body ? expanded : !event.target.closest(".inbox-toggle")) return;
 		viewState.expanded = expanded ? null : message.id;
 		if (!expanded && !message.readAt) void markRead(message);
 		else renderInboxPage();

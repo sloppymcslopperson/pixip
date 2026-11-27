@@ -665,6 +665,7 @@
 .inbox-body.preview {
 	max-height: 2.9em;
 	overflow: hidden;
+	cursor: pointer;
 }
 .inbox-actions {
 	display: flex;

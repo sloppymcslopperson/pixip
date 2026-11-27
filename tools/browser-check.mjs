@@ -1262,12 +1262,12 @@ async function runInboxFlow(page, base) {
 		return list.scrollTop;
 	});
 	assert.ok(beforeScroll > 0, "the inbox list can scroll with a short test viewport");
-	await page.evaluate(() => document.querySelector("#inbox-page .inbox-card-head").click());
+	await page.evaluate(() => document.querySelector("#inbox-page .inbox-body.preview").click());
 	await page.waitForSelector("#inbox-page .inbox-body:not(.preview)", { timeout: FLOW_TIMEOUT });
 	assert.equal(
 		await page.evaluate(() => document.querySelector("#inbox-page .inbox-list")?.scrollTop),
 		beforeScroll,
-		"expanding keeps the inbox scroll position",
+		"expanding from the preview keeps the inbox scroll position",
 	);
 	await scrollStyle.evaluate((node) => node.remove());
 	await checkNoOverflow(page, "inbox message expanded");
