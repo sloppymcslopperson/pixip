@@ -1234,6 +1234,24 @@ async function runInboxFlow(page, base) {
 	await page.waitForSelector("#inbox-page:not([hidden]) .inbox-card", { timeout: FLOW_TIMEOUT });
 	await checkNoOverflow(page, "inbox page");
 
+	// Selecting part of the subject is a drag, not a toggle.
+	await page.evaluate(() => {
+		const subject = document.querySelector("#inbox-page .inbox-subject");
+		const range = document.createRange();
+		range.setStart(subject.firstChild, 0);
+		range.setEnd(subject.firstChild, 4);
+		const selection = window.getSelection();
+		selection.removeAllRanges();
+		selection.addRange(range);
+		subject.click();
+	});
+	assert.equal(
+		await page.evaluate(() => document.querySelector("#inbox-page .inbox-body")?.classList.contains("preview")),
+		true,
+		"dragging over the subject keeps the message collapsed",
+	);
+	await page.evaluate(() => window.getSelection()?.removeAllRanges());
+
 	// Reading a message is expanding it; that marks it read without a reload.
 	await page.evaluate(() => document.querySelector("#inbox-page .inbox-card-head").click());
 	await page.waitForSelector("#inbox-page .inbox-body:not(.preview)", { timeout: FLOW_TIMEOUT });

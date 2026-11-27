@@ -337,9 +337,17 @@ function renderCard(message) {
 	card.append(actions);
 
 	// The header/subject and a collapsed preview are the message control. Clicking
-	// the open body selects text and must not collapse it; the sender and action
-	// buttons stop propagation.
+	// the open body selects text and must not collapse it; a drag that selects text
+	// in the card must not toggle it either. The sender and action buttons stop
+	// propagation.
 	card.addEventListener("click", (event) => {
+		const selection = window.getSelection();
+		if (
+			selection &&
+			!selection.isCollapsed &&
+			(card.contains(selection.anchorNode) || card.contains(selection.focusNode))
+		)
+			return;
 		const body = event.target.closest(".inbox-body");
 		if (body ? expanded : !event.target.closest(".inbox-toggle")) return;
 		viewState.expanded = expanded ? null : message.id;
