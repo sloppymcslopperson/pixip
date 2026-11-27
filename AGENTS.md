@@ -55,6 +55,10 @@ node bin/pixip.ts --data-dir ./tmp/dev          # http://127.0.0.1:8137/
 
 Rules:
 
+- Never reload or restart the daemon unless the user explicitly asks for it in
+  the current turn. From inside a pixip session use the browser's
+  `/pixup-restart` card; the CLI refuses agent-initiated restarts, and `SIGHUP`
+  is ignored. Do not schedule a reload or restart in the background.
 - The hub spawns the real `pi` binary. Never add a shim, a private extension API,
   or a plugin-side change: existing Pi extensions must keep working untouched.
   Extension dialogs travel as `extension_ui_request` / `extension_ui_response`.
