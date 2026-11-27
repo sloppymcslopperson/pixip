@@ -69,3 +69,24 @@ Hitting <12 s requires one of:
 4. **Change restart product behavior** to start faster/not wait — product risk outside this test-time ticket.
 
 The batch is halted here with ticket 50 still in progress; no ticket-50 commit has been made.
+
+### Additional decision (2026-11-21)
+
+After the blocker was raised, the owner chose **run daemon tests concurrently**: "Make a commit right now, then go down this road. If it doesn't noticeable improvements let me know."
+
+- Current work (lazy imports + `startDaemon`/`stopDaemon`/`readLogTail` test reductions) was committed as `4f1229e` before starting this.
+- Try per-describe concurrency in `test/daemon.test.ts`, measure isolated wall time and flakiness, and report whether the improvement is noticeable.
+- Keep the in-process harness and product restart changes out of this attempt; this is a test-runner scheduling change only.
+
+### Concurrency result
+
+Applied `{ concurrency: 3 }` to all four top-level describes in `test/daemon.test.ts` (lifecycle, backend, reload, hard restart). Each test already uses its own temp data dir, so they can overlap.
+
+- `daemon.test.ts` isolated: **23.29 s** with 27/27 passing (was 34.8 s after the spawn reductions, 42.4 s before ticket 50).
+- Tried concurrency 2/4/5/6/8: all landed 23.7–25.3 s; 3 is the best stable setting on this 2-CPU box.
+- Tried also running the four describes concurrently (outer `{ concurrency: true }`): 21.8 s but the SIGHUP soft-refresh test flaked, so that was reverted.
+- Full `npm run check`: **149.8 s**, green, 502/502 root tests.
+
+The 12 s target is still not met. Hard restart alone is **11.4 s** at concurrency 8 (8 tests, each replacing a daemon), so even perfect overlap of the other describes cannot go below ~11.5 s plus startup. Reaching <12 s reliably requires the in-process harness (excluded earlier) or merging hard-restart scenarios so fewer real restarts run.
+
+The concurrency change is being committed as an improvement while ticket 50 stays open for the owner's decision on the revised target.

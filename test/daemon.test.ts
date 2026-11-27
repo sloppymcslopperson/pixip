@@ -101,7 +101,7 @@ after(async () => {
 	await cleanupRoots();
 });
 
-describe("daemon lifecycle", () => {
+describe("daemon lifecycle", { concurrency: 3 }, () => {
 	it("starts, reports, refreshes, tails and stops one data dir", async () => {
 		const dir = await tempRoot("pixip-daemon-");
 		const { url, pid } = await daemon(dir);
@@ -278,7 +278,7 @@ describe("daemon lifecycle", () => {
 	});
 });
 
-describe("backend selection", () => {
+describe("backend selection", { concurrency: 3 }, () => {
 	it("spawns the host by default and records PIXIP_PI_HOST for restart", async () => {
 		const dir = await tempRoot("pixip-backend-");
 		const spawnLog = join(dir, "host.jsonl");
@@ -343,7 +343,7 @@ describe("backend selection", () => {
 	});
 });
 
-describe("pixip reload", () => {
+describe("pixip reload", { concurrency: 3 }, () => {
 	it("reloads assets and live children, then prints the report", async () => {
 		const dir = await tempRoot("pixip-reload-");
 		const { url, pid } = await daemon(
@@ -410,7 +410,7 @@ describe("pixip reload", () => {
 	});
 });
 
-describe("hard restart", () => {
+describe("hard restart", { concurrency: 3 }, () => {
 	it("refuses while busy, times out with --when-idle and replaces with --force", async () => {
 		const dir = await tempRoot("pixip-daemon-");
 		const { url, pid } = await daemon(dir, { FAKE_PI_IS_STREAMING: "1" });
