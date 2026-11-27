@@ -14,7 +14,7 @@
  * follows the real step results.
  */
 import { spawn } from "node:child_process";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -27,7 +27,7 @@ const BUDGETS = {
 	"check:static": 55,
 	"test:full": 170,
 	"check:browser": 40,
-	workspace: 50,
+	"check:workspaces": 60,
 };
 
 const children = new Set();
@@ -81,33 +81,6 @@ async function testFiles() {
 		.map((name) => join("test", name));
 }
 
-async function workspaceNames() {
-	const pkg = JSON.parse(await readFile(join(ROOT, "package.json"), "utf8"));
-	const dirs = [];
-	for (const pattern of pkg.workspaces ?? []) {
-		const star = pattern.indexOf("*");
-		if (star === -1) {
-			dirs.push(join(ROOT, pattern));
-			continue;
-		}
-		const base = pattern.slice(0, star).replace(/\/$/, "");
-		for (const entry of await readdir(join(ROOT, base), { withFileTypes: true })) {
-			if (entry.isDirectory()) dirs.push(join(ROOT, base, entry.name));
-		}
-	}
-
-	const names = [];
-	for (const dir of dirs) {
-		try {
-			const workspace = JSON.parse(await readFile(join(dir, "package.json"), "utf8"));
-			if (workspace.name) names.push(workspace.name);
-		} catch {
-			// A directory without a package.json is not a workspace.
-		}
-	}
-	return names;
-}
-
 /**
  * Top-level TAP entries carry the suite duration including nested tests, so
  * reading only unindented `ok` blocks avoids counting a nested test twice.
@@ -152,7 +125,6 @@ function printFailure(step) {
 }
 
 const files = await testFiles();
-const workspaces = await workspaceNames();
 
 const steps = [
 	{ name: "check:static", command: NPM, args: ["run", "--silent", "check:static"], budget: BUDGETS["check:static"] },
@@ -163,12 +135,12 @@ const steps = [
 		budget: BUDGETS["test:full"],
 	},
 	{ name: "check:browser", command: NPM, args: ["run", "--silent", "check:browser"], budget: BUDGETS["check:browser"] },
-	...workspaces.map((name) => ({
-		name: `check --workspace ${name}`,
+	{
+		name: "check:workspaces",
 		command: NPM,
-		args: ["run", "--silent", "check", "--workspace", name],
-		budget: BUDGETS.workspace,
-	})),
+		args: ["run", "--silent", "check:workspaces"],
+		budget: BUDGETS["check:workspaces"],
+	},
 ];
 
 console.log(`check:timings: ${steps.length} steps, ${files.length} test files`);
