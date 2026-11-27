@@ -2,6 +2,7 @@
 area: transcript-reading
 part: inventory
 project: feature-inventory
+commit: bf5b97491a6021f34633cb431371bcb9a80cf671
 ---
 
 Capture everything a user does while reading a session: streamed messages, live thinking, tool and bash output, images, long-history navigation, and transcript readability controls. This is the core reading surface and the largest single area.
