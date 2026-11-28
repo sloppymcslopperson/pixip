@@ -100,6 +100,25 @@ describe("POST /api/agents/:id/messages", () => {
 		}
 	});
 
+	it("answers a malformed percent-encoded target with 400", async () => {
+		const paths = await fixtureRoot("pixip-send-bad-target-");
+		const { hub, server } = await boot(paths);
+		try {
+			await hub.create(paths.dir, "alpha");
+			const response = await fetch(new URL("api/agents/%E0%A4%A/messages", server.url), {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ message: "hello" }),
+			});
+			assert.equal(response.status, 400);
+			assert.match(((await response.json()) as Record<string, string>)["error"] ?? "", /valid percent-encoded/);
+			assert.equal((await prompts(paths)).length, 0, "nothing is delivered");
+		} finally {
+			await server.close();
+			await hub.shutdown();
+		}
+	});
+
 	it("steers a busy target and keeps the caller's sender id in the marker", async () => {
 		const paths = await fixtureRoot("pixip-send-busy-");
 		const { hub, server } = await boot(paths, { FAKE_PI_IS_STREAMING: "1" });

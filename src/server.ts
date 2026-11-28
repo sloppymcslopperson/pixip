@@ -545,6 +545,13 @@ async function handleHttp(
 		}
 		const agentMessageMatch = /^\/api\/agents\/([^/]+)\/messages$/.exec(url.pathname);
 		if (req.method === "POST" && agentMessageMatch?.[1]) {
+			let target: string;
+			try {
+				target = decodeURIComponent(agentMessageMatch[1]);
+			} catch {
+				send(400, JSON.stringify({ error: "target is not a valid percent-encoded path segment" }));
+				return;
+			}
 			let parsed: Record<string, unknown>;
 			try {
 				parsed = JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>;
@@ -562,7 +569,7 @@ async function handleHttp(
 			try {
 				const baseUrl = agentBaseUrl(req.headers.host, hub.childDaemonUrl);
 				const ack = await hub.sendAgentMessage(
-					{ target: decodeURIComponent(agentMessageMatch[1]), message, ...(sender !== undefined ? { sender } : {}) },
+					{ target, message, ...(sender !== undefined ? { sender } : {}) },
 					baseUrl,
 				);
 				send(200, JSON.stringify(ack));
