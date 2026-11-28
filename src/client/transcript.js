@@ -1,4 +1,5 @@
 // Client transcript module; shared state lives in kernel/state.js.
+import { resolveAgentSender } from "./agentMessage.js";
 import { appendBlock, hideThinkingIndicator, scheduleThinkingPaint, showThinkingIndicator } from "./transcriptView.js";
 import { endCompaction, startCompaction } from "./compaction.js";
 import { applyLiveThinkingFrame, applyThinkingEvent, createLiveThought } from "./thinkingStream.js";
@@ -13,7 +14,7 @@ import {
 	renderAssistant,
 	renderAssistantBody,
 	renderEntry,
-	renderUserBody,
+	renderUserContent,
 	summarizeArgs,
 	textOf,
 	toolBlock,
@@ -101,6 +102,34 @@ function trackTruncated() {
 }
 
 /**
+ * Upgrade or downgrade sender links after the dashboard list arrives or changes.
+ * A deep-linked transcript paints before the first `sessions` frame, so a
+ * sender can start as plain text and become a button without a repaint.
+ */
+export function decorateAgentSenders(root = ui.log) {
+	if (!root || typeof root.querySelectorAll !== "function") return;
+	for (const node of root.querySelectorAll(".agent-message .agent-sender[data-sender-id]")) {
+		const sender = resolveAgentSender(node.dataset.senderId, state.sessions);
+		const linked = sender.routeId !== null;
+		if (linked === (node.tagName === "BUTTON")) {
+			if (linked) node.dataset.route = sender.routeId;
+			else delete node.dataset.route;
+			if (node.textContent !== sender.name) node.textContent = sender.name;
+			continue;
+		}
+		const next = document.createElement(linked ? "button" : "span");
+		next.className = "agent-sender";
+		next.dataset.senderId = sender.senderId;
+		if (linked) {
+			next.type = "button";
+			next.dataset.route = sender.routeId;
+		}
+		next.textContent = sender.name;
+		node.replaceWith(next);
+	}
+}
+
+/**
  * Mark snapshot entries so a block can be found and replaced after its full
  * text arrives. `truncated` is the fetchable window cap; `fullTruncated` is the
  * hard cap and deliberately gets no repeated fetch affordance.
@@ -140,6 +169,7 @@ export function htmlOf(entries, calls) {
 	const context = {
 		sessionId: state.info?.id,
 		compaction: boundaryId && state.compactionMeta?.id === boundaryId ? state.compactionMeta : null,
+		sessions: state.sessions,
 	};
 	const blocks = [];
 	for (const entry of entries) {
@@ -206,6 +236,7 @@ export function applyFullEntry(frame) {
 	trackTools();
 	trackTruncated();
 	decorateRefBlocks(ui.log);
+	decorateAgentSenders(ui.log);
 }
 
 ui.log.addEventListener("click", (event) => {
@@ -253,6 +284,7 @@ export function renderTranscript(distance = null) {
 	trackTools();
 	trackTruncated();
 	decorateRefBlocks(ui.log);
+	decorateAgentSenders(ui.log);
 
 	// Older entries of the same window fill in above, chunk by chunk. The
 	// distance from the bottom is held constant, so a pinned view stays pinned.
@@ -266,6 +298,7 @@ export function renderTranscript(distance = null) {
 		trackTools();
 		trackTruncated();
 		decorateRefBlocks(ui.log);
+		decorateAgentSenders(ui.log);
 		start = from;
 		if (start > 0) fillTimer = setTimeout(fill, 0);
 	};
@@ -387,8 +420,10 @@ export function handleEvent(event) {
 			if (message.role === "user") {
 				state.pendingUser?.remove();
 				state.pendingUser = null;
-				const section = appendBlock("user", `<div class="who">you</div>${renderUserBody(message)}`, true);
+				const content = renderUserContent(message, { sessions: state.sessions });
+				const section = appendBlock(content.className, content.html, true);
 				stampRef(section, tagForLiveMessage(message));
+				decorateAgentSenders(section);
 				void decorateUserRefs(section);
 				if (state.info?.state === "busy") showThinkingIndicator();
 			} else if (message.role === "assistant") {

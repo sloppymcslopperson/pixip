@@ -7,6 +7,7 @@ import { basename, extname, isAbsolute, join, normalize } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 
 import { createDirectory, DirError, listDirectories } from "./dirs.ts";
+import { AgentFilterError, AgentSendError, agentBaseUrl, listAgents, parseAgentFilters } from "./agents.ts";
 import { INBOX_PURPOSES, InboxError, type InboxFilter, type InboxPurpose } from "./inbox.ts";
 import { ReportError } from "./inboxReport.ts";
 import { detectImageMime, MAX_UPLOAD_BYTES, safeUploadName } from "./attachments.ts";
@@ -529,6 +530,56 @@ async function handleHttp(
 					...(result.reason === "referenced" ? { sessions: result.sessions } : {}),
 				}),
 			);
+			return;
+		}
+		if (req.method === "GET" && url.pathname === "/api/agents") {
+			try {
+				const filters = parseAgentFilters(url.searchParams);
+				const baseUrl = agentBaseUrl(req.headers.host, hub.childDaemonUrl);
+				send(200, JSON.stringify(await listAgents(hub, filters, baseUrl, await hub.lastDeliveries())));
+			} catch (error) {
+				if (!(error instanceof AgentFilterError)) throw error;
+				send(400, JSON.stringify({ error: error.message }));
+			}
+			return;
+		}
+		const agentMessageMatch = /^\/api\/agents\/([^/]+)\/messages$/.exec(url.pathname);
+		if (req.method === "POST" && agentMessageMatch?.[1]) {
+			let target: string;
+			try {
+				target = decodeURIComponent(agentMessageMatch[1]);
+			} catch {
+				send(400, JSON.stringify({ error: "target is not a valid percent-encoded path segment" }));
+				return;
+			}
+			let parsed: Record<string, unknown>;
+			try {
+				parsed = JSON.parse((await readBody(req)) || "{}") as Record<string, unknown>;
+			} catch {
+				send(400, JSON.stringify({ error: "request body must be JSON" }));
+				return;
+			}
+			const message =
+				typeof parsed["message"] === "string"
+					? parsed["message"]
+					: typeof parsed["text"] === "string"
+						? parsed["text"]
+						: "";
+			const sender = typeof parsed["sender"] === "string" ? parsed["sender"] : undefined;
+			try {
+				const baseUrl = agentBaseUrl(req.headers.host, hub.childDaemonUrl);
+				const ack = await hub.sendAgentMessage(
+					{ target, message, ...(sender !== undefined ? { sender } : {}) },
+					baseUrl,
+				);
+				send(200, JSON.stringify(ack));
+			} catch (error) {
+				if (!(error instanceof AgentSendError)) throw error;
+				send(
+					error.status,
+					JSON.stringify({ error: error.message, ...(error.candidates ? { candidates: error.candidates } : {}) }),
+				);
+			}
 			return;
 		}
 		if (req.method === "GET" && url.pathname === "/api/sessions") {

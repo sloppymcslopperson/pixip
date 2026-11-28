@@ -57,6 +57,44 @@
 .block.user .who {
 	color: var(--user);
 }
+/* Inbound inter-agent message: the marker is gone, the sender is the link. */
+.block.user.agent-message {
+	border-left-color: var(--accent);
+	padding: 7px 10px;
+	border-radius: 0 9px 9px 0;
+	background: color-mix(in srgb, var(--accent) 7%, var(--bg-soft));
+}
+.block.user.agent-message .who {
+	display: block;
+	color: var(--fg-dim);
+	text-transform: none;
+	letter-spacing: normal;
+	font-size: 0.78em;
+	overflow-wrap: anywhere;
+}
+.block.user.agent-message .agent-sender {
+	color: var(--accent);
+	font-weight: 700;
+}
+button.agent-sender {
+	padding: 0;
+	border: 0;
+	background: none;
+	font: inherit;
+	cursor: pointer;
+	text-decoration: underline;
+	text-underline-offset: 2px;
+	overflow-wrap: anywhere;
+}
+button.agent-sender:hover,
+button.agent-sender:focus-visible {
+	color: var(--fg);
+}
+.block.user.agent-message .text.agent-empty:empty::after {
+	content: "This message has no content. This is a bug.";
+	color: var(--fg-faint);
+	font-style: italic;
+}
 /* Recorded user-message images: tap to enlarge. */
 .msg-images {
 	display: flex;

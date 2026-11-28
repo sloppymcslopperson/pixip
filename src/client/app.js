@@ -369,6 +369,14 @@ ui.log.addEventListener("click", (event) => {
 		openImageSheet(image.src);
 		return;
 	}
+	const sender = event.target.closest(".agent-sender[data-route]");
+	if (sender) {
+		event.preventDefault();
+		const routeId = sender.dataset.route;
+		location.hash = `s=${encodeURIComponent(routeId)}`;
+		openSession(routeId);
+		return;
+	}
 	handleRefTagAction(event);
 });
 

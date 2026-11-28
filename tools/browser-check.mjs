@@ -68,6 +68,28 @@ entries.push({
 		],
 	},
 });
+// Inbound agent messages: one with a body and one empty marker. The peer
+// logical id is filled in after the fixture sessions exist.
+entries.push({
+	type: "message",
+	id: "h321",
+	parentId: "h320",
+	timestamp: "2026-11-21T00:00:03.000Z",
+	message: {
+		role: "user",
+		content: [{ type: "text", text: "[pixip-agent=__PEER_LOGICAL__]\nPlease review the login fix." }],
+	},
+});
+entries.push({
+	type: "message",
+	id: "h322",
+	parentId: "h321",
+	timestamp: "2026-11-21T00:00:04.000Z",
+	message: {
+		role: "user",
+		content: [{ type: "text", text: "[pixip-agent=__PEER_LOGICAL__]" }],
+	},
+});
 
 async function bootFixture() {
 	const paths = await fixtureRoot("pixip-browser-", { flat: true });
@@ -119,7 +141,12 @@ async function bootFixture() {
 	// deep link resolves it as a name-only chip once that frame arrives.
 	await sessionFile(
 		paths,
-		entries.map((entry) => JSON.stringify(entry).replaceAll("__LOGICAL__", id).replaceAll("__INBOX__", inbox.id)),
+		entries.map((entry) =>
+			JSON.stringify(entry)
+				.replaceAll("__LOGICAL__", id)
+				.replaceAll("__INBOX__", inbox.id)
+				.replaceAll("__PEER_LOGICAL__", peer.logicalId),
+		),
 		{ cwd: paths.dir },
 	);
 	return {
@@ -672,6 +699,58 @@ async function runTranscriptRefChipsFlow(page, base, sessionId, hub) {
 	);
 	assert.equal((await inlineChips(page)).length, 2, "a reload keeps both chips");
 	await checkNoOverflow(page, "transcript ref chips");
+}
+
+async function runAgentMessageFlow(page, base, sessionId, peerLogicalId) {
+	await page.goto(`${base}?flow=agent#s=${sessionId}`, { waitUntil: "domcontentloaded", timeout: FLOW_TIMEOUT });
+	await waitForSession(page);
+	await page.waitForFunction(() => document.querySelectorAll("#log .block.user.agent-message").length === 2, {
+		timeout: FLOW_TIMEOUT,
+	});
+	const bubble = await page.evaluate(() => {
+		const blocks = [...document.querySelectorAll("#log .block.user.agent-message")];
+		const first = blocks[0];
+		const second = blocks[1];
+		const empty = second?.querySelector(".text.agent-empty");
+		return {
+			count: blocks.length,
+			text: first?.textContent ?? "",
+			header: first?.querySelector(".who")?.textContent ?? "",
+			route: first?.querySelector(".agent-sender")?.dataset.route ?? "",
+			senderTag: first?.querySelector(".agent-sender")?.tagName ?? "",
+			emptyText: empty?.textContent ?? "missing",
+			placeholder: empty ? getComputedStyle(empty, "::after").content : "",
+		};
+	});
+	assert.equal(bubble.count, 2, "both persisted agent messages render as bubbles");
+	assert.equal(bubble.senderTag, "BUTTON", "the sender is a button");
+	assert.equal(bubble.route, peerLogicalId, "the sender button routes by logical id");
+	assert.match(bubble.header, /^Agent repo peer sent a message$/);
+	assert.match(bubble.text, /Please review the login fix/);
+	assert.doesNotMatch(bubble.text, /pixip-agent/, "the marker is hidden from the body");
+	assert.equal(bubble.emptyText, "", "the empty bubble does not invent text in the DOM");
+	assert.match(bubble.placeholder, /This message has no content\. This is a bug\./);
+	await checkNoOverflow(page, "agent message");
+
+	// The preloaded entry is the same one a reload parses from the snapshot.
+	await page.reload({ waitUntil: "domcontentloaded", timeout: FLOW_TIMEOUT });
+	await waitForSession(page);
+	await page.waitForFunction(() => document.querySelectorAll("#log .block.user.agent-message").length === 2, {
+		timeout: FLOW_TIMEOUT,
+	});
+	assert.doesNotMatch(
+		await page.evaluate(() => document.querySelector("#log .block.user.agent-message")?.textContent ?? ""),
+		/pixip-agent/,
+		"a reload keeps the marker hidden",
+	);
+
+	await page.evaluate(() => document.querySelector("#log .block.user.agent-message .agent-sender")?.click());
+	await page.waitForFunction(
+		(id) => location.hash === `#s=${encodeURIComponent(id)}`,
+		{ timeout: FLOW_TIMEOUT },
+		peerLogicalId,
+	);
+	await checkNoOverflow(page, "agent sender route");
 }
 
 async function runDashboardFlow(page, base, sessionId) {
@@ -1413,6 +1492,7 @@ async function runViewport(browser, base, fixture, viewport) {
 		await runRefCopyFlow(page, base, fixture.sessionId, fixture.hub, fixture.paths);
 		await runRefChipNavigationFlow(page, base, fixture.sessionId, fixture);
 		await runTranscriptRefChipsFlow(page, base, fixture.sessionId, fixture.hub);
+		await runAgentMessageFlow(page, base, fixture.sessionId, fixture.peerLogicalId);
 		await runSelectFlow(page, base, fixture.sessionId, fixture.hub, fixture.paths);
 		await runPanelFlow(page, base, fixture.sessionId);
 		await runHistoryFlow(page, base, fixture.sessionId);

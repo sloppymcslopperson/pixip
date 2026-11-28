@@ -2,6 +2,7 @@
 // `node --test` imports the same file, so what the tests cover is what ships.
 // Markdown lives in `./markdown.js`, which imports the vendored renderer.
 
+import { parseAgentMessage, resolveAgentSender } from "./agentMessage.js";
 import { formatTokens } from "./footer.js";
 import { escapeHtml, markdownToHtml } from "./markdown.js";
 import { scanRefTags } from "./reftags.js";
@@ -340,9 +341,9 @@ export function renderUserText(text) {
 }
 
 /** Inside a user block: text plus any recorded image thumbnails. */
-export function renderUserBody(message) {
+export function renderUserBody(message, bodyText = textOf(message?.content), emptyHtml = null) {
 	const content = message?.content;
-	const text = renderUserText(textOf(content));
+	const text = renderUserText(bodyText);
 	const images = Array.isArray(content)
 		? content.filter(
 				(block) =>
@@ -358,9 +359,33 @@ export function renderUserBody(message) {
 	const textHtml = text
 		? `<div class="text">${text}</div>`
 		: images.length === 0
-			? '<div class="text">[image]</div>'
+			? (emptyHtml ?? '<div class="text">[image]</div>')
 			: "";
 	return `${textHtml}${thumbs ? `<div class="msg-images">${thumbs}</div>` : ""}`;
+}
+
+/**
+ * A user message's class and inner html. Inter-agent messages keep the normal
+ * user body, but lose the marker line and gain a sender header. Pure so the
+ * live and snapshot paths cannot drift.
+ */
+export function renderUserContent(message, context = {}) {
+	const parsed = parseAgentMessage(textOf(message?.content));
+	if (!parsed) {
+		return { agent: false, className: "user", html: `<div class="who">you</div>${renderUserBody(message)}` };
+	}
+	const sender = resolveAgentSender(parsed.senderId, context.sessions);
+	const name = escapeHtml(sender.name);
+	const senderId = escapeHtml(sender.senderId);
+	const senderHtml = sender.routeId
+		? `<button type="button" class="agent-sender" data-sender-id="${senderId}" data-route="${escapeHtml(sender.routeId)}">${name}</button>`
+		: `<span class="agent-sender" data-sender-id="${senderId}">${name}</span>`;
+	const emptyHtml = '<div class="text agent-empty"></div>';
+	return {
+		agent: true,
+		className: "user agent-message",
+		html: `<div class="who">Agent ${senderHtml} sent a message</div>${renderUserBody(message, parsed.body, emptyHtml)}`,
+	};
 }
 
 export function renderMessage(message, entryId, context = {}) {
@@ -368,7 +393,8 @@ export function renderMessage(message, entryId, context = {}) {
 	if (message.role === "user") {
 		// Fork and copy actions are attached by reftagActions.js; snapshot entries
 		// carry their id there, live blocks derive the msg: key instead.
-		return `<section class="block user"><div class="who">you</div>${renderUserBody(message)}</section>`;
+		const content = renderUserContent(message, context);
+		return `<section class="block ${content.className}">${content.html}</section>`;
 	}
 	if (message.role === "assistant") {
 		return renderAssistant(message.content ?? []);

@@ -284,6 +284,7 @@ Client → hub:
 | `ui`                                     | `id`, `value` \| `confirmed` \| `cancelled` | `extension_ui_response`                                                                                                                                      |
 
 REST is only for discovery, process verbs and downloads: `GET /api/sessions`,
+`GET /api/agents?all=&cwd=&repo=&state=&query=&self=`,
 `POST /api/sessions`, `GET /api/dirs?path=`, `POST /api/dirs`,
 `POST /api/sessions/:id/stop`,
 `POST /api/sessions/:id/archive`, `POST /api/sessions/archive-inactive`,
@@ -298,6 +299,26 @@ peers and the exact bind address;
 the worktree routes follow the server bind like the rest of the dashboard, because
 managing a tree is a normal session action rather than a host-local admin verb.
 Streaming never uses HTTP requests.
+
+## Agent discovery
+
+`GET /api/agents` is the read-only contract shared by `pixip agents list` and
+the opt-in `pixip-agents` extension. It returns
+`{"agents":[...],"count":N}` for live, attached and stopped sessions; archive
+and trash rows are hidden unless `all=1`, and then carry `stored: "archive"`
+or `stored: "trash"`. Each row has the current Pi id, stable logical id, name,
+state, cwd, repo, branch/worktree, `awaitingUser`, `lastActivity`, `isSelf`
+and an absolute `url` of `http://<Host>/#s=<current-pi-id>` (logical id as the
+fallback). The URL is built from the request `Host` header, so a wildcard bind
+still yields a usable link; the daemon URL is only a fallback.
+
+`cwd` and `repo` match resolved absolute paths exactly, `state` is one of the
+canonical states, and `query` is a case-insensitive substring over name/id/cwd/
+repo/branch. `self` is the caller's `PIXIP_SESSION_ID` (or a Pi id); matching
+rows are marked and sorted first, then repo/worktree grouping, newest
+`lastActivity`, name and id. Bad filters return 400 with a readable message; an
+empty result is a normal 200. Discovery never creates, wakes, stops, archives
+or deletes anything.
 
 ## New-session directory picker
 
