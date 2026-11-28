@@ -267,13 +267,14 @@ describe("daemon lifecycle", { concurrency: 3 }, () => {
 		assert.equal(await runningDaemon(dir), undefined);
 	});
 
-	it("answers SIGHUP with a soft refresh", async () => {
+	it("ignores SIGHUP and only refreshes on an explicit request", async () => {
 		const dir = await tempRoot("pixip-daemon-");
 		const { url, pid } = await daemon(dir);
 		process.kill(pid, "SIGHUP");
-		await waitFor(async () => (await fetchHealth(url).catch(() => ({ reloads: 0 }))).reloads === 1);
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		assert.equal((await fetchHealth(url)).reloads, 0);
 		const report = await refreshDaemon(dir);
-		assert.equal(report.reloads, 2);
+		assert.equal(report.reloads, 1);
 		await stopDaemon(dir);
 	});
 });
@@ -411,7 +412,7 @@ describe("pixip reload", { concurrency: 3 }, () => {
 });
 
 describe("hard restart", { concurrency: 3 }, () => {
-	it("refuses while busy, times out with --when-idle and replaces with --force", async () => {
+	it("refuses while busy, times out with --when-idle and replaces with --force from an outside shell", async () => {
 		const dir = await tempRoot("pixip-daemon-");
 		const { url, pid } = await daemon(dir, { FAKE_PI_IS_STREAMING: "1" });
 		await createSession(url, dir);
@@ -497,7 +498,7 @@ describe("hard restart", { concurrency: 3 }, () => {
 		const first = frames.find((frame) => frame["t"] === "snapshot");
 		assert.equal((first?.["entries"] as unknown[]).length, 1);
 
-		const restarted = await cli(["restart", "--data-dir", dir, "--force"], fakeEnv);
+		const restarted = await cli(["restart", "--data-dir", dir], fakeEnv);
 		assert.equal(restarted.code, 0, restarted.stderr);
 		assert.ok(frames.some((frame) => frame["t"] === "restarting"));
 		const state = await readDaemonState(dir);
@@ -536,7 +537,7 @@ describe("hard restart", { concurrency: 3 }, () => {
 		const { pid } = await daemon(dir);
 		// The CLI that triggers the restart carries the session identity of the Pi
 		// shell that ran it. Neither the helper nor the new daemon may pass it on.
-		const restarted = await cli(["restart", "--data-dir", dir, "--force"], {
+		const restarted = await cli(["restart", "--data-dir", dir], {
 			PI_SESSION_ID: "01a1fb3f-cccc-7664-b952-f6673a2c7a8c",
 			PI_SESSION_FILE: "/sessions/some-caller.jsonl",
 			FAKE_PI_LOG: log,
@@ -592,18 +593,20 @@ describe("hard restart", { concurrency: 3 }, () => {
 		await stopDaemon(dir);
 	});
 
-	it("--when-idle does not wait for the calling session", async () => {
+	it("refuses a restart from inside a pixip session even with --when-idle", async () => {
 		const dir = await tempRoot("pixip-daemon-");
 		const { url, pid } = await daemon(dir, { FAKE_PI_IS_STREAMING: "1" });
 		const created = await createSession(url, dir);
 		const logicalId = String(created["logicalId"]);
 		assert.ok(logicalId);
-		const restarted = await cli(["restart", "--data-dir", dir, "--when-idle", "--timeout", "1"], {
+		const refused = await cli(["restart", "--data-dir", dir, "--force", "--when-idle", "--timeout", "1"], {
 			PIXIP_SESSION_ID: logicalId,
 		});
-		assert.equal(restarted.code, 0, restarted.stderr);
+		assert.equal(refused.code, 2, refused.stderr);
+		assert.match(refused.stderr, /restart is user-only inside a pixip session/);
 		const state = await readDaemonState(dir);
-		assert.ok(state && state.pid !== pid);
+		assert.equal(state?.pid, pid);
+		assert.equal(pidAlive(pid), true);
 		await stopDaemon(dir);
 	});
 

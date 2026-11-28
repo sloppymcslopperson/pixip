@@ -450,13 +450,13 @@ Commands:
                       refused, exit 2 from inside an agent)
   restart [--force] [--when-idle] [--timeout <s>]
                       replace the process; sessions survive in their JSONL and
-                      the new daemon reattaches the ones that were live. The
-                      stop/start runs in a detached helper, so this also works
-                      when issued from inside a pixip session (that turn ends,
-                      the daemon comes back). Refuses while a session is busy
-                      unless --force; --when-idle waits for the other sessions
-                      (the calling one does not count) up to --timeout (default
-                      300s, exit 2)
+                      the new daemon reattaches the ones that were live. Refuses
+                      from inside a pixip session (use the browser
+                      /pixup-restart card instead) and while any session is
+                      busy unless --force; --force is only accepted from a
+                      shell outside pixip, since that is an explicit user
+                      action. --when-idle waits for the other sessions up to
+                      --timeout (default 300s, exit 2).
   protect [<session-id>] [--off] [--json]
                       mark one session as protected from the dashboard bulk
                       archive (or clear it with --off). Defaults to the caller's
@@ -485,7 +485,7 @@ function printInboxHelp(): void {
 Commands:
   send --subject <text> [--purpose <purpose>] [--quiet] <body>
                       post one message. Purpose is attention-needed (default),
-                      deliverable, extra-info or no-rush. Inside a pixip session
+                      deliverable, reports, extra-info or no-rush. Inside a pixip session
                       the sender is the calling session (PIXIP_SESSION_ID);
                       otherwise it is labelled "local shell"
   list [--unread] [--archived] [--json]
@@ -814,15 +814,9 @@ async function serve(options: Options): Promise<void> {
 	// the dashboard's hot/warm set back before the browser even reconnects.
 	void resumeRestartedSessions(hub, options.dataDir, server);
 
-	const softRefresh = async (label: string) => {
-		try {
-			const report = await server.refresh();
-			log(`${label}: reloaded ${report.reloaded.join(", ")} (${report.reloads} total)`);
-		} catch (error) {
-			log(`${label} failed: ${(error as Error).message}`);
-		}
-	};
-	process.on("SIGHUP", () => void softRefresh("SIGHUP"));
+	// SIGHUP is deliberately a no-op. Reloads are user-requested only; an
+	// external signal must not re-read assets or policy behind the user's back.
+	process.on("SIGHUP", () => log("SIGHUP ignored; reloads require an explicit request"));
 
 	let reloadChain: Promise<unknown> = Promise.resolve();
 	const daemonReload = (label: string) => {
@@ -1126,6 +1120,15 @@ async function runRestartHelper(options: Options): Promise<void> {
 async function cmdRestart(options: Options): Promise<void> {
 	if (options.detached) return await runRestartHelper(options);
 
+	// A Pi child can run this CLI through its bash tool. Restarting from there
+	// killed other in-flight agents, so the CLI refuses and leaves replacement
+	// to the browser's user-only /pixup-restart card.
+	if (insidePixip()) {
+		process.stderr.write("restart is user-only inside a pixip session, please use /pixup-restart in the browser\n");
+		process.exitCode = 2;
+		return;
+	}
+
 	const running = await runningDaemon(options.dataDir);
 	if (!running) {
 		// Idempotent: restarting a stopped data dir is just a start.
@@ -1152,7 +1155,9 @@ async function cmdRestart(options: Options): Promise<void> {
 	} else if (!options.force) {
 		const busy = await busyNow();
 		if (busy.length > 0) {
-			throw new Error(`refusing to restart while busy: ${describeSessions(busy)}; use --force or --when-idle`);
+			throw new Error(
+				`refusing to restart while busy: ${describeSessions(busy)}; use --force from a shell outside pixip or --when-idle`,
+			);
 		}
 	}
 

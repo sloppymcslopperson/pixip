@@ -212,8 +212,8 @@ pixip stop
 `--data-dir` owns everything (`pixip.pid`, `pixip.state.json`, `pixip.log`,
 `sessions/`, `inbox.json`), so parallel instances on another `--port`/`--data-dir` never
 collide. One process owns a data dir at a time: the bare foreground command
-refuses to start when a daemon already owns it. Soft refresh (`pixip refresh`,
-`SIGHUP`, or the header's `reload`) keeps children and sockets, and its endpoint
+refuses to start when a daemon already owns it. Soft refresh (`pixip refresh` or `POST /api/refresh`) keeps children and
+sockets, and its endpoint
 accepts loopback peers and the exact bind address because the UI has no auth.
 `/reload` (or `pixip reload`) is the in-place step beyond that: it refuses while
 any session is busy, re-reads assets/policy/index, reloads every live host child
@@ -224,14 +224,12 @@ off-by-default developer convenience: a 200 ms debounce over `src/` and
 `extensions/` runs the same reload. A busy session defers the reload (the
 daemon keeps polling and shows a "reload deferred" card after a minute) rather
 than interrupting; a failed reload, including a half-written file, is logged and
-shown as a notice while the daemon keeps serving. Hard restart
-refuses while a session is busy unless `--force`;
-`--when-idle` waits up to `--timeout` seconds (default 300, exit 2) for the other
-sessions and is the safe way to pick up hub changes from inside pixip: the
-stop/start runs in a detached helper that survives the calling session, and
-`pixip stop` issued from inside a session restarts instead of taking the service
-down (use a shell outside pixip to really stop it). The phone reconnects with
-backoff and its durable cursor, and sessions reattach from their JSONL.
+shown as a notice while the daemon keeps serving. Hard restart refuses while any session is busy unless `--force`, and `--force`
+is only accepted from a shell outside pixip. It refuses from inside a pixip
+session: use the browser's `/pixup-restart` card, which is user-gated and can
+pause sessions first. `--when-idle` waits up to `--timeout` seconds (default
+300, exit 2). `SIGHUP` is logged and ignored, and no reload or restart happens
+unless the user explicitly asks.
 
 `pixip protect` marks one session as excluded from the dashboard's bulk archive
 (the protected row shows a purple dot). With no id it uses the caller's

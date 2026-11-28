@@ -468,8 +468,9 @@ dead pid is stale and gets cleaned rather than reported.
 
 ### Soft refresh
 
-Soft refresh (`pixip refresh`, `SIGHUP`, `POST /api/refresh`) must never disturb
-a turn:
+Soft refresh (`pixip refresh`, `POST /api/refresh`) must never disturb a turn.
+`SIGHUP` is logged and ignored so an external signal cannot refresh behind the
+user's back:
 
 1. re-resolve the command policy for every live session — two-phase, so a
    malformed file fails the refresh before any policy is swapped;
@@ -591,17 +592,16 @@ resume.` as a steering prompt. The outcome rides on `/health` once so the
 reconnected client paints a single ephemeral row even though the broadcast
 happened before the socket came back.
 
-A hard restart from the CLI is still explicit: `pixip restart` refuses while a
-session is busy unless `--force`, or waits for every session to be idle with
-`--when-idle` (bounded by `--timeout`, default 300 s, exit 2 on timeout). It also
-works from inside a pixip session: the stop/start runs in a **detached helper**
-(`restart --detached`, stdio to `<data-dir>/pixip.log`), not in the CLI process,
-so it survives the shutdown of the Pi child that ran the bash tool. `PIXIP_INSIDE=1`
-and `PIXIP_SESSION_ID` are exported to every Pi child: `--when-idle` ignores the
-calling session (it is the one being replaced). `pixip stop` from inside a
-session now refuses with exit 2 and a user-only message instead of turning into
-a forced restart; a shell outside pixip still stops for real. Unexpected daemon
-crashes have no frame; the same socket-close reconnect path applies, without
+A hard restart from the CLI is explicit: `pixip restart` refuses while any other
+session is busy, `--force` overrides that only from a shell outside pixip, and
+`--when-idle` waits for every session to be idle (bounded by `--timeout`, default
+300 s, exit 2 on timeout). It refuses from inside a pixip session with exit 2,
+because an agent-triggered restart can kill another in-flight agent. Replacement
+from a session goes through the browser's nonce-gated `/pixup-restart` card,
+which is user-only; its Force action can interrupt busy turns. `pixip stop` from
+inside a session likewise refuses with a user-only message; a shell outside
+pixip still stops for real. Unexpected daemon crashes have no frame; the same
+socket-close reconnect path applies, without
 claiming a planned restart.
 
 ### Backend and port boundary
