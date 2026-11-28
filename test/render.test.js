@@ -17,6 +17,8 @@ import {
 	renderMessage,
 	renderUserBody,
 	renderUserText,
+	LIVE_THINKING_ATTR,
+	LIVE_THINKING_SELECTOR,
 	summarizeArgs,
 	textOf,
 	thinkingBoxHtml,
@@ -360,6 +362,17 @@ describe("markdown", () => {
 		assert.match(thinkingStatus(true).className, / thinking-indicator active$/);
 		assert.equal(thinkingStatus(false).summary, "thinking");
 		assert.match(thinkingStatus(false).className, / thinking-indicator done$/);
+	});
+
+	it("marks only the transient live indicator, so the painter never adopts a finalized box", () => {
+		const live = thinkingBoxHtml("streaming", { active: true, live: true });
+		assert.match(live, /<details class="block meta thinking-indicator active" data-live="1">/);
+		assert.equal(LIVE_THINKING_SELECTOR, '.thinking-indicator[data-live="1"]');
+		const done = thinkingBoxHtml("finished");
+		assert.equal(done.includes(LIVE_THINKING_ATTR), false);
+		// The selector matches the live box and nothing else.
+		assert.match(live, /data-live="1"/);
+		assert.doesNotMatch(done, /data-live/);
 	});
 
 	it("combines several thinking blocks into one box before the answer and can keep it open", () => {

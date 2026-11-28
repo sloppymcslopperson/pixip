@@ -1,7 +1,7 @@
 // Shared append-only transcript DOM primitives. The painter in transcript.js
 // owns windows and deltas; these are the small operations other features need
 // without importing the transcript feature.
-import { thinkingBoxHtml, thinkingStatus } from "./render.js";
+import { LIVE_THINKING_ATTR, LIVE_THINKING_SELECTOR, thinkingBoxHtml, thinkingStatus } from "./render.js";
 import { scheduleScroll } from "./scroll.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
@@ -23,12 +23,13 @@ function paintThinkingIndicator(existing, thought) {
 	const text = typeof thought?.text === "string" ? thought.text : "";
 	const active = thought?.active !== false;
 	const open = existing?.tagName === "DETAILS" ? existing.open : thought?.expanded === true;
-	const html = thinkingBoxHtml(text, { active, open });
+	const html = thinkingBoxHtml(text, { active, open, live: true });
 	if (!html) {
 		const plain = existing?.tagName === "DIV" ? existing : document.createElement("div");
 		if (existing && existing !== plain) existing.replaceWith(plain);
 		const status = thinkingStatus(active);
 		plain.className = status.className;
+		plain.setAttribute(LIVE_THINKING_ATTR, "1");
 		plain.textContent = status.summary;
 		return plain;
 	}
@@ -43,7 +44,9 @@ function paintThinkingIndicator(existing, thought) {
 export function showThinkingIndicator() {
 	if (ui.session.hidden) return;
 	const thought = state.liveThought;
-	let existing = ui.log.querySelector(".thinking-indicator");
+	// Scope to the transient marker: a finalized box shares the class and must
+	// stay where its answer left it.
+	let existing = ui.log.querySelector(LIVE_THINKING_SELECTOR);
 	existing = existing ? paintThinkingIndicator(existing, thought) : paintThinkingIndicator(null, thought);
 	// Keep it after the newest block (for example the real user message that
 	// replaces the optimistic echo) without repainting it.
@@ -63,7 +66,7 @@ export function scheduleThinkingPaint() {
 }
 
 export function hideThinkingIndicator() {
-	ui.log.querySelector(".thinking-indicator")?.remove();
+	ui.log.querySelector(LIVE_THINKING_SELECTOR)?.remove();
 }
 
 /** Persistent progress for compaction, separate from the turn's thinking row. */

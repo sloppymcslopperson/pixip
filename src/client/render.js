@@ -452,6 +452,15 @@ export function bashCardHtml(message) {
 	return `<section class="${classes.join(" ")}"><div class="bash-head"><span class="bash-prompt">$</span><span class="bash-cmd">${escapeHtml(command)}</span>${badge}</div><pre class="bash-out">${escapeHtml(output)}</pre><div class="bash-meta">${escapeHtml(meta.join(" · "))}</div></section>`;
 }
 
+/**
+ * Only the transient streamed indicator carries this marker. Finalized boxes
+ * share the `thinking-indicator` class, so the live painter must never look one
+ * up by that class alone: it would move or delete a finished thought.
+ */
+export const LIVE_THINKING_ATTR = "data-live";
+
+export const LIVE_THINKING_SELECTOR = `.thinking-indicator[${LIVE_THINKING_ATTR}="1"]`;
+
 /** Summary and classes for the one thought disclosure, live and finalized. */
 export function thinkingStatus(active = true) {
 	return active
@@ -482,7 +491,8 @@ export function thinkingBoxHtml(text, options = {}) {
 	// ANSI-only and whitespace-only thoughts produce no visible text: no box.
 	if (!inner.replace(/<[^>]*>/g, "").trim()) return "";
 	const open = options.open === true ? " open" : "";
-	return `<details class="${status.className}"${open}><summary>${status.summary}</summary><div class="think-live">${inner}</div></details>`;
+	const live = options.live === true ? ` ${LIVE_THINKING_ATTR}="1"` : "";
+	return `<details class="${status.className}"${live}${open}><summary>${status.summary}</summary><div class="think-live">${inner}</div></details>`;
 }
 
 export function renderAssistant(content, includeTools = true, options = {}) {
