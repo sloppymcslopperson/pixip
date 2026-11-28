@@ -5,11 +5,12 @@
 export const PURPOSE_LABELS = {
 	"attention-needed": "attention",
 	deliverable: "deliverable",
+	reports: "reports",
 	"extra-info": "extra info",
 	"no-rush": "no rush",
 };
 
-export const INBOX_PURPOSES = ["attention-needed", "deliverable", "extra-info", "no-rush"];
+export const INBOX_PURPOSES = ["attention-needed", "deliverable", "reports", "extra-info", "no-rush"];
 
 export function shortId(id) {
 	return typeof id === "string" ? id.slice(0, 8) : "";

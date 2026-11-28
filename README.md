@@ -259,7 +259,7 @@ pixip inbox delete <id>
 Inside a Pi child the sender is the calling session (`PIXIP_SESSION_ID`); a
 plain shell is labelled `local shell`. The CLI talks to `PIXIP_DAEMON_URL` when
 set, otherwise to the daemon running for `--data-dir`. Purposes are
-`attention-needed`, `deliverable`, `extra-info` and `no-rush`.
+`attention-needed`, `deliverable`, `reports`, `extra-info` and `no-rush`.
 
 The REST surface is `POST/GET /api/inbox`, `POST /api/inbox/reports`,
 `POST /api/inbox/read-all`, `POST /api/inbox/:id/read|archive|restore`, and

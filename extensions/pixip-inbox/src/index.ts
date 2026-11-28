@@ -22,7 +22,7 @@ import {
 
 const PurposeSchema = Type.String({
 	enum: [...INBOX_PURPOSES],
-	description: "attention-needed, deliverable, extra-info or no-rush",
+	description: "attention-needed, deliverable, reports, extra-info or no-rush",
 });
 
 const InboxSendParams = Type.Object({
@@ -69,7 +69,8 @@ export default function pixipInbox(pi: ExtensionAPI) {
 		description:
 			"Send one durable message to the user's pixip dashboard inbox. The message outlives this session " +
 			"and is visible in the inbox sheet. Pick a purpose: attention-needed (the user should act or decide), " +
-			"deliverable (a finished result), extra-info (useful context), or no-rush (read later). Do not use " +
+			"deliverable (a finished result), reports (a message carrying an HTML report), extra-info (useful context), " +
+			"or no-rush (read later). Do not use " +
 			"this for ordinary conversation; the transcript already carries that.",
 		promptSnippet: "Leave a durable message in the pixip inbox",
 		promptGuidelines: [

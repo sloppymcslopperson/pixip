@@ -11,7 +11,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 
-export const INBOX_PURPOSES = ["attention-needed", "deliverable", "extra-info", "no-rush"] as const;
+export const INBOX_PURPOSES = ["attention-needed", "deliverable", "reports", "extra-info", "no-rush"] as const;
 export type InboxPurpose = (typeof INBOX_PURPOSES)[number];
 
 export const DEFAULT_INBOX_LIMIT = 200;

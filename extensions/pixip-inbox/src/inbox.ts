@@ -5,7 +5,7 @@
  */
 export const INBOX_TOOL = "inbox_send";
 export const REPORT_TOOL = "inbox_report";
-export const INBOX_PURPOSES = ["attention-needed", "deliverable", "extra-info", "no-rush"] as const;
+export const INBOX_PURPOSES = ["attention-needed", "deliverable", "reports", "extra-info", "no-rush"] as const;
 export type InboxPurpose = (typeof INBOX_PURPOSES)[number];
 export const REPORT_ACTIONS = ["new", "write", "add_asset", "remove_asset", "show"] as const;
 export type ReportAction = (typeof REPORT_ACTIONS)[number];

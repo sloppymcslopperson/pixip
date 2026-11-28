@@ -11,7 +11,7 @@ inbox_send({
 });
 ```
 
-Purposes are `attention-needed`, `deliverable`, `extra-info` and `no-rush`.
+Purposes are `attention-needed`, `deliverable`, `reports`, `extra-info` and `no-rush`.
 The message outlives the session and appears in the dashboard inbox sheet; the
 hub attributes it to the calling session through `PIXIP_SESSION_ID`.
 
