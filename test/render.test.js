@@ -12,13 +12,15 @@ import {
 	formatDuration,
 	pendingErrorHtml,
 	pendingSessionHtml,
-	renderAssistantBody,
+	renderAssistant,
 	renderEntry,
 	renderMessage,
 	renderUserBody,
 	renderUserText,
 	summarizeArgs,
 	textOf,
+	thinkingBoxHtml,
+	thinkingStatus,
 	toolBlock,
 } from "../src/client/render.js";
 
@@ -333,15 +335,35 @@ describe("markdown", () => {
 		}
 	});
 
-	it("keeps thinking blocks as escaped ansi text", () => {
-		const html = renderAssistantBody([{ type: "thinking", thinking: "**raw** <i>" }], false);
-		assert.match(html, /<details class="think">/);
+	it("keeps thinking blocks as escaped ansi text in the shared box", () => {
+		const html = renderAssistant([{ type: "thinking", thinking: "**raw** <i>" }], false);
+		assert.match(html, /<details class="block meta thinking-indicator done">/);
+		assert.match(html, /<summary>thinking<\/summary>/);
 		assert.match(html, /\*\*raw\*\* &lt;i&gt;/);
 		assert.equal(html.includes("<strong>"), false);
+		// A thought-only message leaves no empty labelled answer block behind.
+		assert.equal(html.includes("block assistant"), false);
 	});
 
-	it("combines several thinking blocks into one box and can keep it open", () => {
-		const html = renderAssistantBody(
+	it("preserves thought line breaks in the shared think body", () => {
+		const html = thinkingBoxHtml("line one\nline two");
+		assert.match(html, /<div class="think-live">line one\nline two<\/div>/);
+	});
+
+	it("skips thoughts with no visible text", () => {
+		assert.equal(thinkingBoxHtml("   \n\t"), "");
+		assert.equal(thinkingBoxHtml("\u001b[31m\u001b[0m"), "");
+	});
+
+	it("keeps the live and finalized status summaries distinct", () => {
+		assert.equal(thinkingStatus(true).summary, "agent is thinking…");
+		assert.match(thinkingStatus(true).className, / thinking-indicator active$/);
+		assert.equal(thinkingStatus(false).summary, "thinking");
+		assert.match(thinkingStatus(false).className, / thinking-indicator done$/);
+	});
+
+	it("combines several thinking blocks into one box before the answer and can keep it open", () => {
+		const html = renderAssistant(
 			[
 				{ type: "thinking", thinking: "first" },
 				{ type: "thinking", thinking: "second" },
@@ -350,9 +372,10 @@ describe("markdown", () => {
 			false,
 			{ openThinking: true },
 		);
-		assert.equal((html.match(/<details class="think"/g) ?? []).length, 1);
-		assert.match(html, /<details class="think" open><summary>thinking<\/summary>/);
-		assert.ok(html.indexOf("first") < html.indexOf("second"));
+		assert.equal((html.match(/<details class="block meta thinking-indicator done"/g) ?? []).length, 1);
+		assert.match(html, /<details class="block meta thinking-indicator done" open>/);
+		assert.ok(html.includes("first\n\nsecond"));
+		assert.ok(html.indexOf("</details>") < html.indexOf("block assistant"));
 	});
 });
 

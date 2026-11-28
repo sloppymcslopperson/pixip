@@ -53,9 +53,12 @@ remote terminal.
 Pi streams reasoning as `message_update` records whose `assistantMessageEvent`
 is `thinking_start`, `thinking_delta`, or `thinking_end`. The client shows the
 usual `agent is thinking…` marker until text arrives, then turns the marker into
-a disclosure that streams the thought with the same ANSI rendering as the final
-box. Tapping it toggles; if it is open at `message_end`, the final single
-`details.think` box for that assistant message starts open. A message with no
+a disclosure that streams the thought. The live stream and the finalized
+transcript share one `details.block.meta.thinking-indicator` component, so a
+completed thought keeps its line breaks, wrapping and ANSI styling. The
+finalized box is a top-level transcript block before the assistant answer.
+Tapping toggles; if the live box is open at `message_end`, that finalized box
+starts open, while later snapshots render it collapsed. A message with no
 thinking text keeps the plain, non-clickable marker.
 
 The hub keeps one volatile buffer per attached session for the current assistant

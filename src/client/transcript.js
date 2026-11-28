@@ -16,6 +16,8 @@ import {
 	renderUserBody,
 	summarizeArgs,
 	textOf,
+	thinkingBoxHtml,
+	thoughtTextOf,
 	toolBlock,
 	toolCallsOf,
 	toolResultParts,
@@ -105,10 +107,23 @@ function trackTruncated() {
  * text arrives. `truncated` is the fetchable window cap; `fullTruncated` is the
  * hard cap and deliberately gets no repeated fetch affordance.
  */
+function entryAttrs(entry) {
+	return ` data-entry="${escapeHtml(entry.id)}"${entry.truncated === true ? ' data-truncated="1"' : ""}`;
+}
+
 function tagEntry(html, entry) {
 	if (!html || typeof entry?.id !== "string" || entry.id.length === 0) return html;
-	const attrs = ` data-entry="${escapeHtml(entry.id)}"${entry.truncated === true ? ' data-truncated="1"' : ""}`;
-	return html.replace(/^<(section|details)/, `<$1${attrs}`);
+	return html.replace(/^<(section|details)/, `<$1${entryAttrs(entry)}`);
+}
+
+/**
+ * An assistant entry can render a top-level thought box and the answer block
+ * as siblings. The neutral container keeps windowing, full-entry replacement
+ * and reftag decoration addressed to one entry node.
+ */
+function tagAssistantEntry(html, entry) {
+	if (!html || typeof entry?.id !== "string" || entry.id.length === 0) return html;
+	return `<section class="entry"${entryAttrs(entry)}>${html}</section>`;
 }
 
 export function earlierButton() {
@@ -144,7 +159,7 @@ export function htmlOf(entries, calls) {
 	const blocks = [];
 	for (const entry of entries) {
 		if (entry?.type === "message" && entry.message?.role === "assistant") {
-			blocks.push(tagEntry(renderAssistant(entry.message.content, false), entry));
+			blocks.push(tagAssistantEntry(renderAssistant(entry.message.content, false), entry));
 			continue;
 		}
 		if (entry?.type === "message" && entry.message?.role === "toolResult") {
@@ -415,16 +430,30 @@ export function handleEvent(event) {
 				if (typeof message.timestamp === "number") liveAssistantTs = message.timestamp;
 				const expanded = state.liveThought?.expanded === true;
 				hideThinkingIndicator();
-				const body = renderAssistantBody(message.content ?? [], false, { openThinking: expanded });
+				const thought = thinkingBoxHtml(thoughtTextOf(message.content), { open: expanded });
+				const body = renderAssistantBody(message.content ?? [], false);
 				const section = state.streaming;
 				state.streaming = null;
-				if (section) {
-					if (body) section.innerHTML = `<div class="who">pi</div>${body}`;
-					else section.remove();
-					if (body) stampRef(section, tagForLiveMessage(message));
-				} else if (body) {
-					const painted = appendBlock("assistant", `<div class="who">pi</div>${body}`, true);
-					stampRef(painted, tagForLiveMessage(message));
+				let answer = null;
+				if (body) {
+					if (section) {
+						section.innerHTML = `<div class="who">pi</div>${body}`;
+						answer = section;
+					} else {
+						answer = appendBlock("assistant", `<div class="who">pi</div>${body}`, true);
+					}
+					stampRef(answer, tagForLiveMessage(message));
+				} else if (section) {
+					section.remove();
+				}
+				if (thought) {
+					if (answer) answer.insertAdjacentHTML("beforebegin", thought);
+					else {
+						const holder = document.createElement("div");
+						holder.innerHTML = thought;
+						ui.log.append(holder.firstElementChild);
+						scheduleScroll();
+					}
 				}
 				state.liveThought = { text: "", active: false, expanded };
 			}
