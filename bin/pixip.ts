@@ -36,6 +36,8 @@ import {
 	writeResumeSet,
 } from "../src/daemon.ts";
 import type { WorktreeEntry } from "../src/worktree.ts";
+import type { AgentInfo, AgentList } from "../src/agents.ts";
+import { resolveFilterPath } from "../src/agents.ts";
 import { frameNotice, type SessionInfo } from "../src/wire.ts";
 import type { InboxList, InboxView } from "../src/inbox.ts";
 import { RefResolutionError, formatRef, parseRefArg, resolveRef } from "../src/refResolve.ts";
@@ -68,6 +70,7 @@ type Command =
 	| "worktree"
 	| "protect"
 	| "inbox"
+	| "agents"
 	| "ref";
 
 const SUBCOMMANDS = new Set<string>([
@@ -82,6 +85,7 @@ const SUBCOMMANDS = new Set<string>([
 	"worktree",
 	"protect",
 	"inbox",
+	"agents",
 	"ref",
 ]);
 
@@ -136,6 +140,16 @@ interface Options {
 	unread: boolean;
 	/** `inbox list --archived` */
 	archived: boolean;
+	/** `agents list --all`: include archived and trash sessions. */
+	all: boolean;
+	/** `agents list --cwd <path>` */
+	cwd: string;
+	/** `agents list --repo <path>` */
+	repo: string;
+	/** `agents list --state <state>` */
+	state: string;
+	/** `agents list --query <text>` */
+	query: string;
 	/** Internal: this process is the detached restart helper. */
 	detached: boolean;
 	/** Non-flag arguments after the subcommand (`worktree list [<path>]`). */
@@ -192,6 +206,11 @@ function parseArgs(argv: string[]): Options {
 		quiet: false,
 		unread: false,
 		archived: false,
+		all: false,
+		cwd: "",
+		repo: "",
+		state: "",
+		query: "",
 		detached: false,
 		positionals: [],
 	};
@@ -292,6 +311,21 @@ function parseArgs(argv: string[]): Options {
 				break;
 			case "--archived":
 				options.archived = true;
+				break;
+			case "--all":
+				options.all = true;
+				break;
+			case "--cwd":
+				options.cwd = next();
+				break;
+			case "--repo":
+				options.repo = next();
+				break;
+			case "--state":
+				options.state = next();
+				break;
+			case "--query":
+				options.query = next();
 				break;
 			case "--detached":
 				// Internal flag of the restart helper; not part of the public surface.
@@ -434,6 +468,8 @@ Commands:
   inbox <send|list|read|archive|delete>
                       durable messages from agents, readable in the dashboard
                       (see 'pixip inbox --help')
+  agents <list>       find other pixip sessions without opening the web UI
+                      (see 'pixip agents --help')
   ref <tag> [--json]  resolve a copied pixip ref offline: kind, session, role,
                       time, cwd, branch and its text (capped at 4 KB)
 
@@ -465,6 +501,32 @@ Options:
   --data-dir <path>   isolation root used to find the running daemon
                       (default ./tmp/dev)
   --json              machine-readable output for list
+`;
+	process.stdout.write(usage);
+}
+
+function printAgentsHelp(): void {
+	const usage = `Usage: pixip agents list [options]
+
+Commands:
+  list [--all] [--json] [--cwd <path>] [--repo <path>] [--state <state>]
+       [--query <text>]
+                      list active pixip sessions. The calling session (when
+                      PIXIP_SESSION_ID is set) is marked and sorted first.
+                      --all also includes archived and trash sessions, marked
+                      with their stored state. --cwd and --repo match an exact
+                      resolved path; --state is one of starting, idle, busy,
+                      stopped or error; --query is a case-insensitive substring
+                      over name, id, logical id, cwd, repo and branch.
+
+The command talks to the daemon at PIXIP_DAEMON_URL when set, otherwise to
+the running daemon for --data-dir. Every row includes an absolute URL of the
+form http://host:port/#s=<id> that opens the session page.
+
+Options:
+  --data-dir <path>   isolation root used to find the running daemon
+                      (default ./tmp/dev)
+  --json              machine-readable envelope {"agents":[...],"count":N}
 `;
 	process.stdout.write(usage);
 }
@@ -556,6 +618,15 @@ async function main(): Promise<void> {
 		}
 		const options = parseArgs(argv);
 		return await cmdInbox(action, options);
+	}
+	if (command === "agents") {
+		const action = argv.shift();
+		if (!action || action === "--help" || action === "-h" || action === "help") {
+			printAgentsHelp();
+			return;
+		}
+		const options = parseArgs(argv);
+		return await cmdAgents(action, options);
 	}
 	const options = parseArgs(argv);
 	if (options.positionals.length > 0 && command !== "protect") {
@@ -1315,6 +1386,57 @@ async function cmdInbox(action: string, options: Options): Promise<void> {
 			return await cmdInboxDelete(options);
 		default:
 			throw new Error(`unknown inbox command ${action}`);
+	}
+}
+
+// ------------------------------------------------------------------ agents
+
+function formatAgentTable(agents: AgentInfo[]): string {
+	const headers = ["SELF", "WAITING", "STATE", "ID", "NAME", "LOCATION", "URL"];
+	const data = agents.map((agent) => [
+		agent.isSelf ? "*" : "",
+		agent.awaitingUser ? "!" : "",
+		agent.stored ? `${agent.state}/${agent.stored}` : agent.state,
+		agent.id.slice(0, 8),
+		agent.name || "(untitled)",
+		agent.worktree?.path ?? agent.repo ?? agent.cwd,
+		agent.url,
+	]);
+	const widths = headers.map((header, index) => Math.max(header.length, ...data.map((row) => row[index]?.length ?? 0)));
+	const line = (cells: string[]) =>
+		cells.map((cell, index) => (index === cells.length - 1 ? cell : cell.padEnd(widths[index] ?? 0))).join("  ");
+	return [line(headers), line(widths.map((width) => "-".repeat(width))), ...data.map(line)].join("\n") + "\n";
+}
+
+async function cmdAgentsList(options: Options): Promise<void> {
+	if (options.positionals.length > 0) {
+		throw new Error(
+			"usage: pixip agents list [--json] [--all] [--cwd <path>] [--repo <path>] [--state <state>] [--query <text>]",
+		);
+	}
+	const params = new URLSearchParams();
+	if (options.all) params.set("all", "1");
+	if (options.cwd) params.set("cwd", resolveFilterPath(options.cwd));
+	if (options.repo) params.set("repo", resolveFilterPath(options.repo));
+	if (options.state) params.set("state", options.state);
+	if (options.query) params.set("query", options.query);
+	const self = callerSession();
+	if (self) params.set("self", self);
+	const suffix = params.size > 0 ? `?${params.toString()}` : "";
+	const list = await inboxRequest<AgentList>(options, `api/agents${suffix}`);
+	if (options.json) {
+		process.stdout.write(`${JSON.stringify(list)}\n`);
+		return;
+	}
+	process.stdout.write(list.count > 0 ? formatAgentTable(list.agents) : "no agents found\n");
+}
+
+async function cmdAgents(action: string, options: Options): Promise<void> {
+	switch (action) {
+		case "list":
+			return await cmdAgentsList(options);
+		default:
+			throw new Error(`unknown agents command ${action}`);
 	}
 }
 

@@ -80,6 +80,14 @@ the same way:
 pi install /path/to/pixip/extensions/pixip-show-image
 ```
 
+`extensions/pixip-agents` registers `agent_list`, a read-only way for an agent
+to find other sessions (live, attached or stopped) and get their absolute
+`#s=<id>` page URL. Archived/trash sessions are opt-in with `all: true`.
+
+```bash
+pi install /path/to/pixip/extensions/pixip-agents
+```
+
 ## Why
 
 Existing options are slow, shaped around terminals or editors, and some of them
@@ -303,6 +311,40 @@ inbox bar appear.
 
 ```bash
 pi install /path/to/pixip/extensions/pixip-inbox
+```
+
+## Agent discovery
+
+An agent can find other pixip sessions without opening the web UI. The surface
+is read-only and shared by the CLI, the dashboard-independent API and the opt-in
+`pixip-agents` extension:
+
+```bash
+pixip agents list [--json] [--all] [--cwd <path>] [--repo <path>]
+                  [--state <state>] [--query <text>]
+```
+
+Each row has the current Pi id, stable logical id, name, state, cwd, repo,
+branch/worktree, `awaitingUser`, `lastActivity`, `isSelf` and an absolute URL
+like `http://127.0.0.1:8137/#s=<id>` that opens that session. The calling
+session (`PIXIP_SESSION_ID`) is marked and sorted first. `--all` adds archived
+and trash sessions, marked `archive` or `trash`; without it only active board
+sessions are returned. `--cwd` and `--repo` match exact resolved paths,
+`--state` is one of `starting`, `idle`, `busy`, `stopped`, `error`, and
+`--query` searches name, id, logical id, cwd, repo and branch.
+
+The REST route is `GET /api/agents` and returns
+`{"agents":[...],"count":N}`. The extension
+`extensions/pixip-agents` is the agent face:
+
+```bash
+pi install /path/to/pixip/extensions/pixip-agents
+```
+
+```ts
+agent_list();
+agent_list({ state: "idle", query: "auth" });
+agent_list({ all: true });
 ```
 
 ## Refs

@@ -7,6 +7,7 @@ import { basename, extname, isAbsolute, join, normalize } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 
 import { createDirectory, DirError, listDirectories } from "./dirs.ts";
+import { AgentFilterError, agentBaseUrl, listAgents, parseAgentFilters } from "./agents.ts";
 import { INBOX_PURPOSES, InboxError, type InboxFilter, type InboxPurpose } from "./inbox.ts";
 import { ReportError } from "./inboxReport.ts";
 import { detectImageMime, MAX_UPLOAD_BYTES, safeUploadName } from "./attachments.ts";
@@ -529,6 +530,17 @@ async function handleHttp(
 					...(result.reason === "referenced" ? { sessions: result.sessions } : {}),
 				}),
 			);
+			return;
+		}
+		if (req.method === "GET" && url.pathname === "/api/agents") {
+			try {
+				const filters = parseAgentFilters(url.searchParams);
+				const baseUrl = agentBaseUrl(req.headers.host, hub.childDaemonUrl);
+				send(200, JSON.stringify(await listAgents(hub, filters, baseUrl)));
+			} catch (error) {
+				if (!(error instanceof AgentFilterError)) throw error;
+				send(400, JSON.stringify({ error: error.message }));
+			}
 			return;
 		}
 		if (req.method === "GET" && url.pathname === "/api/sessions") {

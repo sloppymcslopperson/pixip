@@ -1,0 +1,44 @@
+{
+	"name": "pixip-agents",
+	"version": "0.1.0",
+	"private": true,
+	"description": "agent_list: read-only discovery of pixip sessions for a Pi agent",
+	"type": "module",
+	"license": "Unlicense",
+	"keywords": [
+		"pi-package",
+		"pi",
+		"extension",
+		"agents",
+		"pixip"
+	],
+	"pi": {
+		"extensions": [
+			"./src/index.ts"
+		]
+	},
+	"files": [
+		"src",
+		"README.md"
+	],
+	"engines": {
+		"node": ">=22.19.0"
+	},
+	"scripts": {
+		"test": "node --test test/*.test.ts",
+		"typecheck": "tsc --noEmit --incremental --tsBuildInfoFile ../../node_modules/.cache/tsbuildinfo/pixip-agents.tsbuildinfo",
+		"lint": "eslint . --cache --cache-location ../../node_modules/.cache/eslint/pixip-agents.cache",
+		"format:check": "prettier --check .",
+		"check": "npm run typecheck && npm run lint && npm run format:check && npm test"
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*",
+		"typebox": "*"
+	},
+	"devDependencies": {
+		"@earendil-works/pi-coding-agent": "1.5.2",
+		"@types/node": "^22.19.0",
+		"typebox": "*",
+		"typescript": "^5.9.0"
+	}
+}
