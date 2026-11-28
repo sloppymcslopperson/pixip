@@ -20,8 +20,36 @@ import { handleRestartNotice, markRestartPending } from "./restart.js";
 import { handleWatchNotice } from "./watch.js";
 import { openExportSheet, openModelSheet, openThinkingSheet, openTreeSheet } from "./sheets.js";
 import { dropSurface, handleNeedTime, handleReasks } from "./surface.js";
-import { applyFullEntry, applyLiveThinking, handleEvent, prependHistory, renderTranscript } from "./transcript.js";
+import {
+	applyFullEntry,
+	applyLiveThinking,
+	decorateAgentSenders,
+	handleEvent,
+	prependHistory,
+	renderTranscript,
+} from "./transcript.js";
 import { toast } from "./toast.js";
+
+let sessionsLoading = false;
+
+/**
+ * A deep-linked session paints before any list frame. Fetch the existing
+ * dashboard list once so sender names and links can arrive without a repaint.
+ */
+function ensureSessions() {
+	if ((Array.isArray(state.sessions) && state.sessions.length > 0) || sessionsLoading) return;
+	sessionsLoading = true;
+	void listSessions()
+		.then((sessions) => {
+			if (!Array.isArray(sessions) || sessions.length === 0) return;
+			state.sessions = sessions;
+			decorateAgentSenders();
+			void decorateUserRefs();
+		})
+		.finally(() => {
+			sessionsLoading = false;
+		});
+}
 
 /** A parked session that stopped, errored or vanished no longer owns a socket. */
 function evictStoppedParked(sessions) {
@@ -89,6 +117,7 @@ export function handleFrame(fromSessionId, frame) {
 				state.sessions = frame.sessions;
 				// A deep link has no dashboard `sessions` frame; hello already
 				// carries the list, so cross-session refs can resolve here.
+				decorateAgentSenders();
 				void decorateUserRefs();
 			}
 			if (!state.sessionId) {
@@ -102,6 +131,7 @@ export function handleFrame(fromSessionId, frame) {
 			state.sessions = sessions;
 			// A deep link paints the transcript before this frame; refs to other
 			// sessions only resolve once their names and locations are here.
+			decorateAgentSenders();
 			void decorateUserRefs();
 			evictStoppedParked(sessions);
 			if (!state.sessionId) {
@@ -122,6 +152,7 @@ export function handleFrame(fromSessionId, frame) {
 		}
 		case "snapshot":
 			handleSnapshot(frame);
+			ensureSessions();
 			break;
 		case "live_thinking":
 			applyLiveThinking(frame);
