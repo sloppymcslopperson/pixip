@@ -1,0 +1,1 @@
+Steering queue doesn’t properly empty in shell when it empties in actuality. When the x is pressed in this case a toast informs the user that the queue was already empty. The queue display should reflect the current actual state of the steering queue
