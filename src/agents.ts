@@ -1,13 +1,15 @@
 /**
- * Read-only agent discovery: the shape returned by `GET /api/agents`.
+ * Agent discovery and message targeting: the shapes returned by
+ * `GET /api/agents` and `POST /api/agents/:id/messages`.
  *
  * The same list feeds the dashboard-independent CLI and the opt-in
- * `pixip-agents` extension, so all filtering, ordering and URL construction
- * lives here. Nothing in this module mutates a session.
+ * `pixip-agents` extension, so all filtering, ordering, target resolution and
+ * URL construction lives here. Sending itself runs in the hub.
  */
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
+import type { AgentDeliveryReceipt } from "./agentDeliveries.ts";
 import type { StoredSessionInfo } from "./sessionIndex.ts";
 import type { SessionInfo, SessionState, WorktreeInfo } from "./wire.ts";
 
@@ -37,6 +39,8 @@ export interface AgentInfo {
 	archivedAt?: string;
 	deletedAt?: string;
 	expiresAt?: number;
+	/** Latest successful send to this target; only active rows carry it. */
+	lastDelivery?: AgentDeliveryReceipt;
 }
 
 export interface AgentFilters {
@@ -60,6 +64,56 @@ export interface AgentSource {
 }
 
 export class AgentFilterError extends Error {}
+
+/** Public target summary used in 404/409 responses and error text. */
+export interface AgentCandidate {
+	id: string;
+	logicalId: string;
+	name: string;
+	state: SessionState;
+	stored?: AgentStored;
+}
+
+/** One send request after HTTP/CLI parsing. */
+export interface AgentSendRequest {
+	target: string;
+	message: string;
+	sender?: string;
+}
+
+/** The acknowledgement returned without waiting for the target's turn. */
+export interface AgentSendAck {
+	deliveryId: string;
+	target: {
+		id: string;
+		name: string;
+		url: string;
+		stateBefore: SessionState;
+		stateAfter: SessionState;
+	};
+	delivered: boolean;
+	woken: boolean;
+	streaming: boolean;
+	at: string;
+}
+
+/** A request/resolution/delivery failure with the HTTP status the route should use. */
+export class AgentSendError extends Error {
+	readonly status: number;
+	readonly candidates?: AgentCandidate[];
+
+	constructor(message: string, status: number, candidates?: AgentCandidate[]) {
+		super(message);
+		this.name = "AgentSendError";
+		this.status = status;
+		if (candidates) this.candidates = candidates;
+	}
+}
+
+export interface ResolvedAgentTarget {
+	info: SessionInfo | StoredSessionInfo;
+	stored?: AgentStored;
+}
 
 const FILTER_KEYS = new Set(["all", "cwd", "repo", "state", "query", "self"]);
 
@@ -146,6 +200,7 @@ function toAgent(
 	baseUrl: string,
 	self: string | undefined,
 	stored?: AgentStored,
+	lastDelivery?: AgentDeliveryReceipt,
 ): AgentInfo {
 	const id = info.id;
 	const logicalId = info.logicalId ?? id;
@@ -168,6 +223,7 @@ function toAgent(
 	if ("archivedAt" in info && info.archivedAt) agent.archivedAt = info.archivedAt;
 	if ("deletedAt" in info && info.deletedAt) agent.deletedAt = info.deletedAt;
 	if ("expiresAt" in info && typeof info.expiresAt === "number") agent.expiresAt = info.expiresAt;
+	if (!stored && lastDelivery) agent.lastDelivery = lastDelivery;
 	return agent;
 }
 
@@ -209,8 +265,15 @@ function compareAgents(a: AgentInfo, b: AgentInfo): number {
 }
 
 /** Read the active board, plus archive/trash when explicitly requested. */
-export async function listAgents(source: AgentSource, filters: AgentFilters, baseUrl: string): Promise<AgentList> {
-	const agents = (await source.list()).map((info) => toAgent(info, baseUrl, filters.self));
+export async function listAgents(
+	source: AgentSource,
+	filters: AgentFilters,
+	baseUrl: string,
+	lastDeliveries?: Map<string, AgentDeliveryReceipt>,
+): Promise<AgentList> {
+	const agents = (await source.list()).map((info) =>
+		toAgent(info, baseUrl, filters.self, undefined, lastDeliveries?.get(info.logicalId ?? info.id)),
+	);
 	if (filters.all) {
 		for (const info of await source.listArchived()) {
 			agents.push(toAgent(info, baseUrl, filters.self, "archive"));
@@ -221,4 +284,93 @@ export async function listAgents(source: AgentSource, filters: AgentFilters, bas
 	}
 	const selected = agents.filter((agent) => matches(agent, filters)).sort(compareAgents);
 	return { agents: selected, count: selected.length };
+}
+
+function candidate(info: SessionInfo | StoredSessionInfo, stored?: AgentStored): AgentCandidate {
+	return {
+		id: info.id,
+		logicalId: info.logicalId ?? info.id,
+		name: info.name ?? "",
+		state: info.state,
+		...(stored ? { stored } : {}),
+	};
+}
+
+function candidateText(candidate: AgentCandidate): string {
+	const label = candidate.name ? `${candidate.name} [${candidate.id}]` : `[${candidate.id}]`;
+	return `${label} (${candidate.stored ? `${candidate.state}/${candidate.stored}` : candidate.state})`;
+}
+
+function ambiguous(query: string, candidates: AgentCandidate[]): AgentSendError {
+	return new AgentSendError(
+		`ambiguous agent "${query}"; matches: ${candidates.map(candidateText).join(", ")}`,
+		409,
+		candidates,
+	);
+}
+
+/**
+ * Resolve one target. Exact ids always win, including an archived/trash row;
+ * stored rows are never reachable by name or prefix. Names are case-insensitive
+ * and only search the active board.
+ */
+export function resolveAgentTarget(
+	active: SessionInfo[],
+	archived: StoredSessionInfo[],
+	trash: StoredSessionInfo[],
+	query: string,
+): ResolvedAgentTarget {
+	const activeMatches: ResolvedAgentTarget[] = active
+		.filter((info) => info.id === query || info.logicalId === query)
+		.map((info) => ({ info }));
+	const archivedMatches: ResolvedAgentTarget[] = archived
+		.filter((info) => info.id === query || info.logicalId === query)
+		.map((info) => ({ info, stored: "archive" }));
+	const trashMatches: ResolvedAgentTarget[] = trash
+		.filter((info) => info.id === query || info.logicalId === query)
+		.map((info) => ({ info, stored: "trash" }));
+	const exact = [...activeMatches, ...archivedMatches, ...trashMatches];
+	if (exact.length === 1 && exact[0]) return exact[0];
+	if (exact.length > 1) {
+		throw ambiguous(
+			query,
+			exact.map((match) => candidate(match.info, match.stored)),
+		);
+	}
+
+	const lower = query.toLowerCase();
+	const named = active.filter((info) => (info.name ?? "").toLowerCase() === lower);
+	if (named.length === 1 && named[0]) return { info: named[0] };
+	if (named.length > 1)
+		throw ambiguous(
+			query,
+			named.map((info) => candidate(info)),
+		);
+
+	const prefixed = active.filter((info) => info.id.startsWith(query) || (info.logicalId?.startsWith(query) ?? false));
+	if (prefixed.length === 1 && prefixed[0]) return { info: prefixed[0] };
+	if (prefixed.length > 1)
+		throw ambiguous(
+			query,
+			prefixed.map((info) => candidate(info)),
+		);
+
+	throw new AgentSendError(`unknown agent "${query}"; no active session matches that id, name or id prefix`, 404);
+}
+
+/** Validate once, before any IO, so empty input never reaches a session. */
+export function normalizeAgentSend(input: AgentSendRequest): { target: string; message: string; senderId: string } {
+	const target = input.target.trim();
+	if (!target) throw new AgentSendError("target must not be empty", 400);
+	if (!input.message.trim()) throw new AgentSendError("message must not be empty", 400);
+	const rawSender = (input.sender ?? "").trim();
+	const senderId = rawSender || "local-shell";
+	if (senderId.length > 128) throw new AgentSendError("sender must be 128 characters or fewer", 400);
+	for (const char of senderId) {
+		const code = char.charCodeAt(0);
+		if (code < 0x20 || code === 0x7f) {
+			throw new AgentSendError("sender must not contain control characters or newlines", 400);
+		}
+	}
+	return { target, message: input.message, senderId };
 }

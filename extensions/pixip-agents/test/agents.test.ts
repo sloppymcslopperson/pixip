@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { after, describe, it } from "node:test";
 
-import { listAgents, runAgentListTool } from "../src/agents.ts";
+import { listAgents, runAgentListTool, runAgentSendTool, sendAgentMessage } from "../src/agents.ts";
 
 interface Captured {
 	method: string;
 	url: string;
 	headers: IncomingMessage["headers"];
+	body: string;
 }
 
 interface TestServer {
@@ -36,9 +37,15 @@ async function server(
 ): Promise<TestServer> {
 	const captured: Captured[] = [];
 	const instance = createServer((req: IncomingMessage, res: ServerResponse) => {
-		req.resume();
+		const chunks: Buffer[] = [];
+		req.on("data", (chunk: Buffer) => chunks.push(chunk));
 		req.on("end", () => {
-			captured.push({ method: req.method ?? "", url: req.url ?? "", headers: req.headers });
+			captured.push({
+				method: req.method ?? "",
+				url: req.url ?? "",
+				headers: req.headers,
+				body: Buffer.concat(chunks).toString("utf8"),
+			});
 			res.writeHead(status, { "content-type": "application/json" });
 			res.end(JSON.stringify(reply));
 		});
@@ -134,5 +141,68 @@ describe("agent_list", () => {
 		assert.equal(result.isError, undefined);
 		assert.equal(result.content[0]?.text, "No pixip agents found.");
 		assert.deepEqual(result.details, { agents: [], count: 0 });
+	});
+});
+
+const sendAck = {
+	deliveryId: "delivery-1",
+	target: {
+		id: "pi-1",
+		name: "Review migration",
+		url: "http://127.0.0.1:8137/#s=pi-1",
+		stateBefore: "idle",
+		stateAfter: "idle",
+	},
+	delivered: true,
+	woken: false,
+	streaming: false,
+	at: "2026-11-21T00:00:00.000Z",
+};
+
+describe("agent_send", () => {
+	it("POSTs the target, message and caller as sender", async () => {
+		const hub = await boot(200, sendAck);
+		const ack = await sendAgentMessage(
+			{ target: "Review migration", message: "please look" },
+			{ env: { PIXIP_DAEMON_URL: hub.url, PIXIP_SESSION_ID: "self-1" } },
+		);
+		assert.deepEqual(ack, sendAck);
+		const call = hub.captured[0];
+		assert.ok(call);
+		assert.equal(call.method, "POST");
+		assert.equal(call.url, "/api/agents/Review%20migration/messages");
+		assert.deepEqual(JSON.parse(call.body), { message: "please look", sender: "self-1" });
+	});
+
+	it("uses local-shell outside a pixip session and returns the URL in tool text", async () => {
+		const hub = await boot(200, sendAck);
+		const result = await runAgentSendTool({ target: "pi-1", message: "hello" }, { env: { PIXIP_DAEMON_URL: hub.url } });
+		assert.equal(result.isError, undefined);
+		assert.match(result.content[0]?.text ?? "", /Delivered delivery-1/);
+		assert.match(result.content[0]?.text ?? "", /http:\/\/127\.0\.0\.1:8137\/#s=pi-1/);
+		assert.deepEqual(result.details, sendAck);
+		const call = hub.captured[0];
+		assert.ok(call);
+		assert.equal((JSON.parse(call.body) as { sender: string }).sender, "local-shell");
+	});
+
+	it("turns ambiguity into an actionable tool error", async () => {
+		const hub = await boot(409, { error: 'ambiguous agent "dup"; matches: one [a], two [b]' });
+		const result = await runAgentSendTool({ target: "dup", message: "hello" }, { env: { PIXIP_DAEMON_URL: hub.url } });
+		assert.equal(result.isError, true);
+		assert.match(result.content[0]?.text ?? "", /ambiguous agent "dup"/);
+		assert.equal(result.details.delivered, false);
+		assert.equal(result.details.error, 'agent send failed: ambiguous agent "dup"; matches: one [a], two [b]');
+	});
+
+	it("explains a missing daemon and validates empty input before a request", async () => {
+		await assert.rejects(
+			() => sendAgentMessage({ target: "x", message: "y" }, { env: {} }),
+			/PIXIP_DAEMON_URL is not set/,
+		);
+		await assert.rejects(
+			() => sendAgentMessage({ target: "x", message: " " }, { env: { PIXIP_DAEMON_URL: "http://127.0.0.1:1/" } }),
+			/message must not be empty/,
+		);
 	});
 });

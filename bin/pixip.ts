@@ -36,7 +36,7 @@ import {
 	writeResumeSet,
 } from "../src/daemon.ts";
 import type { WorktreeEntry } from "../src/worktree.ts";
-import type { AgentInfo, AgentList } from "../src/agents.ts";
+import type { AgentInfo, AgentList, AgentSendAck } from "../src/agents.ts";
 import { resolveFilterPath } from "../src/agents.ts";
 import { frameNotice, type SessionInfo } from "../src/wire.ts";
 import type { InboxList, InboxView } from "../src/inbox.ts";
@@ -468,8 +468,8 @@ Commands:
   inbox <send|list|read|archive|delete>
                       durable messages from agents, readable in the dashboard
                       (see 'pixip inbox --help')
-  agents <list>       find other pixip sessions without opening the web UI
-                      (see 'pixip agents --help')
+  agents <list|send>  find or message other pixip sessions without opening
+                      the web UI (see 'pixip agents --help')
   ref <tag> [--json]  resolve a copied pixip ref offline: kind, session, role,
                       time, cwd, branch and its text (capped at 4 KB)
 
@@ -506,7 +506,7 @@ Options:
 }
 
 function printAgentsHelp(): void {
-	const usage = `Usage: pixip agents list [options]
+	const usage = `Usage: pixip agents <list|send> [options]
 
 Commands:
   list [--all] [--json] [--cwd <path>] [--repo <path>] [--state <state>]
@@ -518,6 +518,13 @@ Commands:
                       resolved path; --state is one of starting, idle, busy,
                       stopped or error; --query is a case-insensitive substring
                       over name, id, logical id, cwd, repo and branch.
+  send <target> <message> [--json]
+                      send one message to another session exactly like a human
+                      prompt. <target> is an exact id/logical id, or a unique
+                      active name or id prefix; archived/trash targets require
+                      an explicit id. The target is woken or restored if
+                      necessary. Prints the acknowledgement and target URL
+                      without waiting for the target's turn.
 
 The command talks to the daemon at PIXIP_DAEMON_URL when set, otherwise to
 the running daemon for --data-dir. Every row includes an absolute URL of the
@@ -526,7 +533,7 @@ form http://host:port/#s=<id> that opens the session page.
 Options:
   --data-dir <path>   isolation root used to find the running daemon
                       (default ./tmp/dev)
-  --json              machine-readable envelope {"agents":[...],"count":N}
+  --json              machine-readable output (list envelope or send ack)
 `;
 	process.stdout.write(usage);
 }
@@ -1431,10 +1438,32 @@ async function cmdAgentsList(options: Options): Promise<void> {
 	process.stdout.write(list.count > 0 ? formatAgentTable(list.agents) : "no agents found\n");
 }
 
+function formatAgentSend(ack: AgentSendAck): string {
+	const label = ack.target.name ? `${ack.target.name} [${ack.target.id}]` : `[${ack.target.id}]`;
+	const flags = [ack.woken ? "woken" : "", ack.streaming ? "steered" : ""].filter(Boolean);
+	return `delivered ${ack.deliveryId} to ${label} (${ack.target.stateBefore} -> ${ack.target.stateAfter})${
+		flags.length > 0 ? ` ${flags.join(", ")}` : ""
+	}\n${ack.target.url}\n`;
+}
+
+async function cmdAgentsSend(options: Options): Promise<void> {
+	const [target, ...words] = options.positionals;
+	const message = words.join(" ").trim();
+	if (!target || !message) throw new Error("usage: pixip agents send <target> <message> [--json]");
+	const ack = await inboxRequest<AgentSendAck>(options, `api/agents/${encodeURIComponent(target)}/messages`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ message, sender: callerSession() ?? "local-shell" }),
+	});
+	process.stdout.write(options.json ? `${JSON.stringify(ack)}\n` : formatAgentSend(ack));
+}
+
 async function cmdAgents(action: string, options: Options): Promise<void> {
 	switch (action) {
 		case "list":
 			return await cmdAgentsList(options);
+		case "send":
+			return await cmdAgentsSend(options);
 		default:
 			throw new Error(`unknown agents command ${action}`);
 	}

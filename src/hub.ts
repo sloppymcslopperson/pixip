@@ -1,12 +1,15 @@
 import { dirname, join } from "node:path";
 
 import * as hubControl from "./hubControl.ts";
+import * as hubAgents from "./hubAgents.ts";
 import * as hubInbox from "./hubInbox.ts";
 import * as hubLive from "./hubLive.ts";
 import * as hubSession from "./hubSession.ts";
 import * as hubStore from "./hubStore.ts";
 import * as hubWorktree from "./hubWorktree.ts";
 import { PENDING_UI_GRACE_MS, PENDING_UI_OPEN_MS, REASK_REPLY_MS } from "./pendingReask.ts";
+import { AgentDeliveryLog, type AgentDeliveryReceipt, type AgentDeliveryRecord } from "./agentDeliveries.ts";
+import type { AgentSendAck, AgentSendRequest } from "./agents.ts";
 import type { PiBackend } from "./backend.ts";
 import { WINDOW_BYTES, WINDOW_ENTRIES } from "./jsonl.ts";
 import {
@@ -188,6 +191,8 @@ export class Hub {
 	readonly inboxStore: InboxStore;
 	/** Hub-owned HTML reports attached to inbox messages. */
 	readonly reportStore: InboxReportStore;
+	/** Bounded acknowledgement history for agent-to-agent messages. */
+	private readonly deliveryLog: AgentDeliveryLog;
 	/** Set when the optional `pixip-inbox` extension announced itself in this daemon run. */
 	inboxExtensionSeen = false;
 	/** Daemon URL injected into every Pi child, set once the server is listening. */
@@ -209,6 +214,10 @@ export class Hub {
 			log: options.log,
 		});
 		this.reportStore = new InboxReportStore({ root: join(dataDir, "reports"), log: options.log });
+		this.deliveryLog = new AgentDeliveryLog({
+			path: join(dataDir, "agent-deliveries.json"),
+			log: options.log,
+		});
 		this.startupTrash = options.skipStartupTrash ? Promise.resolve() : this.purgeTrashOnStart();
 		void this.inboxSweepReports().catch((error: unknown) =>
 			options.log(`report sweep failed: ${(error as Error).message}`),
@@ -236,6 +245,27 @@ export class Hub {
 	/** URL children receive as `PIXIP_DAEMON_URL`, when the server is up. */
 	get childDaemonUrl(): string | undefined {
 		return this.daemonUrl;
+	}
+
+	// ---------------------------------------------------------------- agents
+
+	/** Deliver one message and return the acknowledgement without waiting for the turn. */
+	async sendAgentMessage(input: AgentSendRequest, baseUrl: string): Promise<AgentSendAck> {
+		return await hubAgents.sendAgentMessage.apply(this, [input, baseUrl]);
+	}
+
+	/** Latest acknowledgement per logical target id, for discovery rows. */
+	async lastDeliveries(): Promise<Map<string, AgentDeliveryReceipt>> {
+		return await this.deliveryLog.lastByLogicalId();
+	}
+
+	/** Persist one receipt; delivery already happened, so a write failure only logs. */
+	async recordDelivery(record: AgentDeliveryRecord): Promise<void> {
+		try {
+			await this.deliveryLog.record(record);
+		} catch (error) {
+			this.options.log(`delivery log write failed: ${(error as Error).message}`);
+		}
 	}
 
 	get inboxToken(): string | undefined {

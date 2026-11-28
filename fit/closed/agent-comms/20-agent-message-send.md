@@ -1,3 +1,7 @@
+---
+grilled: true
+---
+
 Add `agent_send` and `pixip agents send` so an agent can message another session exactly like a human would. The sender gets an immediate acknowledgement with a delivery state and the target URL, and never waits for the target's turn.
 
 ### Goal
@@ -28,3 +32,12 @@ Add `agent_send` and `pixip agents send` so an agent can message another session
 ### Out of scope
 
 - Client bubble rendering (ticket 30) and any web authentication or restricted-mode gate.
+
+### Grilling answers
+
+- Sender: request body field `sender`; CLI/extension pass their own `PIXIP_SESSION_ID`, fallback `local-shell`. Trim; empty means `local-shell`; reject control/newline characters and values over 128 characters with 400.
+- Resolution: exact id/logical id across active and stored first, then unique active name (case-insensitive), then unique active id/logical-id prefix. Archived/trash only by explicit exact id/logical id, never name or prefix. Exact ids always win.
+- Delivery log: full acknowledgement per target, newest 200, persisted as `<data-dir>/agent-deliveries.json`. `lastDelivery` is exposed on active rows only, keyed by logical id.
+- Errors: unknown 404, ambiguous 409 with candidates, empty target/message or bad sender 400, attach/restore/prompt failure 502.
+- `starting` targets get a normal prompt; only `busy` gets `streamingBehavior: "steer"`.
+- Sending to the sender's own session is refused with 400.

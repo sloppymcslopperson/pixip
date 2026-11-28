@@ -82,7 +82,9 @@ pi install /path/to/pixip/extensions/pixip-show-image
 
 `extensions/pixip-agents` registers `agent_list`, a read-only way for an agent
 to find other sessions (live, attached or stopped) and get their absolute
-`#s=<id>` page URL. Archived/trash sessions are opt-in with `all: true`.
+`#s=<id>` page URL, plus `agent_send`, which messages a target like a human
+prompt and returns the acknowledgement and URL. Archived/trash sessions are
+opt-in with `all: true` and messageable only by explicit id.
 
 ```bash
 pi install /path/to/pixip/extensions/pixip-agents
@@ -313,15 +315,18 @@ inbox bar appear.
 pi install /path/to/pixip/extensions/pixip-inbox
 ```
 
-## Agent discovery
+## Agent discovery and messaging
 
-An agent can find other pixip sessions without opening the web UI. The surface
-is read-only and shared by the CLI, the dashboard-independent API and the opt-in
-`pixip-agents` extension:
+An agent can find and message other pixip sessions without opening the web UI.
+Discovery is read-only; sending delivers a normal prompt and returns an
+acknowledgement without waiting for the target's turn. Both surfaces are shared
+by the CLI, the dashboard-independent API and the opt-in `pixip-agents`
+extension:
 
 ```bash
 pixip agents list [--json] [--all] [--cwd <path>] [--repo <path>]
                   [--state <state>] [--query <text>]
+pixip agents send <target> <message> [--json]
 ```
 
 Each row has the current Pi id, stable logical id, name, state, cwd, repo,
@@ -331,11 +336,18 @@ session (`PIXIP_SESSION_ID`) is marked and sorted first. `--all` adds archived
 and trash sessions, marked `archive` or `trash`; without it only active board
 sessions are returned. `--cwd` and `--repo` match exact resolved paths,
 `--state` is one of `starting`, `idle`, `busy`, `stopped`, `error`, and
-`--query` searches name, id, logical id, cwd, repo and branch.
+`--query` searches name, id, logical id, cwd, repo and branch. Active rows
+also carry the latest send as `lastDelivery` (delivery id, sender, time,
+delivered/woken/streaming and states); stored rows do not.
 
-The REST route is `GET /api/agents` and returns
-`{"agents":[...],"count":N}`. The extension
-`extensions/pixip-agents` is the agent face:
+`POST /api/agents/:id/messages` with `{ "message": "...", "sender": "..." }`
+resolves the target by exact id/logical id first, then by unique active name or
+id prefix. Archived and trash sessions require an explicit id. A stopped target
+is attached, an archived/trash target is restored, and a busy target is
+steered; the prompt is prefixed with `[pixip-agent=<sender>]`. The response is
+the delivery acknowledgement, including the target URL, and `GET /api/agents`
+returns `{"agents":[...],"count":N}` with active `lastDelivery` rows. The
+extension `extensions/pixip-agents` is the agent face:
 
 ```bash
 pi install /path/to/pixip/extensions/pixip-agents
@@ -345,6 +357,7 @@ pi install /path/to/pixip/extensions/pixip-agents
 agent_list();
 agent_list({ state: "idle", query: "auth" });
 agent_list({ all: true });
+agent_send({ target: "auth", message: "Please review the login fix." });
 ```
 
 ## Refs
