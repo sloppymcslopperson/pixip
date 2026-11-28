@@ -2,6 +2,7 @@
 area: session-control
 part: inventory
 project: feature-inventory
+commit: f212f0ba564745b76a2778a8ff7b4c71027d4e8c
 ---
 
 Capture the per-session controls and derived information a user relies on: model and thinking level, the status footer, renaming and auto titles, tree/fork/clone/import/export, copy, compaction and new/resume. These are the operations that change what a session is, not how it is read.

@@ -2,6 +2,7 @@
 area: daemon-cli
 part: inventory
 project: feature-inventory
+commit: a9af04ee092c662720ffcd11fa253cb2cef753c0
 ---
 
 Capture the operator experience: starting and supervising the pixip daemon, session survival, data-dir isolation, backend selection, and the CLI verbs. This is the server-side product surface that a rewrite must not lose.

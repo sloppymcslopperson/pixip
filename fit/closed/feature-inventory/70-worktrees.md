@@ -2,6 +2,7 @@
 area: worktrees
 part: inventory
 project: feature-inventory
+commit: "882e377"
 ---
 
 Capture worktrees and repository groups end-to-end: creating a session in a new worktree, joining or switching to an existing one, grouping sessions by repo/worktree, and removing or pruning trees. This area spans dashboard, REST and CLI and is described once rather than per surface.

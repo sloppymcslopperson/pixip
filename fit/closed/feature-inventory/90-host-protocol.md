@@ -2,6 +2,7 @@
 area: host-protocol
 part: inventory
 project: feature-inventory
+commit: bd7971b3a884818d3ae6a557b65566fc94440143
 ---
 
 Capture the protocol and host boundary that make the product possible: the embedded Pi host, the RPC framing, the panel extension, and the browser-hub wire contract. This is the area a rewrite is most likely to redesign, so it is described as a contract, not as code structure.
