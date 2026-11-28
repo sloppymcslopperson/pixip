@@ -1,18 +1,19 @@
 ---
 area: compile-report
-depends_on: "dashboard-sessions,transcript-reading,composer-input,extension-ui,bundled-extensions,inbox-reports,worktrees,refs,session-control,daemon-cli,host-protocol,dev-tooling"
+depends_on: "dashboard-sessions,transcript-reading,composer-input,extension-ui,bundled-extensions,inbox-reports,worktrees,refs,session-control,daemon-cli,host-protocol,dev-tooling,agent-comms"
 part: compile
 project: feature-inventory
 ---
 
-Compile the twelve area inventories into one readable report with a short front index and a self-contained HTML version delivered through the pixip inbox. This ticket also owns the completeness audit and the final quality pass, so it runs last.
+Compile the thirteen area inventories into one readable report with a short front index and a self-contained HTML version delivered through the pixip inbox. This ticket also owns the completeness audit and the final quality pass, so it runs last.
 
 ### Goal
 A reader with low context should be able to open one index, understand the whole product in a few minutes, and jump to any area without reading the code or the old docs.
 
 ### Scope
 - Assemble `docs/feature-inventory/index.md`: purpose, how to read, one-paragraph product summary, logical groupings, full TOC, and a coverage matrix (area -> surfaces -> source modules).
-- Review all twelve area docs for overlap and contradictions; dedupe worktrees/refs/inbox/session-control cross-references instead of repeating them.
+- Review all thirteen area docs for overlap and contradictions; dedupe worktrees/refs/inbox/session-control/agent-comms cross-references instead of repeating them.
+- Include `97-agent-comms` (agent discovery, message sending, CLI/extension/REST faces, inbound agent bubble) and cross-link it from `90-host-protocol` and `50-bundled-extensions` rather than repeating it.
 - Build the HTML report with `inbox_report` (self-contained, inline SVG, no JavaScript, local assets only, sandbox-safe) and send it with `inbox_send` as a `reports` purpose message.
 - Completeness audit against the code: every client module, REST route, CLI verb, bundled extension, wire frame, and widget-breakdown entry is either covered or intentionally marked out of scope with a reason.
 - Quality pass: no screenshots, every image an SVG wireframe, each area within the word cap, summaries and TOCs present, phone-readable at 390 px and sane at 1280 px with no horizontal overflow.
@@ -31,11 +32,11 @@ A reader with low context should be able to open one index, understand the whole
 - None beyond a short note on where the report lives and how to regenerate it. This ticket is editorial.
 
 ### Sources to read
-All twelve area docs, `docs/`, `README.md`, `ARCHITECTURE.md`, `ui_work/UI_WIDGET_BREAKDOWN.html`, the route/CLI/module lists, and the completed area tickets.
+All thirteen area docs, `docs/`, `README.md`, `ARCHITECTURE.md`, `ui_work/UI_WIDGET_BREAKDOWN.html`, the route/CLI/module lists, and the completed area tickets.
 
 ### Acceptance
 - `docs/feature-inventory/index.md` exists with summary, TOC and coverage matrix.
-- All twelve area docs are linked and mutually consistent.
+- All thirteen area docs are linked and mutually consistent.
 - HTML report renders in pixip with inline SVGs, no JavaScript, no external loads, no screenshots.
 - 390 px has no horizontal overflow; 1280 px still reads well.
 - Every module/route/CLI verb/extension/wire frame is covered or explicitly out of scope.
