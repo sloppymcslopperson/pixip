@@ -1,7 +1,7 @@
 // Shared append-only transcript DOM primitives. The painter in transcript.js
 // owns windows and deltas; these are the small operations other features need
 // without importing the transcript feature.
-import { ansiToHtml } from "./render.js";
+import { thinkingBoxHtml, thinkingStatus } from "./render.js";
 import { scheduleScroll } from "./scroll.js";
 import { state } from "./kernel/state.js";
 import { ui } from "./kernel/ui.js";
@@ -18,39 +18,26 @@ export function appendBlock(kind, html, raw = false) {
 
 let thoughtQueued = false;
 
-function thinkingSummary(thought) {
-	return thought?.active === false ? "thinking" : "agent is thinking…";
-}
-
-function thinkingClass(thought) {
-	const phase = thought?.active === false ? " done" : " active";
-	return `block meta thinking-indicator${phase}`;
-}
-
 /** Paint into (or replace) the current indicator and return its element. */
 function paintThinkingIndicator(existing, thought) {
 	const text = typeof thought?.text === "string" ? thought.text : "";
-	if (!text) {
+	const active = thought?.active !== false;
+	const open = existing?.tagName === "DETAILS" ? existing.open : thought?.expanded === true;
+	const html = thinkingBoxHtml(text, { active, open });
+	if (!html) {
 		const plain = existing?.tagName === "DIV" ? existing : document.createElement("div");
 		if (existing && existing !== plain) existing.replaceWith(plain);
-		plain.className = thinkingClass(thought);
-		plain.textContent = thinkingSummary(thought);
+		const status = thinkingStatus(active);
+		plain.className = status.className;
+		plain.textContent = status.summary;
 		return plain;
 	}
-	let details = existing?.tagName === "DETAILS" ? existing : null;
-	const created = !details;
-	if (!details) {
-		details = document.createElement("details");
-		details.innerHTML = '<summary></summary><div class="think-live"></div>';
-		if (existing) existing.replaceWith(details);
-	}
-	details.className = thinkingClass(thought);
-	if (created) details.open = thought?.expanded === true;
-	const summary = details.querySelector("summary");
-	if (summary) summary.textContent = thinkingSummary(thought);
-	const body = details.querySelector(".think-live");
-	if (body) body.innerHTML = ansiToHtml(text);
-	return details;
+	const holder = document.createElement("div");
+	holder.innerHTML = html;
+	const box = holder.firstElementChild;
+	if (existing) existing.replaceWith(box);
+	else ui.log.append(box);
+	return box;
 }
 
 export function showThinkingIndicator() {

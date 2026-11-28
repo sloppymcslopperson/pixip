@@ -452,30 +452,55 @@ export function bashCardHtml(message) {
 	return `<section class="${classes.join(" ")}"><div class="bash-head"><span class="bash-prompt">$</span><span class="bash-cmd">${escapeHtml(command)}</span>${badge}</div><pre class="bash-out">${escapeHtml(output)}</pre><div class="bash-meta">${escapeHtml(meta.join(" · "))}</div></section>`;
 }
 
-export function renderAssistant(content, includeTools = true) {
+/** Summary and classes for the one thought disclosure, live and finalized. */
+export function thinkingStatus(active = true) {
+	return active
+		? { summary: "agent is thinking…", className: "block meta thinking-indicator active" }
+		: { summary: "thinking", className: "block meta thinking-indicator done" };
+}
+
+/** Plain thought text from an assistant message: one stream, blank-line joined. */
+export function thoughtTextOf(content) {
+	if (!Array.isArray(content)) return "";
+	return content
+		.filter((block) => block && block.type === "thinking")
+		.map((block) => (typeof block.thinking === "string" ? block.thinking : ""))
+		.filter((part) => part.length > 0)
+		.join("\n\n");
+}
+
+/**
+ * The thought disclosure shared by the live stream and the finalized box, so a
+ * completed trace keeps the line breaks, wrapping and ANSI styling it had while
+ * streaming. Returns "" when the thought has no visible text.
+ */
+export function thinkingBoxHtml(text, options = {}) {
+	const thought = typeof text === "string" ? text : "";
+	const active = options.active === true;
+	const status = thinkingStatus(active);
+	const inner = ansiToHtml(thought);
+	// ANSI-only and whitespace-only thoughts produce no visible text: no box.
+	if (!inner.replace(/<[^>]*>/g, "").trim()) return "";
+	const open = options.open === true ? " open" : "";
+	return `<details class="${status.className}"${open}><summary>${status.summary}</summary><div class="think-live">${inner}</div></details>`;
+}
+
+export function renderAssistant(content, includeTools = true, options = {}) {
+	const thought = thinkingBoxHtml(thoughtTextOf(content), { open: options.openThinking === true });
 	const body = renderAssistantBody(content, includeTools);
-	if (!body) return "";
-	return `<section class="block assistant"><div class="who">pi</div>${body}</section>`;
+	const answer = body ? `<section class="block assistant"><div class="who">pi</div>${body}</section>` : "";
+	return `${thought}${answer}`;
 }
 
 /** Just the inside of an assistant block (no wrapper, no "pi" label). */
-export function renderAssistantBody(content, includeTools = true, options = {}) {
+export function renderAssistantBody(content, includeTools = true) {
 	let html = "";
 	const text = [];
-	const thinking = [];
 	const tools = [];
 	for (const block of content) {
 		if (!block) continue;
 		if (block.type === "text") text.push(block.text ?? "");
-		else if (block.type === "thinking") thinking.push(block.thinking ?? "");
 		else if (block.type === "toolCall") tools.push(block);
-	}
-	// One thinking box per assistant message: Pi can split reasoning into several
-	// blocks, but the reader experiences a single thought stream.
-	const thought = thinking.filter((part) => part.length > 0).join("\n\n");
-	const inner = thought ? ansiToHtml(thought) : "";
-	if (inner.trim()) {
-		html += `<details class="think"${options.openThinking === true ? " open" : ""}><summary>thinking</summary><div>${inner}</div></details>`;
 	}
 	const body = markdownToHtml(text.join(""));
 	if (body.trim()) html += `<div class="text">${body}</div>`;
