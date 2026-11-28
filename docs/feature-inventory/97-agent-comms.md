@@ -40,7 +40,8 @@ must drain. The message lands in the target exactly where a human prompt would.
 
 `pixip agents list` and the `agent_list` tool return one row per session:
 
-- the current Pi id and the stable logical id, the name and the state;
+- the current Pi id (the stable logical id is in the JSON envelope), the name
+  and the state;
 - `cwd`, repository, branch and worktree;
 - `awaitingUser`, `lastActivity`, and whether this row is the caller (`isSelf`);
 - an absolute dashboard URL of the form `http://<host>/#s=<id>`.
